@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: fhir-integration-service
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
