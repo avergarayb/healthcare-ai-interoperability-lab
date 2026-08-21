@@ -20,7 +20,7 @@ A FHIR client is software that consumes a FHIR REST API.
 
 It does the same job as `curl http://localhost:8080/fhir/metadata`, but with typed Java objects instead of raw JSON.
 
-In this task the client only performs:
+The first client operation was:
 
 ```text
 GET {base-url}/metadata
@@ -28,7 +28,7 @@ GET {base-url}/metadata
 CapabilityStatement
 ```
 
-It does not search Patients, write resources, or expose a new public HTTP endpoint.
+Patient **read** and **search** are documented in [fhir-search.md](fhir-search.md). There is still no public REST controller.
 
 ## Why these Maven dependencies
 
@@ -97,7 +97,7 @@ Our local HAPI server currently reports FHIR R4 `4.0.1`.
 lab.healthcare.fhir.client
 ├── FhirServerProperties       # binds fhir.server.base-url
 ├── FhirClientConfiguration    # FhirContext (R4) + IGenericClient beans
-├── FhirService                # retrieveCapabilityStatement()
+├── FhirService                # metadata, Patient read, Patient search
 └── FhirClientException        # wraps connection/server errors
 ```
 

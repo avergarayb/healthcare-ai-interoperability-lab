@@ -7,4 +7,4 @@ Local FHIR R4 server for this lab is HAPI FHIR, started from `infra/docker/docke
 
 Persistence is PostgreSQL. HAPI configuration stays under `infra/docker/` and is not part of `fhir-integration-service`.
 
-`fhir-integration-service` now includes a Java FHIR **client**. See [fhir-client.md](fhir-client.md) for `FhirContext`, `IGenericClient`, and how `/metadata` is retrieved programmatically.
+`fhir-integration-service` is a Java FHIR **client**. See [fhir-client.md](fhir-client.md) for `FhirContext` and `/metadata`, and [fhir-search.md](fhir-search.md) for Patient **read** and **search**.

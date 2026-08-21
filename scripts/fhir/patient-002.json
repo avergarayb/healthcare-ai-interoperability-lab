@@ -1,0 +1,18 @@
+{
+  "resourceType": "Patient",
+  "id": "patient-002",
+  "identifier": [
+    {
+      "system": "https://example.org/lab/mrn",
+      "value": "MRN-10002"
+    }
+  ],
+  "name": [
+    {
+      "family": "Garcia",
+      "given": ["Juan"]
+    }
+  ],
+  "gender": "male",
+  "birthDate": "1980-08-20"
+}
