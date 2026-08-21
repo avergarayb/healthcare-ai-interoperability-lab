@@ -86,4 +86,4 @@ Package the laboratory as a coherent demonstration of healthcare interoperabilit
 
 ## Current Position
 
-The repository is in Phase 1. `fhir-integration-service` includes a HAPI FHIR R4 client that reads the local server `CapabilityStatement`. The next implementation task is `feature/fhir-search`.
+The repository is in Phase 1. `fhir-integration-service` can retrieve `/metadata` and read/search synthetic `Patient` resources on local HAPI FHIR.
