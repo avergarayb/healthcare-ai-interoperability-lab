@@ -167,6 +167,8 @@ To load them by hand (HAPI must be up):
 pwsh -File scripts/fhir/load-synthetic-patients.ps1
 ```
 
+The script PUTs every JSON file in `scripts/fhir/`, Patients first. Observation and Condition resources are documented in [fhir-resources-and-references.md](fhir-resources-and-references.md).
+
 Equivalent HTTP:
 
 ```http

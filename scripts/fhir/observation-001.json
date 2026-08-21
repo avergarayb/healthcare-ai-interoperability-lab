@@ -1,0 +1,23 @@
+{
+  "resourceType": "Observation",
+  "id": "obs-001",
+  "status": "final",
+  "code": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "85354-9",
+        "display": "Blood pressure panel"
+      }
+    ]
+  },
+  "subject": {
+    "reference": "Patient/patient-001"
+  },
+  "valueQuantity": {
+    "value": 130,
+    "unit": "mmHg",
+    "system": "http://unitsofmeasure.org",
+    "code": "mm[Hg]"
+  }
+}
