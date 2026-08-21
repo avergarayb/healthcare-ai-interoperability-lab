@@ -86,4 +86,4 @@ Package the laboratory as a coherent demonstration of healthcare interoperabilit
 
 ## Current Position
 
-The repository is completing Phase 1. The next implementation task is `feature/fhir-client` inside `fhir-integration-service`.
+The repository is in Phase 1. `fhir-integration-service` includes a HAPI FHIR R4 client that reads the local server `CapabilityStatement`. The next implementation task is `feature/fhir-search`.
