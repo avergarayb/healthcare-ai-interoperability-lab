@@ -5,7 +5,11 @@ import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.server.exceptions.BaseServerResponseException;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CapabilityStatement;
+import org.hl7.fhir.r4.model.Condition;
+import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Patient;
+import org.hl7.fhir.r4.model.Reference;
+import org.hl7.fhir.r4.model.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -61,13 +65,74 @@ public class FhirService {
     }
 
     public List<Patient> extractPatients(Bundle bundle) {
+        return extractResources(bundle, Patient.class);
+    }
+
+    public Observation readObservation(String logicalId) {
+        requireText(logicalId, "Observation logical ID must be provided");
+        return execute(
+                () -> fhirClient.read()
+                        .resource(Observation.class)
+                        .withId(logicalId)
+                        .execute(),
+                "reading Observation/" + logicalId);
+    }
+
+    public Condition readCondition(String logicalId) {
+        requireText(logicalId, "Condition logical ID must be provided");
+        return execute(
+                () -> fhirClient.read()
+                        .resource(Condition.class)
+                        .withId(logicalId)
+                        .execute(),
+                "reading Condition/" + logicalId);
+    }
+
+    public Bundle searchObservationsByPatient(String patientLogicalId) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasId(patientLogicalId))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient");
+    }
+
+    public Bundle searchConditionsByPatient(String patientLogicalId) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Condition.class)
+                        .where(Condition.PATIENT.hasId(patientLogicalId))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Condition by patient");
+    }
+
+    public List<Observation> extractObservations(Bundle bundle) {
+        return extractResources(bundle, Observation.class);
+    }
+
+    public List<Condition> extractConditions(Bundle bundle) {
+        return extractResources(bundle, Condition.class);
+    }
+
+    public String subjectReference(Reference subject) {
+        if (subject == null || !subject.hasReference()) {
+            throw new IllegalArgumentException("Subject reference must be provided");
+        }
+        return subject.getReference();
+    }
+
+    private <T extends Resource> List<T> extractResources(Bundle bundle, Class<T> type) {
         if (bundle == null) {
             throw new IllegalArgumentException("Bundle must be provided");
         }
         return bundle.getEntry().stream()
                 .map(Bundle.BundleEntryComponent::getResource)
-                .filter(Patient.class::isInstance)
-                .map(Patient.class::cast)
+                .filter(type::isInstance)
+                .map(type::cast)
                 .toList();
     }
 

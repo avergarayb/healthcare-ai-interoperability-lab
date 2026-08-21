@@ -7,8 +7,12 @@ import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import ca.uhn.fhir.rest.server.exceptions.ResourceNotFoundException;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CapabilityStatement;
+import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.Enumerations;
+import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Patient;
+import org.hl7.fhir.r4.model.Reference;
+import org.hl7.fhir.r4.model.Resource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Answers;
@@ -152,6 +156,92 @@ class FhirServiceTest {
                 .containsExactly("Maria Garcia", "Maria Lopez");
     }
 
+    @Test
+    void readObservationReturnsResourceAndSubjectReference() {
+        Observation expected = syntheticObservation("obs-001", "Patient/patient-001");
+        when(fhirClient.read().resource(Observation.class).withId("obs-001").execute()).thenReturn(expected);
+
+        Observation actual = fhirService.readObservation("obs-001");
+
+        assertThat(actual.getIdElement().getIdPart()).isEqualTo("obs-001");
+        assertThat(fhirService.subjectReference(actual.getSubject())).isEqualTo("Patient/patient-001");
+        assertThat(actual.getCode().getCodingFirstRep().getSystem()).isEqualTo("http://loinc.org");
+        assertThat(actual.getCode().getCodingFirstRep().getCode()).isEqualTo("85354-9");
+    }
+
+    @Test
+    void readConditionReturnsResourceAndSubjectReference() {
+        Condition expected = syntheticCondition("condition-001", "Patient/patient-001");
+        when(fhirClient.read().resource(Condition.class).withId("condition-001").execute()).thenReturn(expected);
+
+        Condition actual = fhirService.readCondition("condition-001");
+
+        assertThat(actual.getIdElement().getIdPart()).isEqualTo("condition-001");
+        assertThat(fhirService.subjectReference(actual.getSubject())).isEqualTo("Patient/patient-001");
+        assertThat(actual.getCode().getCodingFirstRep().getSystem()).isEqualTo("http://snomed.info/sct");
+        assertThat(actual.getCode().getCodingFirstRep().getCode()).isEqualTo("38341003");
+    }
+
+    @Test
+    void searchObservationsByPatientReturnsBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatient("patient-001");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractObservations(actual))
+                .extracting(observation -> observation.getIdElement().getIdPart())
+                .containsExactly("obs-001");
+    }
+
+    @Test
+    void searchConditionsByPatientReturnsBundle() {
+        Bundle expected = searchBundle(syntheticCondition("condition-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Condition.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchConditionsByPatient("patient-001");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractConditions(actual))
+                .extracting(condition -> condition.getIdElement().getIdPart())
+                .containsExactly("condition-001");
+    }
+
+    @Test
+    void readObservationDoesNotSwallowNotFound() {
+        when(fhirClient.read().resource(Observation.class).withId("missing").execute())
+                .thenThrow(new ResourceNotFoundException("Observation/missing"));
+
+        assertThatThrownBy(() -> fhirService.readObservation("missing"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void searchObservationsByPatientDoesNotSwallowConnectionErrors() {
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.searchObservationsByPatient("patient-001"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
     private static Patient syntheticPatient(String logicalId, String family, String given) {
         Patient patient = new Patient();
         patient.setId(logicalId);
@@ -159,12 +249,35 @@ class FhirServiceTest {
         return patient;
     }
 
-    private static Bundle searchBundle(Patient... patients) {
+    private static Observation syntheticObservation(String logicalId, String patientReference) {
+        Observation observation = new Observation();
+        observation.setId(logicalId);
+        observation.setStatus(Observation.ObservationStatus.FINAL);
+        observation.getCode().addCoding()
+                .setSystem("http://loinc.org")
+                .setCode("85354-9")
+                .setDisplay("Blood pressure panel");
+        observation.setSubject(new Reference(patientReference));
+        return observation;
+    }
+
+    private static Condition syntheticCondition(String logicalId, String patientReference) {
+        Condition condition = new Condition();
+        condition.setId(logicalId);
+        condition.getCode().addCoding()
+                .setSystem("http://snomed.info/sct")
+                .setCode("38341003")
+                .setDisplay("Hypertensive disorder");
+        condition.setSubject(new Reference(patientReference));
+        return condition;
+    }
+
+    private static Bundle searchBundle(Resource... resources) {
         Bundle bundle = new Bundle();
         bundle.setType(Bundle.BundleType.SEARCHSET);
-        bundle.setTotal(patients.length);
-        for (Patient patient : patients) {
-            bundle.addEntry().setResource(patient);
+        bundle.setTotal(resources.length);
+        for (Resource resource : resources) {
+            bundle.addEntry().setResource(resource);
         }
         return bundle;
     }

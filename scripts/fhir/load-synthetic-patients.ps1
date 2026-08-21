@@ -1,21 +1,19 @@
-# Load deterministic synthetic Patient resources into local HAPI FHIR.
+# Load deterministic synthetic FHIR resources into local HAPI FHIR.
 # Requires the FHIR server at http://localhost:8080/fhir
 param(
     [string]$FhirBaseUrl = "http://localhost:8080/fhir"
 )
 
 $ErrorActionPreference = "Stop"
-$patients = @(
-    (Join-Path $PSScriptRoot "patient-001.json"),
-    (Join-Path $PSScriptRoot "patient-002.json"),
-    (Join-Path $PSScriptRoot "patient-003.json")
-)
-
-foreach ($file in $patients) {
-    $id = [System.IO.Path]::GetFileNameWithoutExtension($file)
-    $uri = "$FhirBaseUrl/Patient/$id"
-    Write-Host "PUT $uri"
-    Invoke-RestMethod -Method Put -Uri $uri -ContentType "application/fhir+json" -InFile $file | Out-Null
+$files = Get-ChildItem -Path $PSScriptRoot -Filter *.json | Sort-Object {
+    if ($_.Name -like "patient-*") { "0-$($_.Name)" } else { "1-$($_.Name)" }
 }
 
-Write-Host "Synthetic patients loaded: patient-001, patient-002, patient-003"
+foreach ($file in $files) {
+    $json = Get-Content -Raw -Path $file.FullName | ConvertFrom-Json
+    $uri = "$FhirBaseUrl/$($json.resourceType)/$($json.id)"
+    Write-Host "PUT $uri"
+    Invoke-RestMethod -Method Put -Uri $uri -ContentType "application/fhir+json" -InFile $file.FullName | Out-Null
+}
+
+Write-Host "Synthetic FHIR resources loaded from $PSScriptRoot"
