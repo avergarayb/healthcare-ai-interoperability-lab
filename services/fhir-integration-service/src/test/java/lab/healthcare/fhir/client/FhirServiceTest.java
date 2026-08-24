@@ -5,6 +5,7 @@ import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.gclient.ICriterion;
 import ca.uhn.fhir.rest.gclient.IParam;
+import ca.uhn.fhir.rest.gclient.IQuery;
 import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import ca.uhn.fhir.rest.server.exceptions.ResourceNotFoundException;
 import org.hl7.fhir.r4.model.Bundle;
@@ -28,7 +29,9 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -627,6 +630,135 @@ class FhirServiceTest {
         assertThatThrownBy(() -> fhirService.searchPatientsWithCount(0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("_count");
+    }
+
+    @Test
+    void searchObservationsByPatientNameReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientName("Maria");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Observation/obs-001");
+    }
+
+    @Test
+    void searchObservationsByPatientNameAndCodeReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientNameAndCode("Maria", "85354-9");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Observation/obs-001");
+    }
+
+    @Test
+    void searchConditionsByPatientNameAndClinicalStatusReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticCondition("condition-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Condition.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchConditionsByPatientNameAndClinicalStatus("Maria", "active");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Condition/condition-001");
+    }
+
+    @Test
+    void searchObservationsByPatientIdentifierReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientIdentifier("MRN-10001");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Observation/obs-001");
+    }
+
+    @Test
+    void searchPatientsHavingObservationCodeReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticPatient("patient-001", "Garcia", "Maria"));
+        stubPatientHasQuery(expected, false);
+
+        Bundle actual = fhirService.searchPatientsHavingObservationCode("85354-9");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Patient/patient-001");
+    }
+
+    @Test
+    void searchPatientsHavingConditionClinicalStatusReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticPatient("patient-001", "Garcia", "Maria"));
+        stubPatientHasQuery(expected, false);
+
+        Bundle actual = fhirService.searchPatientsHavingConditionClinicalStatus("active");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Patient/patient-001");
+    }
+
+    @Test
+    void searchPatientsHavingObservationCodeAndGenderReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticPatient("patient-001", "Garcia", "Maria"));
+        stubPatientHasQuery(expected, true);
+
+        Bundle actual = fhirService.searchPatientsHavingObservationCodeAndGender("85354-9", "female");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Patient/patient-001");
+    }
+
+    @Test
+    void searchObservationsByPatientNameDoesNotSwallowConnectionErrors() {
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.searchObservationsByPatientName("Maria"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @Test
+    void searchPatientsHavingObservationCodeDoesNotSwallowConnectionErrors() {
+        IQuery query = stubPatientHasQuery(searchBundle(), false);
+        when(query.execute()).thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.searchPatientsHavingObservationCode("85354-9"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private IQuery stubPatientHasQuery(Bundle expected, boolean withAnd) {
+        IQuery query = mock(IQuery.class);
+        when(fhirClient.search().forResource(eq(Patient.class))).thenReturn(query);
+        when(query.where(anyMap())).thenReturn(query);
+        if (withAnd) {
+            when(query.and(any(ICriterion.class))).thenReturn(query);
+        }
+        when(query.returnBundle(eq(Bundle.class))).thenReturn(query);
+        when(query.execute()).thenReturn(expected);
+        return query;
     }
 
     private static MethodOutcome writeOutcome(String resourceType, String logicalId, boolean created) {
