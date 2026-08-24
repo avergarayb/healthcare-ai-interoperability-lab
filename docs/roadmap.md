@@ -86,4 +86,4 @@ Package the laboratory as a coherent demonstration of healthcare interoperabilit
 
 ## Current Position
 
-The repository is in Phase 1. `fhir-integration-service` can read/search related FHIR resources and use `_include` / `_revinclude` against local HAPI FHIR.
+The repository is in Phase 1. `fhir-integration-service` can read, search, `_include` / `_revinclude`, and perform create / update / delete against local HAPI FHIR.
