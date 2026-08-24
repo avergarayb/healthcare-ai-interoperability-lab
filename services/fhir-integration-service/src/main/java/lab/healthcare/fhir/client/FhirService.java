@@ -121,6 +121,135 @@ public class FhirService {
         return extractResources(bundle, Condition.class);
     }
 
+    public Bundle searchPatientsByNameAndGender(String name, String gender) {
+        requireText(name, "Patient name search parameter must be provided");
+        requireText(gender, "Patient gender search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.NAME.matches().value(name))
+                        .and(Patient.GENDER.exactly().code(gender))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient by name and gender");
+    }
+
+    public Bundle searchPatientsByNameExact(String name) {
+        requireText(name, "Patient name search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.NAME.matchesExactly().value(name))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient by name:exact");
+    }
+
+    public Bundle searchPatientsBornOnOrAfter(String birthDate) {
+        requireText(birthDate, "Patient birthdate search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.BIRTHDATE.afterOrEquals().day(birthDate))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient by birthdate=ge" + birthDate);
+    }
+
+    public Bundle searchPatientsBornBefore(String birthDate) {
+        requireText(birthDate, "Patient birthdate search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.BIRTHDATE.before().day(birthDate))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient by birthdate=lt" + birthDate);
+    }
+
+    public Bundle searchPatientsSortedByBirthDateAscending() {
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .sort()
+                        .ascending(Patient.BIRTHDATE)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _sort=birthdate");
+    }
+
+    public Bundle searchPatientsSortedByBirthDateDescending() {
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .sort()
+                        .descending(Patient.BIRTHDATE)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _sort=-birthdate");
+    }
+
+    public Bundle searchPatientsWithCount(int pageSize) {
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Patient _count must be at least 1");
+        }
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _count=" + pageSize);
+    }
+
+    public Bundle searchObservationsByPatientAndCode(String patientLogicalId, String code) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        requireText(code, "Observation code search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasId(patientLogicalId))
+                        .and(Observation.CODE.exactly().code(code))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient and code");
+    }
+
+    public Bundle searchObservationsByPatientAndCodeSortedByDate(
+            String patientLogicalId,
+            String code,
+            int pageSize) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        requireText(code, "Observation code search parameter must be provided");
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Observation _count must be at least 1");
+        }
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasId(patientLogicalId))
+                        .and(Observation.CODE.exactly().code(code))
+                        .sort()
+                        .descending(Observation.DATE)
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient, code, _sort=-date, and _count");
+    }
+
+    public Bundle searchConditionsByPatientAndClinicalStatus(String patientLogicalId, String clinicalStatus) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        requireText(clinicalStatus, "Condition clinical-status search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Condition.class)
+                        .where(Condition.PATIENT.hasId(patientLogicalId))
+                        .and(Condition.CLINICAL_STATUS.exactly().code(clinicalStatus))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Condition by patient and clinical-status");
+    }
+
     public Bundle searchObservationsByPatientIncludingSubject(String patientLogicalId) {
         requireText(patientLogicalId, "Patient logical ID must be provided");
         return execute(

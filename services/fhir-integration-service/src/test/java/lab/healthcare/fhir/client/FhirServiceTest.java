@@ -4,6 +4,7 @@ import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.gclient.ICriterion;
+import ca.uhn.fhir.rest.gclient.IParam;
 import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import ca.uhn.fhir.rest.server.exceptions.ResourceNotFoundException;
 import org.hl7.fhir.r4.model.Bundle;
@@ -446,6 +447,186 @@ class FhirServiceTest {
         assertThatThrownBy(() -> fhirService.createdLogicalId(new MethodOutcome()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("resource identity");
+    }
+
+    @Test
+    void searchPatientsByNameAndGenderReturnsMatchingBundle() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticPatient("patient-003", "Lopez", "Maria"));
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientsByNameAndGender("Maria", "female");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractPatients(actual))
+                .extracting(patient -> patient.getIdElement().getIdPart())
+                .containsExactlyInAnyOrder("patient-001", "patient-003");
+    }
+
+    @Test
+    void searchObservationsByPatientAndCodeReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientAndCode("patient-001", "85354-9");
+
+        assertThat(fhirService.extractObservations(actual))
+                .extracting(observation -> observation.getIdElement().getIdPart())
+                .containsExactly("obs-001");
+    }
+
+    @Test
+    void searchConditionsByPatientAndClinicalStatusReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticCondition("condition-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Condition.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchConditionsByPatientAndClinicalStatus("patient-001", "active");
+
+        assertThat(fhirService.extractConditions(actual))
+                .extracting(condition -> condition.getIdElement().getIdPart())
+                .containsExactly("condition-001");
+    }
+
+    @Test
+    void searchPatientsByNameExactReturnsMatchingBundle() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticPatient("patient-003", "Lopez", "Maria"));
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientsByNameExact("Maria");
+
+        assertThat(fhirService.extractPatients(actual))
+                .extracting(patient -> patient.getIdElement().getIdPart())
+                .containsExactlyInAnyOrder("patient-001", "patient-003");
+    }
+
+    @Test
+    void searchPatientsBornOnOrAfterReturnsMatchingBundle() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticPatient("patient-003", "Lopez", "Maria"));
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientsBornOnOrAfter("1985-01-01");
+
+        assertThat(fhirService.extractPatients(actual))
+                .extracting(patient -> patient.getIdElement().getIdPart())
+                .containsExactlyInAnyOrder("patient-001", "patient-003");
+    }
+
+    @Test
+    void searchPatientsSortedByBirthDateAscendingReturnsOrderedBundle() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-002", "Garcia", "Juan"),
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticPatient("patient-003", "Lopez", "Maria"));
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .sort()
+                .ascending(any(IParam.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientsSortedByBirthDateAscending();
+
+        assertThat(fhirService.extractPatients(actual))
+                .extracting(patient -> patient.getIdElement().getIdPart())
+                .containsExactly("patient-002", "patient-001", "patient-003");
+    }
+
+    @Test
+    void searchPatientsWithCountReturnsPageSizedBundle() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticPatient("patient-002", "Garcia", "Juan"));
+        expected.setTotal(3);
+        expected.addLink().setRelation(Bundle.LINK_NEXT).setUrl("http://localhost:8080/fhir?_getpages=example");
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .count(2)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientsWithCount(2);
+
+        assertThat(actual.getTotal()).isEqualTo(3);
+        assertThat(actual.getEntry()).hasSize(2);
+        assertThat(actual.getLink(Bundle.LINK_NEXT)).isNotNull();
+    }
+
+    @Test
+    void searchObservationsByPatientAndCodeSortedByDateReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .sort()
+                .descending(any(IParam.class))
+                .count(10)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientAndCodeSortedByDate("patient-001", "85354-9", 10);
+
+        assertThat(fhirService.extractObservations(actual))
+                .extracting(observation -> observation.getIdElement().getIdPart())
+                .containsExactly("obs-001");
+    }
+
+    @Test
+    void searchPatientsByNameAndGenderDoesNotSwallowConnectionErrors() {
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.searchPatientsByNameAndGender("Maria", "female"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @Test
+    void searchPatientsWithCountRejectsNonPositivePageSize() {
+        assertThatThrownBy(() -> fhirService.searchPatientsWithCount(0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("_count");
     }
 
     private static MethodOutcome writeOutcome(String resourceType, String logicalId, boolean created) {
