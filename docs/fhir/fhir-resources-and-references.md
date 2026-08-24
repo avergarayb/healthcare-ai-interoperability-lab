@@ -180,7 +180,7 @@ Bundle
            └── Observation or Condition
 ```
 
-This lab does **not** use `_include` or `_revinclude`. Following the subject is a second read, not a join.
+This lab does **not** use `_include` or `_revinclude` in the basic Patient/Observation/Condition searches. Those parameters are documented in [fhir-include-revinclude.md](fhir-include-revinclude.md).
 
 ## Follow the Reference
 

@@ -242,6 +242,117 @@ class FhirServiceTest {
                 .hasCauseInstanceOf(FhirClientConnectionException.class);
     }
 
+    @Test
+    void searchObservationsByPatientIncludingSubjectReturnsObservationAndPatient() {
+        Bundle expected = searchBundle(
+                syntheticObservation("obs-001", "Patient/patient-001"),
+                syntheticPatient("patient-001", "Garcia", "Maria"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .include(any())
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientIncludingSubject("patient-001");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.resourceIdentities(actual))
+                .containsExactlyInAnyOrder("Observation/obs-001", "Patient/patient-001");
+    }
+
+    @Test
+    void searchPatientRevincludingObservationSubjectReturnsPatientAndObservation() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .where(any(ICriterion.class))
+                .revInclude(any())
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientRevincludingObservationSubject("patient-001");
+
+        assertThat(fhirService.resourceIdentities(actual))
+                .containsExactlyInAnyOrder("Patient/patient-001", "Observation/obs-001");
+    }
+
+    @Test
+    void searchPatientRevincludingConditionSubjectReturnsPatientAndCondition() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticCondition("condition-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .where(any(ICriterion.class))
+                .revInclude(any())
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientRevincludingConditionSubject("patient-001");
+
+        assertThat(fhirService.resourceIdentities(actual))
+                .containsExactlyInAnyOrder("Patient/patient-001", "Condition/condition-001");
+    }
+
+    @Test
+    void searchPatientRevincludingObservationAndConditionSubjectReturnsAllThree() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticObservation("obs-001", "Patient/patient-001"),
+                syntheticCondition("condition-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .where(any(ICriterion.class))
+                .revInclude(any())
+                .revInclude(any())
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientRevincludingObservationAndConditionSubject("patient-001");
+
+        assertThat(fhirService.resourceIdentities(actual))
+                .containsExactlyInAnyOrder(
+                        "Patient/patient-001",
+                        "Observation/obs-001",
+                        "Condition/condition-001");
+    }
+
+    @Test
+    void resourceIdentitiesReadsTypeAndIdFromMixedBundle() {
+        Bundle bundle = searchBundle(
+                syntheticCondition("condition-001", "Patient/patient-001"),
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticObservation("obs-001", "Patient/patient-001"));
+
+        assertThat(fhirService.resourceIdentities(bundle))
+                .containsExactly(
+                        "Condition/condition-001",
+                        "Patient/patient-001",
+                        "Observation/obs-001");
+    }
+
+    @Test
+    void searchObservationsByPatientIncludingSubjectDoesNotSwallowConnectionErrors() {
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .include(any())
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.searchObservationsByPatientIncludingSubject("patient-001"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
     private static Patient syntheticPatient(String logicalId, String family, String given) {
         Patient patient = new Patient();
         patient.setId(logicalId);

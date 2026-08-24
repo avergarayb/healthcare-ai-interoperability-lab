@@ -13,6 +13,7 @@ import org.hl7.fhir.r4.model.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Supplier;
 
 @Service
@@ -116,6 +117,66 @@ public class FhirService {
 
     public List<Condition> extractConditions(Bundle bundle) {
         return extractResources(bundle, Condition.class);
+    }
+
+    public Bundle searchObservationsByPatientIncludingSubject(String patientLogicalId) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasId(patientLogicalId))
+                        .include(Observation.INCLUDE_SUBJECT)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient with _include=Observation:subject");
+    }
+
+    public Bundle searchPatientRevincludingObservationSubject(String patientLogicalId) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.RES_ID.exactly().code(patientLogicalId))
+                        .revInclude(Observation.INCLUDE_SUBJECT)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _revinclude=Observation:subject");
+    }
+
+    public Bundle searchPatientRevincludingConditionSubject(String patientLogicalId) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.RES_ID.exactly().code(patientLogicalId))
+                        .revInclude(Condition.INCLUDE_SUBJECT)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _revinclude=Condition:subject");
+    }
+
+    public Bundle searchPatientRevincludingObservationAndConditionSubject(String patientLogicalId) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.RES_ID.exactly().code(patientLogicalId))
+                        .revInclude(Observation.INCLUDE_SUBJECT)
+                        .revInclude(Condition.INCLUDE_SUBJECT)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _revinclude Observation:subject and Condition:subject");
+    }
+
+    public List<String> resourceIdentities(Bundle bundle) {
+        if (bundle == null) {
+            throw new IllegalArgumentException("Bundle must be provided");
+        }
+        return bundle.getEntry().stream()
+                .map(Bundle.BundleEntryComponent::getResource)
+                .filter(Objects::nonNull)
+                .map(resource -> resource.getResourceType().name() + "/" + resource.getIdElement().getIdPart())
+                .toList();
     }
 
     public String subjectReference(Reference subject) {
