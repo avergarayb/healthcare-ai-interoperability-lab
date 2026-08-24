@@ -1,5 +1,6 @@
 package lab.healthcare.fhir.client;
 
+import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.gclient.ICriterion;
@@ -9,6 +10,7 @@ import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CapabilityStatement;
 import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.Enumerations;
+import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Reference;
@@ -353,6 +355,106 @@ class FhirServiceTest {
                 .hasCauseInstanceOf(FhirClientConnectionException.class);
     }
 
+    @Test
+    void createPatientReturnsMethodOutcomeWithServerAssignedId() {
+        Patient draft = new Patient();
+        draft.addName().setFamily("Torres").addGiven("Ana");
+        MethodOutcome expected = writeOutcome("Patient", "42", true);
+        when(fhirClient.create().resource(any(Patient.class)).execute()).thenReturn(expected);
+
+        MethodOutcome actual = fhirService.createPatient(draft);
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(fhirService.createdLogicalId(actual)).isEqualTo("42");
+        assertThat(actual.getCreated()).isTrue();
+    }
+
+    @Test
+    void createPatientDoesNotSwallowServerErrors() {
+        when(fhirClient.create().resource(any(Patient.class)).execute())
+                .thenThrow(new InternalErrorException("server error"));
+
+        assertThatThrownBy(() -> fhirService.createPatient(new Patient()))
+                .isInstanceOf(FhirClientException.class)
+                .hasMessageContaining("creating Patient")
+                .hasCauseInstanceOf(InternalErrorException.class);
+    }
+
+    @Test
+    void updatePatientSendsResourceWithLogicalId() {
+        Patient patient = syntheticPatient("patient-write-001", "Mendoza", "Carlos");
+        MethodOutcome expected = writeOutcome("Patient", "patient-write-001", false);
+        when(fhirClient.update().resource(any(Patient.class)).execute()).thenReturn(expected);
+
+        MethodOutcome actual = fhirService.updatePatient(patient);
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(fhirService.createdLogicalId(actual)).isEqualTo("patient-write-001");
+    }
+
+    @Test
+    void updatePatientRequiresLogicalId() {
+        assertThatThrownBy(() -> fhirService.updatePatient(new Patient()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("logical ID");
+    }
+
+    @Test
+    void deletePatientReturnsOutcome() {
+        MethodOutcome expected = writeOutcome("Patient", "42", false);
+        when(fhirClient.delete().resourceById("Patient", "42").execute()).thenReturn(expected);
+
+        MethodOutcome actual = fhirService.deletePatient("42");
+
+        assertThat(actual).isSameAs(expected);
+    }
+
+    @Test
+    void deletePatientDoesNotSwallowNotFound() {
+        when(fhirClient.delete().resourceById("Patient", "missing").execute())
+                .thenThrow(new ResourceNotFoundException("Patient/missing"));
+
+        assertThatThrownBy(() -> fhirService.deletePatient("missing"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void createObservationReturnsMethodOutcomeWithServerAssignedId() {
+        Observation draft = syntheticObservation(null, "Patient/patient-001");
+        MethodOutcome expected = writeOutcome("Observation", "99", true);
+        when(fhirClient.create().resource(any(Observation.class)).execute()).thenReturn(expected);
+
+        MethodOutcome actual = fhirService.createObservation(draft);
+
+        assertThat(fhirService.createdLogicalId(actual)).isEqualTo("99");
+        assertThat(actual.getCreated()).isTrue();
+    }
+
+    @Test
+    void createObservationDoesNotSwallowConnectionErrors() {
+        when(fhirClient.create().resource(any(Observation.class)).execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.createObservation(syntheticObservation(null, "Patient/patient-001")))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @Test
+    void createdLogicalIdRequiresIdentity() {
+        assertThatThrownBy(() -> fhirService.createdLogicalId(new MethodOutcome()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("resource identity");
+    }
+
+    private static MethodOutcome writeOutcome(String resourceType, String logicalId, boolean created) {
+        MethodOutcome outcome = new MethodOutcome();
+        outcome.setId(new IdType(resourceType, logicalId));
+        outcome.setCreated(created);
+        return outcome;
+    }
+
     private static Patient syntheticPatient(String logicalId, String family, String given) {
         Patient patient = new Patient();
         patient.setId(logicalId);
@@ -362,7 +464,9 @@ class FhirServiceTest {
 
     private static Observation syntheticObservation(String logicalId, String patientReference) {
         Observation observation = new Observation();
-        observation.setId(logicalId);
+        if (logicalId != null) {
+            observation.setId(logicalId);
+        }
         observation.setStatus(Observation.ObservationStatus.FINAL);
         observation.getCode().addCoding()
                 .setSystem("http://loinc.org")

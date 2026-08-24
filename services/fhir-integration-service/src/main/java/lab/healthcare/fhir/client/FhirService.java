@@ -1,8 +1,10 @@
 package lab.healthcare.fhir.client;
 
+import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.server.exceptions.BaseServerResponseException;
+import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CapabilityStatement;
 import org.hl7.fhir.r4.model.Condition;
@@ -168,6 +170,63 @@ public class FhirService {
                 "searching Patient with _revinclude Observation:subject and Condition:subject");
     }
 
+    public MethodOutcome createPatient(Patient patient) {
+        requireResource(patient, "Patient must be provided");
+        return execute(
+                () -> fhirClient.create()
+                        .resource(patient)
+                        .execute(),
+                "creating Patient");
+    }
+
+    public MethodOutcome updatePatient(Patient patient) {
+        requireResource(patient, "Patient must be provided");
+        String logicalId = requireLogicalId(patient, "Patient logical ID must be provided for update");
+        return execute(
+                () -> fhirClient.update()
+                        .resource(patient)
+                        .execute(),
+                "updating Patient/" + logicalId);
+    }
+
+    public MethodOutcome deletePatient(String logicalId) {
+        requireText(logicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.delete()
+                        .resourceById("Patient", logicalId)
+                        .execute(),
+                "deleting Patient/" + logicalId);
+    }
+
+    public MethodOutcome createObservation(Observation observation) {
+        requireResource(observation, "Observation must be provided");
+        return execute(
+                () -> fhirClient.create()
+                        .resource(observation)
+                        .execute(),
+                "creating Observation");
+    }
+
+    public MethodOutcome deleteObservation(String logicalId) {
+        requireText(logicalId, "Observation logical ID must be provided");
+        return execute(
+                () -> fhirClient.delete()
+                        .resourceById("Observation", logicalId)
+                        .execute(),
+                "deleting Observation/" + logicalId);
+    }
+
+    public String createdLogicalId(MethodOutcome outcome) {
+        if (outcome == null) {
+            throw new IllegalArgumentException("MethodOutcome must be provided");
+        }
+        IIdType id = outcome.getId();
+        if (id == null || !id.hasIdPart()) {
+            throw new IllegalArgumentException("MethodOutcome must contain a resource identity");
+        }
+        return id.getIdPart();
+    }
+
     public List<String> resourceIdentities(Bundle bundle) {
         if (bundle == null) {
             throw new IllegalArgumentException("Bundle must be provided");
@@ -211,5 +270,17 @@ public class FhirService {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(message);
         }
+    }
+
+    private static void requireResource(Resource resource, String message) {
+        if (resource == null) {
+            throw new IllegalArgumentException(message);
+        }
+    }
+
+    private static String requireLogicalId(Resource resource, String message) {
+        String logicalId = resource.getIdElement().getIdPart();
+        requireText(logicalId, message);
+        return logicalId;
     }
 }
