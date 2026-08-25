@@ -1,8 +1,10 @@
 package lab.healthcare.fhir.client;
 
+import ca.uhn.fhir.model.api.IQueryParameterType;
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
+import ca.uhn.fhir.rest.param.HasParam;
 import ca.uhn.fhir.rest.server.exceptions.BaseServerResponseException;
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.Bundle;
@@ -15,6 +17,7 @@ import org.hl7.fhir.r4.model.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -250,6 +253,90 @@ public class FhirService {
                 "searching Condition by patient and clinical-status");
     }
 
+    public Bundle searchObservationsByPatientName(String patientName) {
+        requireText(patientName, "Patient name search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasChainedProperty(Patient.NAME.matches().value(patientName)))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient.name");
+    }
+
+    public Bundle searchObservationsByPatientNameAndCode(String patientName, String code) {
+        requireText(patientName, "Patient name search parameter must be provided");
+        requireText(code, "Observation code search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasChainedProperty(Patient.NAME.matches().value(patientName)))
+                        .and(Observation.CODE.exactly().code(code))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient.name and code");
+    }
+
+    public Bundle searchObservationsByPatientIdentifier(String identifier) {
+        requireText(identifier, "Patient identifier search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasChainedProperty(
+                                Patient.IDENTIFIER.exactly().identifier(identifier)))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient.identifier");
+    }
+
+    public Bundle searchConditionsByPatientNameAndClinicalStatus(String patientName, String clinicalStatus) {
+        requireText(patientName, "Patient name search parameter must be provided");
+        requireText(clinicalStatus, "Condition clinical-status search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Condition.class)
+                        .where(Condition.PATIENT.hasChainedProperty(Patient.NAME.matches().value(patientName)))
+                        .and(Condition.CLINICAL_STATUS.exactly().code(clinicalStatus))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Condition by patient.name and clinical-status");
+    }
+
+    public Bundle searchPatientsHavingObservationCode(String code) {
+        requireText(code, "Observation code search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(reverseChain("Observation", "patient", "code", code))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _has:Observation:patient:code");
+    }
+
+    public Bundle searchPatientsHavingConditionClinicalStatus(String clinicalStatus) {
+        requireText(clinicalStatus, "Condition clinical-status search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(reverseChain("Condition", "patient", "clinical-status", clinicalStatus))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _has:Condition:patient:clinical-status");
+    }
+
+    public Bundle searchPatientsHavingObservationCodeAndGender(String code, String gender) {
+        requireText(code, "Observation code search parameter must be provided");
+        requireText(gender, "Patient gender search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(reverseChain("Observation", "patient", "code", code))
+                        .and(Patient.GENDER.exactly().code(gender))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient with _has Observation code and gender");
+    }
+
     public Bundle searchObservationsByPatientIncludingSubject(String patientLogicalId) {
         requireText(patientLogicalId, "Patient logical ID must be provided");
         return execute(
@@ -411,5 +498,15 @@ public class FhirService {
         String logicalId = resource.getIdElement().getIdPart();
         requireText(logicalId, message);
         return logicalId;
+    }
+
+    private static Map<String, List<IQueryParameterType>> reverseChain(
+            String targetResourceType,
+            String referenceSearchParam,
+            String chainedSearchParam,
+            String value) {
+        return Map.of(
+                "_has",
+                List.of(new HasParam(targetResourceType, referenceSearchParam, chainedSearchParam, value)));
     }
 }
