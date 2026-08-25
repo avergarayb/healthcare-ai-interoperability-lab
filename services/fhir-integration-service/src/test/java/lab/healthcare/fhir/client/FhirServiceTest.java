@@ -18,6 +18,7 @@ import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.Enumerations;
 import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.Observation;
+import org.hl7.fhir.r4.model.OperationOutcome;
 import org.hl7.fhir.r4.model.Parameters;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Reference;
@@ -841,6 +842,112 @@ class FhirServiceTest {
     }
 
     @Test
+    void validateResourceReturnsOperationOutcomeDetails() {
+        Observation observation = syntheticObservation("obs-001", "Patient/patient-001");
+        MethodOutcome expected = validationOutcome(
+                OperationOutcome.IssueSeverity.WARNING,
+                "CodeSystem is unknown and can't be validated: http://loinc.org");
+        when(fhirClient.validate().resource(any(Observation.class)).execute()).thenReturn(expected);
+
+        MethodOutcome actual = fhirService.validateResource(observation);
+        OperationOutcome outcome = fhirService.operationOutcome(actual);
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(fhirService.hasErrorIssue(outcome)).isFalse();
+        assertThat(fhirService.issueDiagnostics(outcome)).containsExactly(
+                "CodeSystem is unknown and can't be validated: http://loinc.org");
+    }
+
+    @Test
+    void validateResourcePreservesErrorIssuesForInvalidObservation() {
+        Observation invalid = new Observation();
+        MethodOutcome expected = validationOutcome(
+                OperationOutcome.IssueSeverity.ERROR,
+                "Observation.status: minimum required = 1, but only found 0");
+        when(fhirClient.validate().resource(any(Observation.class)).execute()).thenReturn(expected);
+
+        OperationOutcome outcome = fhirService.operationOutcome(fhirService.validateResource(invalid));
+
+        assertThat(fhirService.hasErrorIssue(outcome)).isTrue();
+        assertThat(fhirService.issueDiagnostics(outcome)).anyMatch(diagnostics ->
+                diagnostics.contains("Observation.status"));
+    }
+
+    @Test
+    void validateResourceDoesNotSwallowConnectionErrors() {
+        when(fhirClient.validate().resource(any(Observation.class)).execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.validateResource(syntheticObservation("obs-001", "Patient/patient-001")))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @Test
+    void validateResourceAgainstProfileReturnsProfileIssues() {
+        Observation withoutSubject = syntheticObservation("obs-no-subject", "Patient/patient-001");
+        withoutSubject.setSubject(null);
+        MethodOutcome expected = validationOutcome(
+                OperationOutcome.IssueSeverity.ERROR,
+                "Observation.subject: minimum required = 1, but only found 0 (from https://example.org/fhir/StructureDefinition/lab-blood-pressure-observation)");
+        when(fhirClient.validate().resource(any(Observation.class)).execute()).thenReturn(expected);
+
+        OperationOutcome outcome = fhirService.operationOutcome(
+                fhirService.validateResourceAgainstProfile(
+                        withoutSubject,
+                        "https://example.org/fhir/StructureDefinition/lab-blood-pressure-observation"));
+
+        assertThat(fhirService.hasErrorIssue(outcome)).isTrue();
+        assertThat(fhirService.issueDiagnostics(outcome)).anyMatch(diagnostics ->
+                diagnostics.contains("lab-blood-pressure-observation"));
+    }
+
+    @Test
+    void validateResourceAgainstProfilePreservesNonErrorIssues() {
+        MethodOutcome expected = validationOutcome(
+                OperationOutcome.IssueSeverity.WARNING,
+                "Best Practice Recommendation: In general, all observations should have a performer");
+        when(fhirClient.validate().resource(any(Observation.class)).execute()).thenReturn(expected);
+
+        OperationOutcome outcome = fhirService.operationOutcome(
+                fhirService.validateResourceAgainstProfile(
+                        syntheticObservation("obs-001", "Patient/patient-001"),
+                        "https://example.org/fhir/StructureDefinition/lab-blood-pressure-observation"));
+
+        assertThat(fhirService.hasErrorIssue(outcome)).isFalse();
+        assertThat(fhirService.issueDiagnostics(outcome)).isNotEmpty();
+    }
+
+    @Test
+    void validateResourceAgainstProfileRequiresProfileUrl() {
+        assertThatThrownBy(() -> fhirService.validateResourceAgainstProfile(
+                        syntheticObservation("obs-001", "Patient/patient-001"), " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Profile URL");
+    }
+
+    @Test
+    void validateResourceAgainstProfileDoesNotSwallowConnectionErrors() {
+        when(fhirClient.validate().resource(any(Observation.class)).execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.validateResourceAgainstProfile(
+                        syntheticObservation("obs-001", "Patient/patient-001"),
+                        "https://example.org/fhir/StructureDefinition/lab-blood-pressure-observation"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @Test
+    void declaredProfilesReadMetaProfileWithoutValidating() {
+        Observation observation = syntheticObservation("obs-001", "Patient/patient-001");
+        observation.getMeta().addProfile("https://example.org/fhir/StructureDefinition/lab-blood-pressure-observation");
+
+        assertThat(fhirService.declaredProfiles(observation)).containsExactly(
+                "https://example.org/fhir/StructureDefinition/lab-blood-pressure-observation");
+    }
+
+    @Test
     void primaryCodingReadsSystemCodeAndDisplay() {
         Observation observation = syntheticObservation("obs-001", "Patient/patient-001");
 
@@ -884,6 +991,17 @@ class FhirServiceTest {
         parameters.addParameter().setName("result").setValue(new BooleanType(result));
         parameters.addParameter().setName("message").setValue(new StringType(message));
         return parameters;
+    }
+
+    private static MethodOutcome validationOutcome(OperationOutcome.IssueSeverity severity, String diagnostics) {
+        OperationOutcome operationOutcome = new OperationOutcome();
+        operationOutcome.addIssue()
+                .setSeverity(severity)
+                .setCode(OperationOutcome.IssueType.PROCESSING)
+                .setDiagnostics(diagnostics);
+        MethodOutcome outcome = new MethodOutcome();
+        outcome.setOperationOutcome(operationOutcome);
+        return outcome;
     }
 
     private static MethodOutcome writeOutcome(String resourceType, String logicalId, boolean created) {

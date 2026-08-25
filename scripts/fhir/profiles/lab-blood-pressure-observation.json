@@ -1,0 +1,36 @@
+{
+  "resourceType": "StructureDefinition",
+  "id": "lab-blood-pressure-observation",
+  "url": "https://example.org/fhir/StructureDefinition/lab-blood-pressure-observation",
+  "name": "LabBloodPressureObservation",
+  "title": "Lab Blood Pressure Observation",
+  "status": "active",
+  "experimental": true,
+  "description": "Synthetic lab profile. Tightens Observation.subject and Observation.value[x] from optional (0..1) to required (1..1). Not a published IG.",
+  "fhirVersion": "4.0.1",
+  "kind": "resource",
+  "abstract": false,
+  "type": "Observation",
+  "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Observation",
+  "derivation": "constraint",
+  "differential": {
+    "element": [
+      {
+        "id": "Observation",
+        "path": "Observation"
+      },
+      {
+        "id": "Observation.subject",
+        "path": "Observation.subject",
+        "min": 1,
+        "max": "1"
+      },
+      {
+        "id": "Observation.value[x]",
+        "path": "Observation.value[x]",
+        "min": 1,
+        "max": "1"
+      }
+    ]
+  }
+}

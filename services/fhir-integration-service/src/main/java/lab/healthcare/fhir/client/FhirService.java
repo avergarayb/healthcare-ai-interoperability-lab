@@ -6,16 +6,20 @@ import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.param.HasParam;
 import ca.uhn.fhir.rest.server.exceptions.BaseServerResponseException;
+import org.hl7.fhir.instance.model.api.IBaseOperationOutcome;
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.BooleanType;
 import org.hl7.fhir.r4.model.Bundle;
+import org.hl7.fhir.r4.model.CanonicalType;
 import org.hl7.fhir.r4.model.CapabilityStatement;
 import org.hl7.fhir.r4.model.CodeType;
 import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.CodeSystem;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Condition;
+import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.Observation;
+import org.hl7.fhir.r4.model.OperationOutcome;
 import org.hl7.fhir.r4.model.Parameters;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Reference;
@@ -405,6 +409,64 @@ public class FhirService {
         return concept.getCodingFirstRep();
     }
 
+    public MethodOutcome validateResource(Resource resource) {
+        requireResource(resource, "Resource must be provided");
+        Resource payload = typeLevelValidationCopy(resource);
+        return execute(
+                () -> fhirClient.validate()
+                        .resource(payload)
+                        .execute(),
+                "validating " + resource.getResourceType().name());
+    }
+
+    public MethodOutcome validateResourceAgainstProfile(Resource resource, String profileUrl) {
+        requireResource(resource, "Resource must be provided");
+        requireText(profileUrl, "Profile URL must be provided");
+        Resource payload = typeLevelValidationCopy(resource);
+        if (declaredProfiles(payload).stream().noneMatch(profileUrl::equals)) {
+            payload.getMeta().addProfile(profileUrl);
+        }
+        return execute(
+                () -> fhirClient.validate()
+                        .resource(payload)
+                        .execute(),
+                "validating " + resource.getResourceType().name() + " against profile " + profileUrl);
+    }
+
+    public OperationOutcome operationOutcome(MethodOutcome outcome) {
+        if (outcome == null) {
+            throw new IllegalArgumentException("MethodOutcome must be provided");
+        }
+        IBaseOperationOutcome base = outcome.getOperationOutcome();
+        if (!(base instanceof OperationOutcome operationOutcome)) {
+            throw new IllegalArgumentException("MethodOutcome must contain an OperationOutcome");
+        }
+        return operationOutcome;
+    }
+
+    public boolean hasErrorIssue(OperationOutcome outcome) {
+        requireResource(outcome, "OperationOutcome must be provided");
+        return outcome.getIssue().stream().anyMatch(issue ->
+                issue.getSeverity() == OperationOutcome.IssueSeverity.ERROR
+                        || issue.getSeverity() == OperationOutcome.IssueSeverity.FATAL);
+    }
+
+    public List<String> issueDiagnostics(OperationOutcome outcome) {
+        requireResource(outcome, "OperationOutcome must be provided");
+        return outcome.getIssue().stream()
+                .map(OperationOutcome.OperationOutcomeIssueComponent::getDiagnostics)
+                .filter(diagnostics -> diagnostics != null && !diagnostics.isBlank())
+                .toList();
+    }
+
+    public List<String> declaredProfiles(Resource resource) {
+        requireResource(resource, "Resource must be provided");
+        return resource.getMeta().getProfile().stream()
+                .map(CanonicalType::getValue)
+                .filter(profile -> profile != null && !profile.isBlank())
+                .toList();
+    }
+
     public Bundle searchObservationsByPatientIncludingSubject(String patientLogicalId) {
         requireText(patientLogicalId, "Patient logical ID must be provided");
         return execute(
@@ -548,6 +610,12 @@ public class FhirService {
         } catch (BaseServerResponseException ex) {
             throw new FhirClientException("FHIR server returned an error while " + action, ex);
         }
+    }
+
+    private static Resource typeLevelValidationCopy(Resource resource) {
+        Resource copy = resource.copy();
+        copy.setIdElement(new IdType(copy.fhirType(), (String) null));
+        return copy;
     }
 
     private static void requireText(String value, String message) {
