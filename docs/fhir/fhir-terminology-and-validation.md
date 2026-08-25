@@ -1,6 +1,6 @@
 # FHIR terminology and `$validate-code`
 
-This note teaches how FHIR represents **coded clinical meaning** and how `$validate-code` checks a code against a terminology context. Read it after [fhir-resources-and-references.md](fhir-resources-and-references.md).
+This note teaches how FHIR represents **coded clinical meaning** and how `$validate-code` checks a code against a terminology context. Read it after [fhir-resources-and-references.md](fhir-resources-and-references.md). Resource-level `$validate` and profiles are in [fhir-validation-and-profiles.md](fhir-validation-and-profiles.md).
 
 The Java service remains a FHIR **client**. There is no custom terminology server, no external LOINC/SNOMED service, and no DTO.
 
@@ -222,6 +222,8 @@ fhirClient.operation()
 ```
 
 `FhirService.validateCode(system, code)` returns `Parameters`. `validationResult` / `validationMessage` read `result` and `message`. They do not collapse the operation to a boolean-only API at the HTTP layer.
+
+`$validate-code` is terminology validation. `$validate` is Resource conformance (structure, cardinality, profile). Do not use one as a substitute for the other. See [fhir-validation-and-profiles.md](fhir-validation-and-profiles.md).
 
 ## Out of scope
 
