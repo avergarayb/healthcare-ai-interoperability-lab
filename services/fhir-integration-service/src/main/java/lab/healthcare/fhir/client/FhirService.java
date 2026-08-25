@@ -7,13 +7,20 @@ import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.param.HasParam;
 import ca.uhn.fhir.rest.server.exceptions.BaseServerResponseException;
 import org.hl7.fhir.instance.model.api.IIdType;
+import org.hl7.fhir.r4.model.BooleanType;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CapabilityStatement;
+import org.hl7.fhir.r4.model.CodeType;
+import org.hl7.fhir.r4.model.CodeableConcept;
+import org.hl7.fhir.r4.model.CodeSystem;
+import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.Observation;
+import org.hl7.fhir.r4.model.Parameters;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Reference;
 import org.hl7.fhir.r4.model.Resource;
+import org.hl7.fhir.r4.model.UriType;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -335,6 +342,67 @@ public class FhirService {
                         .returnBundle(Bundle.class)
                         .execute(),
                 "searching Patient with _has Observation code and gender");
+    }
+
+    public Bundle searchObservationsByCode(String code) {
+        requireText(code, "Observation code search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.CODE.exactly().code(code))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by code");
+    }
+
+    public Bundle searchConditionsByCode(String code) {
+        requireText(code, "Condition code search parameter must be provided");
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Condition.class)
+                        .where(Condition.CODE.exactly().code(code))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Condition by code");
+    }
+
+    public Parameters validateCode(String system, String code) {
+        requireText(system, "CodeSystem url must be provided");
+        requireText(code, "Code must be provided");
+        return execute(
+                () -> fhirClient.operation()
+                        .onType(CodeSystem.class)
+                        .named("$validate-code")
+                        .withParameter(Parameters.class, "url", new UriType(system))
+                        .andParameter("code", new CodeType(code))
+                        .useHttpGet()
+                        .execute(),
+                "validating code " + system + "#" + code);
+    }
+
+    public Boolean validationResult(Parameters parameters) {
+        requireResource(parameters, "Parameters must be provided");
+        Parameters.ParametersParameterComponent result = parameters.getParameter("result");
+        if (result == null || !(result.getValue() instanceof BooleanType booleanType)) {
+            throw new IllegalArgumentException("Parameters must contain a boolean result");
+        }
+        return booleanType.booleanValue();
+    }
+
+    public String validationMessage(Parameters parameters) {
+        requireResource(parameters, "Parameters must be provided");
+        Parameters.ParametersParameterComponent message = parameters.getParameter("message");
+        if (message == null || !message.hasValue()) {
+            return null;
+        }
+        return message.getValue().primitiveValue();
+    }
+
+    public Coding primaryCoding(CodeableConcept concept) {
+        if (concept == null || !concept.hasCoding()) {
+            throw new IllegalArgumentException("CodeableConcept coding must be provided");
+        }
+        return concept.getCodingFirstRep();
     }
 
     public Bundle searchObservationsByPatientIncludingSubject(String patientLogicalId) {

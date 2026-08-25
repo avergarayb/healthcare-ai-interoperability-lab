@@ -81,7 +81,7 @@ CodeableConcept
           └── Coding
 ```
 
-One clinical idea can carry several Codings (LOINC and SNOMED at once). This lab stores a single Coding per resource. We do not translate between systems.
+One clinical idea can carry several Codings (LOINC and SNOMED at once). This lab stores a single Coding per resource. We do not translate between systems. See [fhir-terminology-and-validation.md](fhir-terminology-and-validation.md) for `$validate-code`, Parameters, and the difference between Search and terminology validation.
 
 ## Observation/obs-001
 
