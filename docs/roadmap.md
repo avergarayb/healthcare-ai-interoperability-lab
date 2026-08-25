@@ -86,4 +86,4 @@ Package the laboratory as a coherent demonstration of healthcare interoperabilit
 
 ## Current Position
 
-The repository is in Phase 1. `fhir-integration-service` can read, write, `_include` / `_revinclude`, advanced FHIR Search, chained search, and `_has` against local HAPI FHIR.
+The repository is in Phase 1. `fhir-integration-service` can search, write, chain, `_has`, and call `$validate-code` against local HAPI FHIR. Local HAPI does not ship LOINC/SNOMED CodeSystems.

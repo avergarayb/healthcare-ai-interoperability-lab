@@ -8,15 +8,21 @@ import ca.uhn.fhir.rest.gclient.IParam;
 import ca.uhn.fhir.rest.gclient.IQuery;
 import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import ca.uhn.fhir.rest.server.exceptions.ResourceNotFoundException;
+import org.hl7.fhir.r4.model.BooleanType;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CapabilityStatement;
+import org.hl7.fhir.r4.model.CodeableConcept;
+import org.hl7.fhir.r4.model.CodeSystem;
+import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.Enumerations;
 import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.Observation;
+import org.hl7.fhir.r4.model.Parameters;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Reference;
 import org.hl7.fhir.r4.model.Resource;
+import org.hl7.fhir.r4.model.StringType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Answers;
@@ -759,6 +765,125 @@ class FhirServiceTest {
         when(query.returnBundle(eq(Bundle.class))).thenReturn(query);
         when(query.execute()).thenReturn(expected);
         return query;
+    }
+
+    @Test
+    void searchObservationsByCodeReturnsMatchingBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByCode("85354-9");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Observation/obs-001");
+    }
+
+    @Test
+    void validateCodeReturnsParametersForValidLoinc() {
+        Parameters expected = validationParameters(true, "valid");
+        stubValidateCode(expected);
+
+        Parameters actual = fhirService.validateCode("http://loinc.org", "85354-9");
+
+        assertThat(fhirService.validationResult(actual)).isTrue();
+        assertThat(fhirService.validationMessage(actual)).isEqualTo("valid");
+    }
+
+    @Test
+    void validateCodeReturnsParametersForInvalidLoinc() {
+        Parameters expected = validationParameters(false, "unknown code");
+        stubValidateCode(expected);
+
+        Parameters actual = fhirService.validateCode("http://loinc.org", "99999999");
+
+        assertThat(fhirService.validationResult(actual)).isFalse();
+        assertThat(fhirService.validationMessage(actual)).contains("unknown");
+    }
+
+    @Test
+    void validateCodeReturnsParametersForValidSnomed() {
+        Parameters expected = validationParameters(true, "valid");
+        stubValidateCode(expected);
+
+        Parameters actual = fhirService.validateCode("http://snomed.info/sct", "38341003");
+
+        assertThat(fhirService.validationResult(actual)).isTrue();
+    }
+
+    @Test
+    void validateCodeReturnsParametersForInvalidSnomed() {
+        Parameters expected = validationParameters(false, "not found");
+        stubValidateCode(expected);
+
+        Parameters actual = fhirService.validateCode("http://snomed.info/sct", "99999999");
+
+        assertThat(fhirService.validationResult(actual)).isFalse();
+    }
+
+    @Test
+    void validateCodeDoesNotSwallowConnectionErrors() {
+        when(fhirClient.operation()
+                .onType(CodeSystem.class)
+                .named("$validate-code")
+                .withParameter(eq(Parameters.class), eq("url"), any())
+                .andParameter(eq("code"), any())
+                .useHttpGet()
+                .execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.validateCode("http://loinc.org", "85354-9"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @Test
+    void primaryCodingReadsSystemCodeAndDisplay() {
+        Observation observation = syntheticObservation("obs-001", "Patient/patient-001");
+
+        Coding coding = fhirService.primaryCoding(observation.getCode());
+
+        assertThat(coding.getSystem()).isEqualTo("http://loinc.org");
+        assertThat(coding.getCode()).isEqualTo("85354-9");
+        assertThat(coding.getDisplay()).isEqualTo("Blood pressure panel");
+    }
+
+    @Test
+    void codeableConceptCanHoldMultipleCodingsWithoutEquivalence() {
+        CodeableConcept concept = new CodeableConcept();
+        concept.addCoding()
+                .setSystem("http://loinc.org")
+                .setCode("85354-9")
+                .setDisplay("Blood pressure panel");
+        concept.addCoding()
+                .setSystem("http://snomed.info/sct")
+                .setCode("75367002")
+                .setDisplay("Blood pressure");
+
+        assertThat(concept.getCoding()).hasSize(2);
+        assertThat(concept.getCoding().get(0).getSystem()).isNotEqualTo(concept.getCoding().get(1).getSystem());
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private void stubValidateCode(Parameters expected) {
+        when(fhirClient.operation()
+                .onType(CodeSystem.class)
+                .named("$validate-code")
+                .withParameter(eq(Parameters.class), eq("url"), any())
+                .andParameter(eq("code"), any())
+                .useHttpGet()
+                .execute())
+                .thenReturn(expected);
+    }
+
+    private static Parameters validationParameters(boolean result, String message) {
+        Parameters parameters = new Parameters();
+        parameters.addParameter().setName("result").setValue(new BooleanType(result));
+        parameters.addParameter().setName("message").setValue(new StringType(message));
+        return parameters;
     }
 
     private static MethodOutcome writeOutcome(String resourceType, String logicalId, boolean created) {
