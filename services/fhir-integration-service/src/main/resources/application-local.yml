@@ -1,0 +1,4 @@
+# Overlay: --spring.profiles.active=local
+# Change fhir.active-server or a profile base-url here without editing Java.
+fhir:
+  active-server: local-hapi

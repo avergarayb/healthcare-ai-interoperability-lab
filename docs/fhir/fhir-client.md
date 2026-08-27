@@ -45,13 +45,13 @@ We did **not** add `hapi-fhir-server`, JPA, or validation modules. Those belong 
 
 `FhirContext` is HAPI's parser/serializer factory. It knows which FHIR version to use (DSTU2, STU3, R4, R5, ...).
 
-We create an R4 context:
+The active server profile supplies `fhir-version: R4`. The factory builds:
 
 ```java
-FhirContext.forR4()
+FhirContext.forVersion(FhirVersionEnum.R4)
 ```
 
-If the context were R5, the client would expect R5 resources and would not match our R4 server.
+Only R4 is accepted in this lab. If the context were R5, the client would not match our R4 server.
 
 `FhirContext` is expensive to build and is thread-safe. Spring holds a single bean for the life of the process.
 
@@ -63,7 +63,7 @@ If the context were R5, the client would expect R5 resources and would not match
 fhirContext.newRestfulGenericClient(baseUrl)
 ```
 
-It turns Java calls into FHIR HTTP requests against the configured base URL.
+It turns Java calls into FHIR HTTP requests against the **active server profile** base URL.
 
 `capabilities().ofType(CapabilityStatement.class).execute()` is HAPI's typed equivalent of `GET /metadata`.
 
@@ -71,17 +71,7 @@ Clients are cheap and thread-safe. We keep one Spring bean because the base URL 
 
 ## Base URL configuration
 
-The server address is not hard-coded in Java. It comes from Spring configuration:
-
-```yaml
-fhir:
-  server:
-    base-url: http://localhost:8080/fhir
-```
-
-`FhirServerProperties` binds `fhir.server.base-url` and `FhirClientConfiguration` injects it into `IGenericClient`.
-
-Change the property later for another local server, a test environment, Epic, Oracle Health, or any other FHIR R4 endpoint. Do not put credentials in this file.
+The server address is not hard-coded in Java. Named **server profiles** live in Spring configuration. The active profile for this lab is `local-hapi`. See [fhir-server-configuration.md](fhir-server-configuration.md).
 
 ## CapabilityStatement
 
@@ -95,9 +85,12 @@ Our local HAPI server currently reports FHIR R4 `4.0.1`.
 
 ```text
 lab.healthcare.fhir.client
-├── FhirServerProperties       # binds fhir.server.base-url
-├── FhirClientConfiguration    # FhirContext (R4) + IGenericClient beans
-├── FhirService                # metadata, Patient read, Patient search
+├── FhirServersProperties      # binds fhir.active-server and fhir.servers
+├── FhirServerProfile          # name, baseUrl, fhirVersion, enabled
+├── FhirServerProfileRegistry  # selects and validates the active profile
+├── FhirClientFactory          # FhirContext + IGenericClient from a profile
+├── FhirClientConfiguration    # Spring beans
+├── FhirService                # metadata, Patient read, Patient search, …
 └── FhirClientException        # wraps connection/server errors
 ```
 
@@ -141,7 +134,7 @@ mvn test
 They verify:
 
 - the Spring context and `/actuator/health`;
-- that the configured client is R4 and uses `fhir.server.base-url`;
+- that the configured client is R4 and uses the active server profile `base-url`;
 - that `FhirService` returns a `CapabilityStatement` and does not hide client errors.
 
 ## Run the integration test

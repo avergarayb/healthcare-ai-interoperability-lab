@@ -7,20 +7,34 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties(FhirServerProperties.class)
+@EnableConfigurationProperties(FhirServersProperties.class)
 public class FhirClientConfiguration {
 
     @Bean
-    public FhirContext fhirContext() {
-        return FhirContext.forR4();
+    public FhirClientFactory fhirClientFactory() {
+        return new FhirClientFactory();
     }
 
     @Bean
-    public IGenericClient fhirClient(FhirContext fhirContext, FhirServerProperties properties) {
-        String baseUrl = properties.baseUrl();
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("Property fhir.server.base-url must be set");
-        }
-        return fhirContext.newRestfulGenericClient(baseUrl);
+    public FhirServerProfileRegistry fhirServerProfileRegistry(FhirServersProperties properties) {
+        return new FhirServerProfileRegistry(properties);
+    }
+
+    @Bean
+    public FhirServerProfile activeFhirServerProfile(FhirServerProfileRegistry registry) {
+        return registry.activeProfile();
+    }
+
+    @Bean
+    public FhirContext fhirContext(FhirClientFactory factory, FhirServerProfile activeFhirServerProfile) {
+        return factory.createContext(activeFhirServerProfile);
+    }
+
+    @Bean
+    public IGenericClient fhirClient(
+            FhirClientFactory factory,
+            FhirContext fhirContext,
+            FhirServerProfile activeFhirServerProfile) {
+        return factory.createClient(fhirContext, activeFhirServerProfile);
     }
 }

@@ -36,6 +36,8 @@ Current bootstrap belongs to this phase.
 
 Connect the integration layer to real EHR FHIR APIs without coupling the lab to a single vendor.
 
+Phase 2 starts with **named FHIR server profiles** and external configuration (`local-hapi` today). Authentication (OAuth / SMART) is not in this step.
+
 ### Phase 3 — SMART on FHIR
 
 Authorization and app launch using SMART on FHIR.
@@ -86,4 +88,4 @@ Package the laboratory as a coherent demonstration of healthcare interoperabilit
 
 ## Current Position
 
-The repository is in Phase 1. `fhir-integration-service` can search, write, chain, `_has`, call `$validate-code`, call `$validate`, send Bundle transaction/batch interactions, page `searchset` Bundles, read Resource history/`_history`, and call Patient `$everything` against local HAPI FHIR. Local HAPI does not ship LOINC/SNOMED CodeSystems.
+The repository is entering Phase 2. `fhir-integration-service` remains a FHIR R4 **client** against local HAPI, now selected through named server profiles (`fhir.active-server`) instead of a single `fhir.server.base-url`. OAuth and SMART are not implemented yet. Local HAPI does not ship LOINC/SNOMED CodeSystems.
