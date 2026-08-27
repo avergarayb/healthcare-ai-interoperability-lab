@@ -24,7 +24,7 @@ public class FhirServerProfileRegistry {
         if (!profile.enabled()) {
             throw new IllegalStateException("FHIR server profile '" + profile.name() + "' is disabled");
         }
-        requireSecretWhenOauthEnabled(profile);
+        requireSecretWhenClientCredentialsEnabled(profile);
         return profile;
     }
 
@@ -78,23 +78,38 @@ public class FhirServerProfileRegistry {
         if (type == FhirAuthenticationType.NONE) {
             return FhirAuthenticationSettings.none();
         }
-        String tokenUrl = raw.tokenUrl();
-        if (tokenUrl == null || tokenUrl.isBlank()) {
-            throw new IllegalStateException(
-                    "Property fhir.servers." + profileName + ".authentication.token-url must be set");
+        String clientId = required(raw.clientId(), profileName, "client-id");
+        if (type == FhirAuthenticationType.OAUTH2_CLIENT_CREDENTIALS) {
+            String tokenUrl = required(raw.tokenUrl(), profileName, "token-url");
+            String clientSecret = raw.clientSecret() == null ? "" : raw.clientSecret();
+            return new FhirAuthenticationSettings(type, tokenUrl, clientId, clientSecret);
         }
-        String clientId = raw.clientId();
-        if (clientId == null || clientId.isBlank()) {
-            throw new IllegalStateException(
-                    "Property fhir.servers." + profileName + ".authentication.client-id must be set");
-        }
-        String clientSecret = raw.clientSecret() == null ? "" : raw.clientSecret();
-        return new FhirAuthenticationSettings(type, tokenUrl.trim(), clientId.trim(), clientSecret);
+        String smartConfigurationUrl = required(raw.smartConfigurationUrl(), profileName, "smart-configuration-url");
+        String redirectUri = required(raw.redirectUri(), profileName, "redirect-uri");
+        String scope = required(raw.scope(), profileName, "scope");
+        String aud = required(raw.aud(), profileName, "aud");
+        return new FhirAuthenticationSettings(
+                type,
+                null,
+                clientId,
+                "",
+                smartConfigurationUrl.trim(),
+                redirectUri.trim(),
+                scope.trim(),
+                aud.trim());
     }
 
-    private static void requireSecretWhenOauthEnabled(FhirServerProfile profile) {
+    private static String required(String value, String profileName, String property) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(
+                    "Property fhir.servers." + profileName + ".authentication." + property + " must be set");
+        }
+        return value.trim();
+    }
+
+    private static void requireSecretWhenClientCredentialsEnabled(FhirServerProfile profile) {
         FhirAuthenticationSettings authentication = profile.authentication();
-        if (!authentication.requiresBearerToken()) {
+        if (!authentication.isClientCredentials()) {
             return;
         }
         String secret = authentication.clientSecret();

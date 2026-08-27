@@ -18,6 +18,14 @@ public record FhirServersProperties(String activeServer, Map<String, ServerSetti
             AuthenticationSettings authentication) {
     }
 
-    public record AuthenticationSettings(String type, String tokenUrl, String clientId, String clientSecret) {
+    public record AuthenticationSettings(
+            String type,
+            String tokenUrl,
+            String clientId,
+            String clientSecret,
+            String smartConfigurationUrl,
+            String redirectUri,
+            String scope,
+            String aud) {
     }
 }

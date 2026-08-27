@@ -39,3 +39,14 @@ fhir:
         token-url: http://localhost:9090/oauth/token
         client-id: lab-client
         client-secret: ${FHIR_SECURED_LAB_CLIENT_SECRET:}
+    smart-lab:
+      base-url: http://localhost:8180/fhir
+      fhir-version: R4
+      enabled: false
+      authentication:
+        type: SMART_AUTHORIZATION_CODE
+        smart-configuration-url: http://localhost:8180/fhir/.well-known/smart-configuration
+        client-id: lab-smart-app
+        redirect-uri: http://127.0.0.1:8081/smart/callback
+        scope: patient/Patient.read patient/Observation.read
+        aud: http://localhost:8180/fhir

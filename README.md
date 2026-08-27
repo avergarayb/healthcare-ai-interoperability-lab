@@ -44,7 +44,7 @@ healthcare-ai-interoperability-lab/
 └── scripts/
 ```
 
-The Docker Compose project name is `healthcare-ai-interoperability-lab`. Services remain `hapi-fhir` and `hapi-fhir-postgres`. The initial application is `fhir-integration-service`. The future Python service `ai-service` is not created yet.
+The Docker Compose project name is `healthcare-ai-interoperability-lab`. Services remain `hapi-fhir` and `hapi-fhir-postgres`, plus optional `lab-oauth` and `fhir-gateway` for OAuth/SMART. The initial application is `fhir-integration-service`. The future Python service `ai-service` is not created yet.
 
 ## Prerequisites
 
