@@ -6,8 +6,10 @@ import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.gclient.ICriterion;
 import ca.uhn.fhir.rest.gclient.IParam;
 import ca.uhn.fhir.rest.gclient.IQuery;
+import ca.uhn.fhir.rest.gclient.IUpdateTyped;
 import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import ca.uhn.fhir.rest.server.exceptions.ResourceNotFoundException;
+import ca.uhn.fhir.rest.server.exceptions.ResourceVersionConflictException;
 import org.hl7.fhir.r4.model.BooleanType;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CapabilityStatement;
@@ -428,6 +430,177 @@ class FhirServiceTest {
         assertThatThrownBy(() -> fhirService.deletePatient("missing"))
                 .isInstanceOf(FhirClientException.class)
                 .hasCauseInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void getPatientHistoryReturnsHistoryBundle() {
+        Bundle expected = historyBundle(
+                historyPatientEntry("history-patient-001", "3", "V3", "PUT", "200 OK"),
+                historyPatientEntry("history-patient-001", "2", "V2", "PUT", "200 OK"),
+                historyPatientEntry("history-patient-001", "1", "V1", "POST", "201 Created"));
+        when(fhirClient.history().onInstance(any(IdType.class)).returnBundle(Bundle.class).execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.getPatientHistory("history-patient-001");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.HISTORY);
+        assertThat(fhirService.historyVersionIds(actual)).containsExactly("3", "2", "1");
+        assertThat(fhirService.historyRequestMethods(actual)).containsExactly("PUT", "PUT", "POST");
+        assertThat(fhirService.historyResponseStatuses(actual)).containsExactly("200 OK", "200 OK", "201 Created");
+        assertThat(fhirService.extractPatients(actual).getFirst().getNameFirstRep().getGivenAsSingleString())
+                .isEqualTo("V3");
+    }
+
+    @Test
+    void getPatientHistoryRequiresLogicalId() {
+        assertThatThrownBy(() -> fhirService.getPatientHistory(" "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("logical ID");
+    }
+
+    @Test
+    void getPatientHistoryDoesNotSwallowServerErrors() {
+        when(fhirClient.history().onInstance(any(IdType.class)).returnBundle(Bundle.class).execute())
+                .thenThrow(new ResourceNotFoundException("Patient/missing"));
+
+        assertThatThrownBy(() -> fhirService.getPatientHistory("missing"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void getPatientHistoryWithCountAppliesPageSize() {
+        Bundle expected = historyBundle(historyPatientEntry("history-patient-001", "3", "V3", "PUT", "200 OK"));
+        expected.setTotal(3);
+        expected.addLink().setRelation(Bundle.LINK_NEXT)
+                .setUrl("http://localhost:8080/fhir/Patient/history-patient-001/_history?_count=1&_offset=1");
+        when(fhirClient.history().onInstance(any(IdType.class)).returnBundle(Bundle.class).count(1).execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.getPatientHistory("history-patient-001", 1);
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.HISTORY);
+        assertThat(actual.getEntry()).hasSize(1);
+        assertThat(actual.getTotal()).isEqualTo(3);
+        assertThat(fhirService.hasNextPage(actual)).isTrue();
+    }
+
+    @Test
+    void getPatientHistoryWithCountRequiresPositivePageSize() {
+        assertThatThrownBy(() -> fhirService.getPatientHistory("history-patient-001", 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("_count");
+    }
+
+    @Test
+    void readPatientVersionReturnsHistoricalResource() {
+        Patient expected = syntheticPatient("history-patient-001", "History", "V1");
+        expected.getMeta().setVersionId("1");
+        when(fhirClient.read().resource(Patient.class).withIdAndVersion("history-patient-001", "1").execute())
+                .thenReturn(expected);
+
+        Patient actual = fhirService.readPatientVersion("history-patient-001", "1");
+
+        assertThat(actual.getIdElement().getIdPart()).isEqualTo("history-patient-001");
+        assertThat(fhirService.patientVersionId(actual)).isEqualTo("1");
+        assertThat(actual.getNameFirstRep().getGivenAsSingleString()).isEqualTo("V1");
+    }
+
+    @Test
+    void readPatientVersionRequiresVersionId() {
+        assertThatThrownBy(() -> fhirService.readPatientVersion("history-patient-001", " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("version ID");
+    }
+
+    @Test
+    void patientVersionIdReadsMeta() {
+        Patient patient = syntheticPatient("history-patient-001", "History", "V3");
+        patient.getMeta().setVersionId("3");
+
+        assertThat(fhirService.patientVersionId(patient)).isEqualTo("3");
+    }
+
+    @Test
+    void patientVersionIdRequiresMetaVersion() {
+        assertThatThrownBy(() -> fhirService.patientVersionId(syntheticPatient("history-patient-001", "History", "V3")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("versionId");
+    }
+
+    @Test
+    void currentReadAndVersionReadAreDistinctOperations() {
+        Patient current = syntheticPatient("history-patient-001", "History", "V3");
+        current.getMeta().setVersionId("3");
+        Patient historical = syntheticPatient("history-patient-001", "History", "V1");
+        historical.getMeta().setVersionId("1");
+        when(fhirClient.read().resource(Patient.class).withId("history-patient-001").execute()).thenReturn(current);
+        when(fhirClient.read().resource(Patient.class).withIdAndVersion("history-patient-001", "1").execute())
+                .thenReturn(historical);
+
+        Patient actualCurrent = fhirService.readPatient("history-patient-001");
+        Patient actualHistorical = fhirService.readPatientVersion("history-patient-001", "1");
+
+        assertThat(actualCurrent.getIdElement().getIdPart()).isEqualTo(actualHistorical.getIdElement().getIdPart());
+        assertThat(fhirService.patientVersionId(actualCurrent)).isEqualTo("3");
+        assertThat(fhirService.patientVersionId(actualHistorical)).isEqualTo("1");
+        assertThat(actualCurrent.getNameFirstRep().getGivenAsSingleString()).isEqualTo("V3");
+        assertThat(actualHistorical.getNameFirstRep().getGivenAsSingleString()).isEqualTo("V1");
+    }
+
+    @Test
+    void historyVersionIdsUseRequestUrlWhenDeleteHasNoResource() {
+        Bundle history = new Bundle();
+        history.setType(Bundle.BundleType.HISTORY);
+        Bundle.BundleEntryComponent deleted = history.addEntry();
+        deleted.getRequest().setMethod(Bundle.HTTPVerb.DELETE).setUrl("Patient/history-delete-001/_history/2");
+        deleted.getResponse().setStatus("200 OK").setEtag("W/\"2\"");
+        history.addEntry().setResource(syntheticPatient("history-delete-001", "HistoryDelete", "Gone"))
+                .getResource().getMeta().setVersionId("1");
+        history.getEntry().get(1).getRequest().setMethod(Bundle.HTTPVerb.POST)
+                .setUrl("Patient/history-delete-001/_history/1");
+        history.getEntry().get(1).getResponse().setStatus("201 Created").setEtag("W/\"1\"");
+
+        assertThat(fhirService.historyVersionIds(history)).containsExactly("2", "1");
+        assertThat(fhirService.historyRequestMethods(history)).containsExactly("DELETE", "POST");
+        assertThat(fhirService.extractPatients(history)).hasSize(1);
+    }
+
+    @Test
+    void updatePatientIfMatchSendsVersionedUpdate() {
+        Patient patient = syntheticPatient("history-patient-001", "History", "V4");
+        MethodOutcome expected = writeOutcome("Patient", "history-patient-001", false);
+        IUpdateTyped update = mock(IUpdateTyped.class);
+        when(fhirClient.update().resource(any(Patient.class))).thenReturn(update);
+        when(update.withAdditionalHeader("If-Match", "W/\"3\"")).thenReturn(update);
+        when(update.execute()).thenReturn(expected);
+
+        MethodOutcome actual = fhirService.updatePatientIfMatch(patient, "3");
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(fhirService.createdLogicalId(actual)).isEqualTo("history-patient-001");
+    }
+
+    @Test
+    void updatePatientIfMatchRequiresVersionId() {
+        assertThatThrownBy(() -> fhirService.updatePatientIfMatch(
+                syntheticPatient("history-patient-001", "History", "V4"), " "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("version ID");
+    }
+
+    @Test
+    void updatePatientIfMatchDoesNotSwallowVersionConflict() {
+        IUpdateTyped update = mock(IUpdateTyped.class);
+        when(fhirClient.update().resource(any(Patient.class))).thenReturn(update);
+        when(update.withAdditionalHeader("If-Match", "W/\"999999\"")).thenReturn(update);
+        when(update.execute()).thenThrow(new ResourceVersionConflictException("version conflict"));
+
+        assertThatThrownBy(() -> fhirService.updatePatientIfMatch(
+                syntheticPatient("history-patient-001", "History", "V4"), "999999"))
+                .isInstanceOf(FhirClientException.class)
+                .hasMessageContaining("If-Match")
+                .hasCauseInstanceOf(ResourceVersionConflictException.class);
     }
 
     @Test
@@ -1222,6 +1395,31 @@ class FhirServiceTest {
                 .setDisplay("Hypertensive disorder");
         condition.setSubject(new Reference(patientReference));
         return condition;
+    }
+
+    private static Bundle historyBundle(Bundle.BundleEntryComponent... entries) {
+        Bundle bundle = new Bundle();
+        bundle.setType(Bundle.BundleType.HISTORY);
+        bundle.setTotal(entries.length);
+        for (Bundle.BundleEntryComponent entry : entries) {
+            bundle.addEntry(entry);
+        }
+        return bundle;
+    }
+
+    private static Bundle.BundleEntryComponent historyPatientEntry(
+            String logicalId,
+            String versionId,
+            String given,
+            String method,
+            String status) {
+        Patient patient = syntheticPatient(logicalId, "History", given);
+        patient.getMeta().setVersionId(versionId);
+        Bundle.BundleEntryComponent entry = new Bundle.BundleEntryComponent();
+        entry.setResource(patient);
+        entry.getRequest().setMethod(Bundle.HTTPVerb.fromCode(method)).setUrl("Patient/" + logicalId + "/_history/" + versionId);
+        entry.getResponse().setStatus(status).setEtag("W/\"" + versionId + "\"");
+        return entry;
     }
 
     private static Bundle searchBundle(Resource... resources) {
