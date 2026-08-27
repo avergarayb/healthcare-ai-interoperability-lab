@@ -282,7 +282,7 @@ public class FhirService {
                 () -> fhirClient.loadPage()
                         .next(bundle)
                         .execute(),
-                "loading next search page");
+                "loading next Bundle page");
     }
 
     public List<Bundle> fetchAllPages(Bundle firstPage) {
@@ -634,6 +634,86 @@ public class FhirService {
                 "deleting Patient/" + logicalId);
     }
 
+    public Bundle getPatientHistory(String logicalId) {
+        requireText(logicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.history()
+                        .onInstance(new IdType("Patient", logicalId))
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "retrieving Patient/" + logicalId + " history");
+    }
+
+    public Bundle getPatientHistory(String logicalId, int pageSize) {
+        requireText(logicalId, "Patient logical ID must be provided");
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Patient history _count must be at least 1");
+        }
+        return execute(
+                () -> fhirClient.history()
+                        .onInstance(new IdType("Patient", logicalId))
+                        .returnBundle(Bundle.class)
+                        .count(pageSize)
+                        .execute(),
+                "retrieving Patient/" + logicalId + " history with _count=" + pageSize);
+    }
+
+    public Patient readPatientVersion(String logicalId, String versionId) {
+        requireText(logicalId, "Patient logical ID must be provided");
+        requireText(versionId, "Patient version ID must be provided");
+        return execute(
+                () -> fhirClient.read()
+                        .resource(Patient.class)
+                        .withIdAndVersion(logicalId, versionId)
+                        .execute(),
+                "reading Patient/" + logicalId + "/_history/" + versionId);
+    }
+
+    public String patientVersionId(Patient patient) {
+        requireResource(patient, "Patient must be provided");
+        if (!patient.hasMeta() || !patient.getMeta().hasVersionId()) {
+            throw new IllegalArgumentException("Patient meta.versionId must be provided");
+        }
+        return patient.getMeta().getVersionId();
+    }
+
+    public MethodOutcome updatePatientIfMatch(Patient patient, String versionId) {
+        requireResource(patient, "Patient must be provided");
+        String logicalId = requireLogicalId(patient, "Patient logical ID must be provided for update");
+        requireText(versionId, "Patient version ID must be provided");
+        Patient toUpdate = patient.copy();
+        toUpdate.setId(new IdType("Patient", logicalId, versionId));
+        return execute(
+                () -> fhirClient.update()
+                        .resource(toUpdate)
+                        .withAdditionalHeader("If-Match", "W/\"" + versionId + "\"")
+                        .execute(),
+                "updating Patient/" + logicalId + " with If-Match version " + versionId);
+    }
+
+    public List<String> historyVersionIds(Bundle bundle) {
+        requireResource(bundle, "Bundle must be provided");
+        return bundle.getEntry().stream()
+                .map(FhirService::historyEntryVersionId)
+                .toList();
+    }
+
+    public List<String> historyRequestMethods(Bundle bundle) {
+        requireResource(bundle, "Bundle must be provided");
+        return bundle.getEntry().stream()
+                .map(entry -> entry.hasRequest() && entry.getRequest().hasMethod()
+                        ? entry.getRequest().getMethod().toCode()
+                        : null)
+                .toList();
+    }
+
+    public List<String> historyResponseStatuses(Bundle bundle) {
+        requireResource(bundle, "Bundle must be provided");
+        return bundle.getEntry().stream()
+                .map(entry -> entry.hasResponse() ? entry.getResponse().getStatus() : null)
+                .toList();
+    }
+
     public MethodOutcome createObservation(Observation observation) {
         requireResource(observation, "Observation must be provided");
         return execute(
@@ -782,6 +862,21 @@ public class FhirService {
             throw new IllegalArgumentException("Subject reference must be provided");
         }
         return subject.getReference();
+    }
+
+    private static String historyEntryVersionId(Bundle.BundleEntryComponent entry) {
+        if (entry.hasResource()
+                && entry.getResource().hasMeta()
+                && entry.getResource().getMeta().hasVersionId()) {
+            return entry.getResource().getMeta().getVersionId();
+        }
+        if (entry.hasRequest() && entry.getRequest().hasUrl()) {
+            IdType requestId = new IdType(entry.getRequest().getUrl());
+            if (requestId.hasVersionIdPart()) {
+                return requestId.getVersionIdPart();
+            }
+        }
+        throw new IllegalArgumentException("History entry has no version ID");
     }
 
     private static void addRequestEntry(
