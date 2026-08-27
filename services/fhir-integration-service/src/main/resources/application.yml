@@ -16,5 +16,13 @@ management:
         enabled: true
 
 fhir:
-  server:
-    base-url: http://localhost:8080/fhir
+  active-server: local-hapi
+  servers:
+    local-hapi:
+      base-url: http://localhost:8080/fhir
+      fhir-version: R4
+      enabled: true
+    example-org:
+      base-url: https://example.org/fhir
+      fhir-version: R4
+      enabled: false
