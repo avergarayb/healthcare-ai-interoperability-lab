@@ -290,7 +290,9 @@ Not implemented:
 POST /Patient?identifier=https://example.org/lab/mrn|MRN-10004
 ```
 
-That is *conditional create*: create only if no match exists. Also out of scope: conditional update, conditional delete, transaction Bundles, and batch Bundles.
+That is *conditional create*: create only if no match exists. Also out of scope in the CRUD task: conditional update and conditional delete.
+
+Transaction and batch Bundles, including conditional create inside a transaction (`If-None-Exist`), are covered in [fhir-bundles-transactions.md](fhir-bundles-transactions.md).
 
 ## Error handling
 

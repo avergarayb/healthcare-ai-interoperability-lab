@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 @Service
@@ -562,6 +563,109 @@ public class FhirService {
                 "deleting Observation/" + logicalId);
     }
 
+    public Bundle executeTransaction(Bundle bundle) {
+        requireResource(bundle, "Bundle must be provided");
+        if (bundle.getType() != Bundle.BundleType.TRANSACTION) {
+            throw new IllegalArgumentException("Bundle type must be transaction");
+        }
+        return execute(
+                () -> fhirClient.transaction()
+                        .withBundle(bundle)
+                        .execute(),
+                "executing transaction Bundle");
+    }
+
+    public Bundle executeBatch(Bundle bundle) {
+        requireResource(bundle, "Bundle must be provided");
+        if (bundle.getType() != Bundle.BundleType.BATCH) {
+            throw new IllegalArgumentException("Bundle type must be batch");
+        }
+        return execute(
+                () -> fhirClient.transaction()
+                        .withBundle(bundle)
+                        .execute(),
+                "executing batch Bundle");
+    }
+
+    public Bundle patientAndObservationCreateTransaction(Patient patient, Observation observation) {
+        requireResource(patient, "Patient must be provided");
+        requireResource(observation, "Observation must be provided");
+        String patientFullUrl = "urn:uuid:" + UUID.randomUUID();
+        Patient patientEntry = patient.copy();
+        patientEntry.setIdElement(new IdType());
+        Observation observationEntry = observation.copy();
+        observationEntry.setIdElement(new IdType());
+        observationEntry.setSubject(new Reference(patientFullUrl));
+
+        Bundle bundle = new Bundle();
+        bundle.setType(Bundle.BundleType.TRANSACTION);
+        addRequestEntry(bundle, patientFullUrl, patientEntry, Bundle.HTTPVerb.POST, "Patient", null);
+        addRequestEntry(bundle, null, observationEntry, Bundle.HTTPVerb.POST, "Observation", null);
+        return bundle;
+    }
+
+    public Bundle conditionalCreatePatientTransaction(Patient patient) {
+        requireResource(patient, "Patient must be provided");
+        if (!patient.hasIdentifier()
+                || !patient.getIdentifierFirstRep().hasSystem()
+                || !patient.getIdentifierFirstRep().hasValue()) {
+            throw new IllegalArgumentException("Patient identifier system and value must be provided");
+        }
+        String ifNoneExist = "identifier="
+                + patient.getIdentifierFirstRep().getSystem()
+                + "|"
+                + patient.getIdentifierFirstRep().getValue();
+        Patient patientEntry = patient.copy();
+        patientEntry.setIdElement(new IdType());
+        Bundle bundle = new Bundle();
+        bundle.setType(Bundle.BundleType.TRANSACTION);
+        addRequestEntry(bundle, null, patientEntry, Bundle.HTTPVerb.POST, "Patient", ifNoneExist);
+        return bundle;
+    }
+
+    public Bundle patientCreateAndGetBatch(Patient patient, String existingPatientLogicalId) {
+        requireResource(patient, "Patient must be provided");
+        requireText(existingPatientLogicalId, "Existing Patient logical ID must be provided");
+        Patient patientEntry = patient.copy();
+        patientEntry.setIdElement(new IdType());
+        Bundle bundle = new Bundle();
+        bundle.setType(Bundle.BundleType.BATCH);
+        addRequestEntry(bundle, null, patientEntry, Bundle.HTTPVerb.POST, "Patient", null);
+        bundle.addEntry().getRequest()
+                .setMethod(Bundle.HTTPVerb.GET)
+                .setUrl("Patient/this-patient-does-not-exist-batch");
+        bundle.addEntry().getRequest()
+                .setMethod(Bundle.HTTPVerb.GET)
+                .setUrl("Patient/" + existingPatientLogicalId);
+        return bundle;
+    }
+
+    public List<String> entryResponseStatuses(Bundle bundle) {
+        requireResource(bundle, "Bundle must be provided");
+        return bundle.getEntry().stream()
+                .map(entry -> entry.hasResponse() ? entry.getResponse().getStatus() : null)
+                .toList();
+    }
+
+    public String entryResponseLocation(Bundle bundle, int index) {
+        requireResource(bundle, "Bundle must be provided");
+        if (index < 0 || index >= bundle.getEntry().size()) {
+            throw new IllegalArgumentException("Bundle entry index is out of range");
+        }
+        String location = bundle.getEntry().get(index).getResponse().getLocation();
+        requireText(location, "Bundle entry response location must be provided");
+        return location;
+    }
+
+    public String logicalIdFromLocation(String location) {
+        requireText(location, "Response location must be provided");
+        IdType id = new IdType(location);
+        if (!id.hasIdPart()) {
+            throw new IllegalArgumentException("Response location must contain a resource identity");
+        }
+        return id.getIdPart();
+    }
+
     public String createdLogicalId(MethodOutcome outcome) {
         if (outcome == null) {
             throw new IllegalArgumentException("MethodOutcome must be provided");
@@ -589,6 +693,24 @@ public class FhirService {
             throw new IllegalArgumentException("Subject reference must be provided");
         }
         return subject.getReference();
+    }
+
+    private static void addRequestEntry(
+            Bundle bundle,
+            String fullUrl,
+            Resource resource,
+            Bundle.HTTPVerb method,
+            String url,
+            String ifNoneExist) {
+        Bundle.BundleEntryComponent entry = bundle.addEntry();
+        if (fullUrl != null) {
+            entry.setFullUrl(fullUrl);
+        }
+        entry.setResource(resource);
+        entry.getRequest().setMethod(method).setUrl(url);
+        if (ifNoneExist != null) {
+            entry.getRequest().setIfNoneExist(ifNoneExist);
+        }
     }
 
     private <T extends Resource> List<T> extractResources(Bundle bundle, Class<T> type) {
