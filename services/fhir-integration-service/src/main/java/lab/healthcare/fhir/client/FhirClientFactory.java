@@ -14,12 +14,31 @@ public class FhirClientFactory {
     }
 
     public IGenericClient createClient(FhirContext fhirContext, FhirServerProfile profile) {
+        requireProfile(profile);
+        if (profile.authentication().requiresBearerToken()) {
+            throw new IllegalArgumentException(
+                    "FHIR server profile '" + profile.name() + "' requires an AccessTokenProvider");
+        }
+        return createClient(fhirContext, profile, AccessTokenProvider.none());
+    }
+
+    public IGenericClient createClient(
+            FhirContext fhirContext,
+            FhirServerProfile profile,
+            AccessTokenProvider tokenProvider) {
         if (fhirContext == null) {
             throw new IllegalArgumentException("FhirContext must be provided");
         }
         requireProfile(profile);
         fhirVersion(profile);
-        return fhirContext.newRestfulGenericClient(profile.baseUrl());
+        IGenericClient client = fhirContext.newRestfulGenericClient(profile.baseUrl());
+        if (profile.authentication().requiresBearerToken()) {
+            if (tokenProvider == null) {
+                throw new IllegalArgumentException("Access token provider must be provided");
+            }
+            client.registerInterceptor(new BearerAccessTokenInterceptor(tokenProvider));
+        }
+        return client;
     }
 
     FhirVersionEnum fhirVersion(FhirServerProfile profile) {

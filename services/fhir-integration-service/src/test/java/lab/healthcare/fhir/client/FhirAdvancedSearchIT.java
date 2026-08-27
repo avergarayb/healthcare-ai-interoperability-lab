@@ -96,9 +96,8 @@ class FhirAdvancedSearchIT {
 
     @Test
     void sortByBirthDateAscendingOrdersTheSeededPatients() {
-        Bundle bundle = fhirService.searchPatientsSortedByBirthDateAscending();
+        List<String> ids = allPatientIds(fhirService.searchPatientsSortedByBirthDateAscending());
 
-        List<String> ids = patientIds(bundle);
         assertThat(ids).contains("patient-001", "patient-002", "patient-003");
         assertThat(ids.indexOf("patient-002")).isLessThan(ids.indexOf("patient-001"));
         assertThat(ids.indexOf("patient-001")).isLessThan(ids.indexOf("patient-003"));
@@ -106,9 +105,8 @@ class FhirAdvancedSearchIT {
 
     @Test
     void sortByBirthDateDescendingReversesTheSeededPatients() {
-        Bundle bundle = fhirService.searchPatientsSortedByBirthDateDescending();
+        List<String> ids = allPatientIds(fhirService.searchPatientsSortedByBirthDateDescending());
 
-        List<String> ids = patientIds(bundle);
         assertThat(ids).contains("patient-001", "patient-002", "patient-003");
         assertThat(ids.indexOf("patient-003")).isLessThan(ids.indexOf("patient-001"));
         assertThat(ids.indexOf("patient-001")).isLessThan(ids.indexOf("patient-002"));
@@ -142,6 +140,12 @@ class FhirAdvancedSearchIT {
         return fhirService.extractPatients(bundle).stream()
                 .map(Patient::getIdElement)
                 .map(id -> id.getIdPart())
+                .toList();
+    }
+
+    private List<String> allPatientIds(Bundle firstPage) {
+        return fhirService.fetchAllPages(firstPage).stream()
+                .flatMap(page -> patientIds(page).stream())
                 .toList();
     }
 }

@@ -193,7 +193,7 @@ Among the seeded Patients, ascending is:
 patient-002 (1980) → patient-001 (1985) → patient-003 (1990)
 ```
 
-Descending reverses that. Integration tests check **relative order** of those three ids so leftover server data cannot flip the assertion by appearing in the same page.
+Descending reverses that. Unfiltered `_sort` still uses HAPI's default `_count` (20). Later lab seeds (`pagelab-*`, history, leftover numeric ids) can push those three ids off the first page. Integration tests walk `next` pages and then check **relative order** of the three ids in the full sorted searchset.
 
 ```java
 .sort().ascending(Patient.BIRTHDATE);
