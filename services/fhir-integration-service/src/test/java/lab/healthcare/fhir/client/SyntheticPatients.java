@@ -5,7 +5,7 @@ import org.hl7.fhir.r4.model.DateType;
 import org.hl7.fhir.r4.model.Enumerations;
 import org.hl7.fhir.r4.model.Patient;
 
-final class SyntheticPatients {
+public final class SyntheticPatients {
 
     static final String IDENTIFIER_SYSTEM = "https://example.org/lab/mrn";
 
@@ -24,7 +24,7 @@ final class SyntheticPatients {
         return patient("patient-003", "MRN-10003", "Lopez", "Maria", Enumerations.AdministrativeGender.FEMALE, "1990-02-15");
     }
 
-    static void seed(IGenericClient fhirClient) {
+    public static void seed(IGenericClient fhirClient) {
         fhirClient.update().resource(mariaGarcia()).execute();
         fhirClient.update().resource(juanGarcia()).execute();
         fhirClient.update().resource(mariaLopez()).execute();

@@ -8,7 +8,7 @@ import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Quantity;
 import org.hl7.fhir.r4.model.Reference;
 
-final class SyntheticClinicalResources {
+public final class SyntheticClinicalResources {
 
     static final String PATIENT_REFERENCE = "Patient/patient-001";
     static final String LOINC = "http://loinc.org";
@@ -48,7 +48,7 @@ final class SyntheticClinicalResources {
         return condition;
     }
 
-    static void seed(IGenericClient fhirClient) {
+    public static void seed(IGenericClient fhirClient) {
         fhirClient.update().resource(bloodPressurePanel()).execute();
         fhirClient.update().resource(hypertensiveDisorder()).execute();
     }

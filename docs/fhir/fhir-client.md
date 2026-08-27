@@ -83,22 +83,19 @@ Our local HAPI server currently reports FHIR R4 `4.0.1`.
 
 ## How the code is structured
 
+Packages are split by responsibility. See [fhir-architecture.md](fhir-architecture.md).
+
 ```text
-lab.healthcare.fhir.client
-├── FhirServersProperties      # binds fhir.active-server and fhir.servers
-├── FhirServerProfile          # name, baseUrl, fhirVersion, enabled, authentication
-├── FhirServerProfileRegistry  # selects and validates the active profile
-├── FhirClientFactory          # FhirContext + IGenericClient from a profile
-├── FhirClientConfiguration    # Spring beans
-├── OAuth2TokenClient          # Client Credentials token POST (optional)
-├── SmartConfigurationClient   # SMART well-known discovery (optional)
-├── AuthorizationCodeClient    # PKCE authorize + token exchange (optional)
-├── BearerAccessTokenInterceptor
-├── FhirService                # metadata, Patient read, Patient search, …
-└── FhirClientException        # wraps connection/server errors
+lab.healthcare.fhir
+├── client     FhirService, FhirClientFactory, FhirClientConfiguration
+├── server     FhirServerProfile, FhirServersProperties, FhirServerProfileRegistry
+├── auth       AccessToken, AccessTokenProvider, Bearer interceptor, cache
+│   └── oauth2 OAuth2TokenClient, OAuth2TokenException, token JSON parser
+├── smart      discovery, PKCE, Authorization Code, SmartTokenProvider
+└── exception  FhirClientException
 ```
 
-The package is `client`, not a second nested `fhir`, so the name describes the responsibility.
+`client` is the FHIR operation and HAPI wiring layer, not a dump of every class in the service.
 
 There is no `@RestController` for this feature. The learning goal is outbound FHIR communication, not a new inbound API.
 

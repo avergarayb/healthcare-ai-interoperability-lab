@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.client;
 
+import lab.healthcare.fhir.exception.FhirClientException;
+
 import ca.uhn.fhir.rest.client.api.IGenericClient;
 import ca.uhn.fhir.rest.server.exceptions.BaseServerResponseException;
 import ca.uhn.fhir.rest.server.exceptions.ResourceNotFoundException;

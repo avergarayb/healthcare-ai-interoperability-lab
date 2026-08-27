@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.client;
 
+import lab.healthcare.fhir.exception.FhirClientException;
+
 import ca.uhn.fhir.model.api.IQueryParameterType;
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;

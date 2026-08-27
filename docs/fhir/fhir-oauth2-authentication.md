@@ -173,6 +173,8 @@ FhirClientFactory
         FhirService   (unchanged: still only IGenericClient)
 ```
 
+Client Credentials types live in `lab.healthcare.fhir.auth` / `auth.oauth2`. See [fhir-architecture.md](fhir-architecture.md).
+
 | Class | Job |
 |---|---|
 | `OAuth2TokenClient` | `POST` token URL; map JSON; throw `OAuth2TokenException` |

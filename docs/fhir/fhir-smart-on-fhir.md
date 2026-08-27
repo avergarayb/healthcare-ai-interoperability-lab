@@ -153,7 +153,7 @@ nginx `auth_request` asks the Authorization Server about each FHIR call.
 
 ## Java
 
-Packages stay in `lab.healthcare.fhir.client` (Task 016 classes were not moved).
+SMART types live in `lab.healthcare.fhir.smart`. Generic tokens and the Bearer interceptor live in `lab.healthcare.fhir.auth`. See [fhir-architecture.md](fhir-architecture.md).
 
 ```text
 FhirService
