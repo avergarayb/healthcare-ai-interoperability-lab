@@ -354,6 +354,109 @@ class FhirServiceTest {
     }
 
     @Test
+    void getPatientEverythingReturnsSearchsetBundle() {
+        Bundle expected = searchBundle(
+                syntheticPatient("patient-001", "Garcia", "Maria"),
+                syntheticObservation("obs-001", "Patient/patient-001"),
+                syntheticCondition("condition-001", "Patient/patient-001"));
+        when(fhirClient.operation()
+                .onInstance(any(IdType.class))
+                .named("$everything")
+                .withNoParameters(Parameters.class)
+                .useHttpGet()
+                .returnResourceType(Bundle.class)
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.getPatientEverything("patient-001");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.resourceIdentities(actual)).containsExactlyInAnyOrder(
+                "Patient/patient-001",
+                "Observation/obs-001",
+                "Condition/condition-001");
+    }
+
+    @Test
+    void getPatientEverythingRequiresLogicalId() {
+        assertThatThrownBy(() -> fhirService.getPatientEverything(" "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("logical ID");
+    }
+
+    @Test
+    void getPatientEverythingDoesNotSwallowNotFound() {
+        when(fhirClient.operation()
+                .onInstance(any(IdType.class))
+                .named("$everything")
+                .withNoParameters(Parameters.class)
+                .useHttpGet()
+                .returnResourceType(Bundle.class)
+                .execute())
+                .thenThrow(new ResourceNotFoundException("Patient/missing"));
+
+        assertThatThrownBy(() -> fhirService.getPatientEverything("missing"))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void getPatientEverythingWithCountReusesNextPage() {
+        Bundle page1 = searchBundle(syntheticPatient("patient-001", "Garcia", "Maria"));
+        page1.setTotal(4);
+        page1.addLink().setRelation(Bundle.LINK_NEXT).setUrl("http://localhost:8080/fhir?_getpages=everything-2");
+        Bundle page2 = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.operation()
+                .onInstance(any(IdType.class))
+                .named("$everything")
+                .withParameter(eq(Parameters.class), eq("_count"), any())
+                .useHttpGet()
+                .returnResourceType(Bundle.class)
+                .execute())
+                .thenReturn(page1);
+        when(fhirClient.loadPage().next(page1).execute()).thenReturn(page2);
+
+        Bundle actual = fhirService.getPatientEverything("patient-001", 1);
+        Bundle next = fhirService.nextPage(actual);
+
+        assertThat(actual.getEntry()).hasSize(1);
+        assertThat(fhirService.hasNextPage(actual)).isTrue();
+        assertThat(fhirService.resourceIdentities(next)).containsExactly("Observation/obs-001");
+    }
+
+    @Test
+    void getPatientEverythingWithCountRequiresPositivePageSize() {
+        assertThatThrownBy(() -> fhirService.getPatientEverything("patient-001", 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("_count");
+    }
+
+    @Test
+    void getPatientEverythingByTypesFiltersResourceTypes() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.operation()
+                .onInstance(any(IdType.class))
+                .named("$everything")
+                .withParameter(eq(Parameters.class), eq("_type"), any())
+                .useHttpGet()
+                .returnResourceType(Bundle.class)
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.getPatientEverythingByTypes("patient-001", "Observation");
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Observation/obs-001");
+        assertThat(fhirService.resourceIdentities(actual)).doesNotContain("Patient/patient-001");
+    }
+
+    @Test
+    void getPatientEverythingByTypesRequiresType() {
+        assertThatThrownBy(() -> fhirService.getPatientEverythingByTypes("patient-001"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("_type");
+    }
+
+    @Test
     void searchObservationsByPatientIncludingSubjectDoesNotSwallowConnectionErrors() {
         when(fhirClient.search()
                 .forResource(eq(Observation.class))
