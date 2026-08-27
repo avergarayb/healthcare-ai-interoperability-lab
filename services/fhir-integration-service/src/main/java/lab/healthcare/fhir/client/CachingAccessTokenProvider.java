@@ -20,7 +20,7 @@ public class CachingAccessTokenProvider implements AccessTokenProvider {
         if (tokenClient == null) {
             throw new IllegalArgumentException("OAuth2 token client must be provided");
         }
-        if (authentication == null || !authentication.requiresBearerToken()) {
+        if (authentication == null || !authentication.isClientCredentials()) {
             throw new IllegalArgumentException("OAuth2 client credentials settings must be provided");
         }
         this.tokenClient = tokenClient;

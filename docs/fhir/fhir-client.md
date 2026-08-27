@@ -71,7 +71,7 @@ Clients are cheap and thread-safe. We keep one Spring bean because the base URL 
 
 ## Base URL configuration
 
-The server address is not hard-coded in Java. Named **server profiles** live in Spring configuration. The active profile for this lab is `local-hapi` (`authentication.type = NONE`). OAuth 2.0 Client Credentials is optional on `secured-lab`. See [fhir-server-configuration.md](fhir-server-configuration.md) and [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md).
+The server address is not hard-coded in Java. Named **server profiles** live in Spring configuration. The active profile for this lab is `local-hapi` (`authentication.type = NONE`). OAuth 2.0 Client Credentials is optional on `secured-lab`. SMART Authorization Code + PKCE is optional on `smart-lab`. See [fhir-server-configuration.md](fhir-server-configuration.md), [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md), and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md).
 
 ## CapabilityStatement
 
@@ -91,6 +91,8 @@ lab.healthcare.fhir.client
 ├── FhirClientFactory          # FhirContext + IGenericClient from a profile
 ├── FhirClientConfiguration    # Spring beans
 ├── OAuth2TokenClient          # Client Credentials token POST (optional)
+├── SmartConfigurationClient   # SMART well-known discovery (optional)
+├── AuthorizationCodeClient    # PKCE authorize + token exchange (optional)
 ├── BearerAccessTokenInterceptor
 ├── FhirService                # metadata, Patient read, Patient search, …
 └── FhirClientException        # wraps connection/server errors

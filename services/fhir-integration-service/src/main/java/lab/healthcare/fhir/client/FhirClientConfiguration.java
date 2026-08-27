@@ -38,14 +38,30 @@ public class FhirClientConfiguration {
     }
 
     @Bean
+    public SmartConfigurationClient smartConfigurationClient() {
+        return new SmartConfigurationClient();
+    }
+
+    @Bean
+    public AuthorizationCodeClient authorizationCodeClient() {
+        return new AuthorizationCodeClient();
+    }
+
+    @Bean
     public AccessTokenProvider accessTokenProvider(
             FhirServerProfile activeFhirServerProfile,
-            OAuth2TokenClient oauth2TokenClient) {
+            OAuth2TokenClient oauth2TokenClient,
+            SmartConfigurationClient smartConfigurationClient,
+            AuthorizationCodeClient authorizationCodeClient) {
         FhirAuthenticationSettings authentication = activeFhirServerProfile.authentication();
-        if (!authentication.requiresBearerToken()) {
-            return AccessTokenProvider.none();
+        if (authentication.isClientCredentials()) {
+            return new CachingAccessTokenProvider(oauth2TokenClient, authentication, Clock.systemUTC());
         }
-        return new CachingAccessTokenProvider(oauth2TokenClient, authentication, Clock.systemUTC());
+        if (authentication.isSmartAuthorizationCode()) {
+            return new SmartTokenProvider(
+                    smartConfigurationClient, authorizationCodeClient, authentication, Clock.systemUTC());
+        }
+        return AccessTokenProvider.none();
     }
 
     @Bean

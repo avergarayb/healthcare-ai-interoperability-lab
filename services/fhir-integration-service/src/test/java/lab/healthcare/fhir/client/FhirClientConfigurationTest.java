@@ -181,11 +181,38 @@ class FhirClientConfigurationTest {
                                         "R4",
                                         true,
                                         new FhirServersProperties.AuthenticationSettings(
-                                                "AUTHORIZATION_CODE", null, null, null)))));
+                                                "AUTHORIZATION_CODE", null, null, null, null, null, null, null)))));
 
         assertThatThrownBy(registry::activeProfile)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("authentication.type");
+    }
+
+    @Test
+    void registryMapsSmartSettingsWithoutClientSecret() {
+        FhirServerProfileRegistry registry = new FhirServerProfileRegistry(
+                new FhirServersProperties(
+                        "smart-lab",
+                        Map.of(
+                                "smart-lab",
+                                new FhirServersProperties.ServerSettings(
+                                        "http://localhost:8180/fhir",
+                                        "R4",
+                                        true,
+                                        new FhirServersProperties.AuthenticationSettings(
+                                                "SMART_AUTHORIZATION_CODE",
+                                                null,
+                                                "lab-smart-app",
+                                                "",
+                                                "http://localhost:8180/fhir/.well-known/smart-configuration",
+                                                "http://127.0.0.1:8081/smart/callback",
+                                                "patient/Patient.read",
+                                                "http://localhost:8180/fhir")))));
+
+        FhirServerProfile profile = registry.activeProfile();
+        assertThat(profile.authentication().type()).isEqualTo(FhirAuthenticationType.SMART_AUTHORIZATION_CODE);
+        assertThat(profile.authentication().aud()).isEqualTo("http://localhost:8180/fhir");
+        assertThat(profile.authentication().clientSecret()).isEmpty();
     }
 
     private static FhirServerProfile localHapi() {
@@ -231,7 +258,11 @@ class FhirClientConfigurationTest {
                                         "OAUTH2_CLIENT_CREDENTIALS",
                                         "http://localhost:9090/oauth/token",
                                         "lab-client",
-                                        secret))));
+                                        secret,
+                                        null,
+                                        null,
+                                        null,
+                                        null))));
     }
 
     private static FhirServersProperties securedServersEnabled(String secret) {
@@ -247,6 +278,10 @@ class FhirClientConfigurationTest {
                                         "OAUTH2_CLIENT_CREDENTIALS",
                                         "http://localhost:9090/oauth/token",
                                         "lab-client",
-                                        secret))));
+                                        secret,
+                                        null,
+                                        null,
+                                        null,
+                                        null))));
     }
 }

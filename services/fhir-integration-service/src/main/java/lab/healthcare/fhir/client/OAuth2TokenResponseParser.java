@@ -31,7 +31,12 @@ final class OAuth2TokenResponseParser {
         }
         long expiresIn = json.hasNonNull("expires_in") ? json.get("expires_in").asLong(0L) : 0L;
         Instant expiresAt = Instant.now(clock).plus(Duration.ofSeconds(Math.max(expiresIn, 0L)));
-        return new AccessToken(token, expiresAt);
+        return new AccessToken(
+                token,
+                expiresAt,
+                text(json, "refresh_token"),
+                text(json, "scope"),
+                text(json, "patient"));
     }
 
     private JsonNode readJson(String body) {

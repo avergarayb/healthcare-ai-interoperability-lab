@@ -57,7 +57,7 @@ FHIR HTTP request
 Protected FHIR gateway
 ```
 
-Authorization Code, PKCE, and SMART launch belong to a later task.
+Authorization Code, PKCE, and SMART launch context belong to [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md).
 
 HAPI ships `BearerTokenAuthInterceptor(String)` for a **fixed** token. Tokens expire (`expires_in`), so this lab uses a custom `IClientInterceptor` that asks an `AccessTokenProvider` on each request. The provider caches until expiry minus 30 seconds.
 
@@ -99,7 +99,7 @@ Observed against this lab stack:
 | `Authorization: Bearer invalid-token` | `401` same body |
 | `Authorization: Bearer lab-access-token` | `200` FHIR `Patient` (proxied to HAPI) |
 | Wrong `client_secret` on `/oauth/token` | `401` `{"error":"invalid_client"}` |
-| `grant_type` other than `client_credentials` | `400` `{"error":"unsupported_grant_type"}` |
+| `grant_type` other than `client_credentials` / `authorization_code` / `refresh_token` | `400` `{"error":"unsupported_grant_type"}` |
 | Unsecured `GET http://localhost:8080/fhir/Patient/patient-001` | still `200` (NONE) |
 
 ## Compose services
@@ -114,7 +114,7 @@ docker compose
 
 `lab-oauth` is a small Python `http.server`. It is not Keycloak, Spring Authorization Server, or Azure AD.
 
-The gateway compares `Authorization` to `Bearer lab-access-token` and strips that header before proxying so HAPI never sees it.
+The gateway asks the Authorization Server (`auth_request`) whether the Bearer token may access the FHIR path. Client Credentials still uses the synthetic value `lab-access-token` (system-style). SMART tokens carry scopes; see [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). The gateway strips `Authorization` before proxying so HAPI never sees it.
 
 ## Configuration vs connectivity
 
@@ -197,7 +197,7 @@ Expired tokens are not a FHIR error: the provider fetches a new one before the i
 
 ## OAuth 2.0 is not SMART on FHIR
 
-SMART adds OpenID Connect, launch context, clinical scopes, and often a browser. This task only proves **client credentials + Bearer** against a local gateway. Do not configure Epic/Cerner/Azure AD here.
+Client Credentials proves **application → system**. SMART adds discovery, Authorization Code, PKCE, scopes, and patient context. See [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Do not configure Epic/Cerner/Azure AD here.
 
 ## Run locally
 

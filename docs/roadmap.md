@@ -36,11 +36,11 @@ Current bootstrap belongs to this phase.
 
 Connect the integration layer to real EHR FHIR APIs without coupling the lab to a single vendor.
 
-Phase 2 starts with **named FHIR server profiles** and external configuration (`local-hapi` today). OAuth 2.0 Client Credentials is available on the optional `secured-lab` profile. SMART on FHIR is not in this step.
+Phase 2 starts with **named FHIR server profiles** and external configuration (`local-hapi` today). OAuth 2.0 Client Credentials is available on the optional `secured-lab` profile. SMART on FHIR Authorization Code + PKCE is available on the optional `smart-lab` profile.
 
 ### Phase 3 — SMART on FHIR
 
-Authorization and app launch using SMART on FHIR.
+Authorization and app launch using SMART on FHIR. This laboratory implements a **synthetic** Authorization Code + PKCE flow (`smart-lab`). Commercial EHR SMART launch is not in this step.
 
 ### Phase 4 — HL7 v2
 
@@ -88,4 +88,4 @@ Package the laboratory as a coherent demonstration of healthcare interoperabilit
 
 ## Current Position
 
-The repository is in Phase 2. `fhir-integration-service` remains a FHIR R4 **client**. Named server profiles (`fhir.active-server`) select connectivity. OAuth 2.0 Client Credentials is optional per profile (`local-hapi` stays `NONE`; `secured-lab` uses a local Authorization Server). SMART is not implemented yet. Local HAPI does not ship LOINC/SNOMED CodeSystems.
+The repository is in Phase 2–3. `fhir-integration-service` remains a FHIR R4 **client**. Named server profiles (`fhir.active-server`) select connectivity. OAuth 2.0 Client Credentials is optional (`secured-lab`). SMART Authorization Code + PKCE is optional (`smart-lab`). Neither talks to a commercial EHR. Local HAPI does not ship LOINC/SNOMED CodeSystems.

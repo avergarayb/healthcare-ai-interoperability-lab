@@ -44,6 +44,10 @@ services:
       LAB_OAUTH_CLIENT_SECRET: ${LAB_OAUTH_CLIENT_SECRET:-lab-secret}
       LAB_OAUTH_ACCESS_TOKEN: lab-access-token
       LAB_OAUTH_EXPIRES_IN: "3600"
+      LAB_SMART_CLIENT_ID: lab-smart-app
+      LAB_SMART_REDIRECT_URI: http://127.0.0.1:8081/smart/callback
+      LAB_SMART_AUD: http://localhost:8180/fhir
+      LAB_SMART_PATIENT: patient-001
     ports:
       - "9090:9090"
 
@@ -53,6 +57,7 @@ services:
     restart: unless-stopped
     depends_on:
       - hapi-fhir
+      - lab-oauth
     ports:
       - "8180:80"
     volumes:

@@ -26,7 +26,7 @@ public class OAuth2TokenClient {
     }
 
     public AccessToken fetchAccessToken(FhirAuthenticationSettings authentication) {
-        if (authentication == null || !authentication.requiresBearerToken()) {
+        if (authentication == null || !authentication.isClientCredentials()) {
             throw new IllegalArgumentException("OAuth2 client credentials settings must be provided");
         }
         String form = "grant_type=" + encode("client_credentials")
