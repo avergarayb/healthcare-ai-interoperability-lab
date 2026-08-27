@@ -27,14 +27,19 @@ import org.hl7.fhir.r4.model.Resource;
 import org.hl7.fhir.r4.model.UriType;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
 @Service
 public class FhirService {
+
+    static final int MAX_SEARCH_PAGES = 20;
 
     private final IGenericClient fhirClient;
 
@@ -215,6 +220,90 @@ public class FhirService {
                         .returnBundle(Bundle.class)
                         .execute(),
                 "searching Patient with _count=" + pageSize);
+    }
+
+    public Bundle searchPatientsByFamilyWithCount(String family, int pageSize) {
+        requireText(family, "Patient family search parameter must be provided");
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Patient _count must be at least 1");
+        }
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.FAMILY.matches().value(family))
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient by family with _count=" + pageSize);
+    }
+
+    public Bundle searchPatientsByNameWithCount(String name, int pageSize) {
+        requireText(name, "Patient name search parameter must be provided");
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Patient _count must be at least 1");
+        }
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.NAME.matches().value(name))
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient by name with _count=" + pageSize);
+    }
+
+    public boolean hasNextPage(Bundle bundle) {
+        requireResource(bundle, "Bundle must be provided");
+        return hasLink(bundle, Bundle.LINK_NEXT);
+    }
+
+    public boolean hasLink(Bundle bundle, String relation) {
+        requireResource(bundle, "Bundle must be provided");
+        requireText(relation, "Bundle link relation must be provided");
+        Bundle.BundleLinkComponent link = bundle.getLink(relation);
+        return link != null && link.hasUrl();
+    }
+
+    public String bundleLink(Bundle bundle, String relation) {
+        requireResource(bundle, "Bundle must be provided");
+        requireText(relation, "Bundle link relation must be provided");
+        if (!hasLink(bundle, relation)) {
+            throw new IllegalArgumentException("Bundle has no " + relation + " link");
+        }
+        return bundle.getLink(relation).getUrl();
+    }
+
+    public Bundle nextPage(Bundle bundle) {
+        requireResource(bundle, "Bundle must be provided");
+        if (!hasNextPage(bundle)) {
+            throw new IllegalArgumentException("Bundle has no next page link");
+        }
+        return execute(
+                () -> fhirClient.loadPage()
+                        .next(bundle)
+                        .execute(),
+                "loading next search page");
+    }
+
+    public List<Bundle> fetchAllPages(Bundle firstPage) {
+        requireResource(firstPage, "Bundle must be provided");
+        List<Bundle> pages = new ArrayList<>();
+        Set<String> seenNextUrls = new HashSet<>();
+        Bundle current = firstPage;
+        while (true) {
+            pages.add(current);
+            if (!hasNextPage(current)) {
+                return pages;
+            }
+            String nextUrl = bundleLink(current, Bundle.LINK_NEXT);
+            if (!seenNextUrls.add(nextUrl)) {
+                throw new IllegalStateException("Search pagination repeated a next URL");
+            }
+            if (pages.size() >= MAX_SEARCH_PAGES) {
+                throw new IllegalStateException("Search pagination exceeded " + MAX_SEARCH_PAGES + " pages");
+            }
+            current = nextPage(current);
+        }
     }
 
     public Bundle searchObservationsByPatientAndCode(String patientLogicalId, String code) {

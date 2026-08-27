@@ -597,6 +597,93 @@ class FhirServiceTest {
     }
 
     @Test
+    void searchPatientsByFamilyWithCountAppliesPageSize() {
+        Bundle expected = searchBundle(
+                syntheticPatient("pagelab-patient-001", "PageLab", "P001"),
+                syntheticPatient("pagelab-patient-002", "PageLab", "P002"),
+                syntheticPatient("pagelab-patient-003", "PageLab", "P003"));
+        expected.setTotal(12);
+        expected.addLink().setRelation(Bundle.LINK_SELF).setUrl("http://localhost:8080/fhir/Patient?family=PageLab&_count=3");
+        expected.addLink().setRelation(Bundle.LINK_NEXT).setUrl("http://localhost:8080/fhir?_getpages=page-2");
+        when(fhirClient.search()
+                .forResource(eq(Patient.class))
+                .where(any(ICriterion.class))
+                .count(3)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchPatientsByFamilyWithCount("PageLab", 3);
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(actual.getTotal()).isEqualTo(12);
+        assertThat(actual.getEntry()).hasSize(3);
+        assertThat(fhirService.hasNextPage(actual)).isTrue();
+        assertThat(fhirService.bundleLink(actual, Bundle.LINK_NEXT)).contains("_getpages");
+    }
+
+    @Test
+    void nextPageFollowsServerProvidedLink() {
+        Bundle page1 = searchBundle(syntheticPatient("pagination-patient-001", "Pagination", "Maria"));
+        page1.addLink().setRelation(Bundle.LINK_NEXT).setUrl("http://localhost:8080/fhir?_getpages=page-2");
+        Bundle page2 = searchBundle(syntheticPatient("pagination-patient-004", "Pagination", "P004"));
+        page2.addLink().setRelation(Bundle.LINK_SELF).setUrl("http://localhost:8080/fhir?_getpages=page-2");
+        when(fhirClient.loadPage().next(page1).execute()).thenReturn(page2);
+
+        Bundle actual = fhirService.nextPage(page1);
+
+        assertThat(fhirService.resourceIdentities(actual)).containsExactly("Patient/pagination-patient-004");
+        assertThat(fhirService.bundleLink(actual, Bundle.LINK_SELF)).contains("_getpages=page-2");
+    }
+
+    @Test
+    void nextPageRequiresNextLink() {
+        Bundle lastPage = searchBundle(syntheticPatient("pagination-patient-012", "Pagination", "P012"));
+
+        assertThatThrownBy(() -> fhirService.nextPage(lastPage))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("next");
+        assertThat(fhirService.hasNextPage(lastPage)).isFalse();
+    }
+
+    @Test
+    void fetchAllPagesWalksUntilThereIsNoNextLink() {
+        Bundle page1 = searchBundle(syntheticPatient("pagination-patient-001", "Pagination", "Maria"));
+        page1.addLink().setRelation(Bundle.LINK_NEXT).setUrl("http://localhost:8080/fhir?_getpages=page-2");
+        Bundle page2 = searchBundle(syntheticPatient("pagination-patient-004", "Pagination", "P004"));
+        when(fhirClient.loadPage().next(page1).execute()).thenReturn(page2);
+
+        List<Bundle> pages = fhirService.fetchAllPages(page1);
+
+        assertThat(pages).hasSize(2);
+        assertThat(fhirService.resourceIdentities(pages.get(0))).containsExactly("Patient/pagination-patient-001");
+        assertThat(fhirService.resourceIdentities(pages.get(1))).containsExactly("Patient/pagination-patient-004");
+    }
+
+    @Test
+    void fetchAllPagesRejectsRepeatedNextUrl() {
+        Bundle looping = searchBundle(syntheticPatient("pagination-patient-001", "Pagination", "Maria"));
+        looping.addLink().setRelation(Bundle.LINK_NEXT).setUrl("http://localhost:8080/fhir?_getpages=loop");
+        when(fhirClient.loadPage().next(looping).execute()).thenReturn(looping);
+
+        assertThatThrownBy(() -> fhirService.fetchAllPages(looping))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("repeated");
+    }
+
+    @Test
+    void nextPageDoesNotSwallowConnectionErrors() {
+        Bundle page1 = searchBundle(syntheticPatient("pagination-patient-001", "Pagination", "Maria"));
+        page1.addLink().setRelation(Bundle.LINK_NEXT).setUrl("http://localhost:8080/fhir?_getpages=page-2");
+        when(fhirClient.loadPage().next(page1).execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.nextPage(page1))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @Test
     void searchObservationsByPatientAndCodeSortedByDateReturnsMatchingBundle() {
         Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
         when(fhirClient.search()
