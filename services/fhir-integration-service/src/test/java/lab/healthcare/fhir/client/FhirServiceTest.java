@@ -948,6 +948,93 @@ class FhirServiceTest {
     }
 
     @Test
+    void patientAndObservationCreateTransactionUsesTemporaryPatientReference() {
+        Patient patient = syntheticPatient(null, "Vega", "Lucia");
+        Observation observation = syntheticObservation(null, "Patient/ignored");
+
+        Bundle bundle = fhirService.patientAndObservationCreateTransaction(patient, observation);
+
+        assertThat(bundle.getType()).isEqualTo(Bundle.BundleType.TRANSACTION);
+        assertThat(bundle.getEntry()).hasSize(2);
+        assertThat(bundle.getEntry().get(0).getRequest().getMethod()).isEqualTo(Bundle.HTTPVerb.POST);
+        assertThat(bundle.getEntry().get(0).getRequest().getUrl()).isEqualTo("Patient");
+        assertThat(bundle.getEntry().get(0).getResource()).isInstanceOf(Patient.class);
+        assertThat(bundle.getEntry().get(0).getFullUrl()).startsWith("urn:uuid:");
+        assertThat(bundle.getEntry().get(1).getRequest().getMethod()).isEqualTo(Bundle.HTTPVerb.POST);
+        assertThat(bundle.getEntry().get(1).getRequest().getUrl()).isEqualTo("Observation");
+        Observation linked = (Observation) bundle.getEntry().get(1).getResource();
+        assertThat(linked.getSubject().getReference()).isEqualTo(bundle.getEntry().get(0).getFullUrl());
+    }
+
+    @Test
+    void patientCreateAndGetBatchUsesIndependentRequests() {
+        Patient patient = syntheticPatient(null, "Batch", "Nuria");
+
+        Bundle bundle = fhirService.patientCreateAndGetBatch(patient, "patient-001");
+
+        assertThat(bundle.getType()).isEqualTo(Bundle.BundleType.BATCH);
+        assertThat(bundle.getEntry()).hasSize(3);
+        assertThat(bundle.getEntry().get(0).getRequest().getMethod()).isEqualTo(Bundle.HTTPVerb.POST);
+        assertThat(bundle.getEntry().get(0).getRequest().getUrl()).isEqualTo("Patient");
+        assertThat(bundle.getEntry().get(1).getRequest().getMethod()).isEqualTo(Bundle.HTTPVerb.GET);
+        assertThat(bundle.getEntry().get(1).getRequest().getUrl()).isEqualTo("Patient/this-patient-does-not-exist-batch");
+        assertThat(bundle.getEntry().get(2).getRequest().getMethod()).isEqualTo(Bundle.HTTPVerb.GET);
+        assertThat(bundle.getEntry().get(2).getRequest().getUrl()).isEqualTo("Patient/patient-001");
+    }
+
+    @Test
+    void conditionalCreatePatientTransactionSetsIfNoneExist() {
+        Patient patient = syntheticPatient(null, "Garcia", "Maria");
+        patient.addIdentifier().setSystem("https://example.org/lab/mrn").setValue("MRN-10001");
+
+        Bundle bundle = fhirService.conditionalCreatePatientTransaction(patient);
+
+        assertThat(bundle.getType()).isEqualTo(Bundle.BundleType.TRANSACTION);
+        assertThat(bundle.getEntry()).hasSize(1);
+        assertThat(bundle.getEntry().get(0).getRequest().getMethod()).isEqualTo(Bundle.HTTPVerb.POST);
+        assertThat(bundle.getEntry().get(0).getRequest().getUrl()).isEqualTo("Patient");
+        assertThat(bundle.getEntry().get(0).getRequest().getIfNoneExist())
+                .isEqualTo("identifier=https://example.org/lab/mrn|MRN-10001");
+    }
+
+    @Test
+    void executeTransactionSendsBundleAndPreservesResponseEntries() {
+        Bundle request = fhirService.patientAndObservationCreateTransaction(
+                syntheticPatient(null, "Vega", "Lucia"),
+                syntheticObservation(null, "Patient/ignored"));
+        Bundle expected = transactionResponse("201 Created", "Patient/42/_history/1");
+        when(fhirClient.transaction().withBundle(any(Bundle.class)).execute()).thenReturn(expected);
+
+        Bundle actual = fhirService.executeTransaction(request);
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.TRANSACTIONRESPONSE);
+        assertThat(fhirService.entryResponseStatuses(actual)).containsExactly("201 Created");
+        assertThat(fhirService.logicalIdFromLocation(fhirService.entryResponseLocation(actual, 0))).isEqualTo("42");
+    }
+
+    @Test
+    void executeBatchRequiresBatchType() {
+        Bundle transaction = new Bundle();
+        transaction.setType(Bundle.BundleType.TRANSACTION);
+
+        assertThatThrownBy(() -> fhirService.executeBatch(transaction))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("batch");
+    }
+
+    @Test
+    void executeTransactionDoesNotSwallowConnectionErrors() {
+        Bundle request = new Bundle();
+        request.setType(Bundle.BundleType.TRANSACTION);
+        when(fhirClient.transaction().withBundle(any(Bundle.class)).execute())
+                .thenThrow(new FhirClientConnectionException("connection refused"));
+
+        assertThatThrownBy(() -> fhirService.executeTransaction(request))
+                .isInstanceOf(FhirClientException.class)
+                .hasCauseInstanceOf(FhirClientConnectionException.class);
+    }
+
+    @Test
     void primaryCodingReadsSystemCodeAndDisplay() {
         Observation observation = syntheticObservation("obs-001", "Patient/patient-001");
 
@@ -1002,6 +1089,13 @@ class FhirServiceTest {
         MethodOutcome outcome = new MethodOutcome();
         outcome.setOperationOutcome(operationOutcome);
         return outcome;
+    }
+
+    private static Bundle transactionResponse(String status, String location) {
+        Bundle bundle = new Bundle();
+        bundle.setType(Bundle.BundleType.TRANSACTIONRESPONSE);
+        bundle.addEntry().getResponse().setStatus(status).setLocation(location);
+        return bundle;
     }
 
     private static MethodOutcome writeOutcome(String resourceType, String logicalId, boolean created) {
