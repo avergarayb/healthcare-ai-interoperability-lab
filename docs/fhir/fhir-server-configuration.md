@@ -12,6 +12,8 @@ There is still no SMART, REST controller, or secret store. OAuth 2.0 Client Cred
 | FHIR **client** | `fhir-integration-service`. It calls the server over HTTP. |
 | **Server profile** | Named connectivity settings (URL, FHIR release, enabled). Not a StructureDefinition profile. |
 
+Named profiles live in `lab.healthcare.fhir.server`. `FhirService` stays in `client`. See [fhir-architecture.md](fhir-architecture.md).
+
 `FhirService` speaks FHIR operations (`read`, `search`, `$everything`, …). It must not own the server URL.
 
 ## Why the URL is not in Java

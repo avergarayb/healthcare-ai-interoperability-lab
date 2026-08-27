@@ -88,4 +88,4 @@ Package the laboratory as a coherent demonstration of healthcare interoperabilit
 
 ## Current Position
 
-The repository is in Phase 2–3. `fhir-integration-service` remains a FHIR R4 **client**. Named server profiles (`fhir.active-server`) select connectivity. OAuth 2.0 Client Credentials is optional (`secured-lab`). SMART Authorization Code + PKCE is optional (`smart-lab`). Neither talks to a commercial EHR. Local HAPI does not ship LOINC/SNOMED CodeSystems.
+The repository is in Phase 2–3. `fhir-integration-service` remains a FHIR R4 **client**. Named server profiles (`fhir.active-server`) select connectivity. OAuth 2.0 Client Credentials is optional (`secured-lab`). SMART Authorization Code + PKCE is optional (`smart-lab`). Java packages are split by responsibility (`client`, `server`, `auth`, `auth.oauth2`, `smart`, `exception`); see [`docs/fhir/fhir-architecture.md`](fhir/fhir-architecture.md). Neither talks to a commercial EHR. Local HAPI does not ship LOINC/SNOMED CodeSystems.

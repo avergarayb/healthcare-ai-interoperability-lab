@@ -1,5 +1,9 @@
 package lab.healthcare.fhir.client;
 
+import lab.healthcare.fhir.auth.AccessTokenProvider;
+import lab.healthcare.fhir.auth.BearerAccessTokenInterceptor;
+import lab.healthcare.fhir.server.FhirServerProfile;
+
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.context.FhirVersionEnum;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
