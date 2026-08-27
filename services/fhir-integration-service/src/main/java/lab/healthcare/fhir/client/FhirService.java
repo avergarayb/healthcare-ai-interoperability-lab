@@ -18,12 +18,14 @@ import org.hl7.fhir.r4.model.CodeSystem;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.IdType;
+import org.hl7.fhir.r4.model.IntegerType;
 import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.OperationOutcome;
 import org.hl7.fhir.r4.model.Parameters;
 import org.hl7.fhir.r4.model.Patient;
 import org.hl7.fhir.r4.model.Reference;
 import org.hl7.fhir.r4.model.Resource;
+import org.hl7.fhir.r4.model.StringType;
 import org.hl7.fhir.r4.model.UriType;
 import org.springframework.stereotype.Service;
 
@@ -604,6 +606,55 @@ public class FhirService {
                         .returnBundle(Bundle.class)
                         .execute(),
                 "searching Patient with _revinclude Observation:subject and Condition:subject");
+    }
+
+    public Bundle getPatientEverything(String logicalId) {
+        requireText(logicalId, "Patient logical ID must be provided");
+        return execute(
+                () -> fhirClient.operation()
+                        .onInstance(new IdType("Patient", logicalId))
+                        .named("$everything")
+                        .withNoParameters(Parameters.class)
+                        .useHttpGet()
+                        .returnResourceType(Bundle.class)
+                        .execute(),
+                "retrieving Patient/" + logicalId + " $everything");
+    }
+
+    public Bundle getPatientEverything(String logicalId, int pageSize) {
+        requireText(logicalId, "Patient logical ID must be provided");
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Patient $everything _count must be at least 1");
+        }
+        return execute(
+                () -> fhirClient.operation()
+                        .onInstance(new IdType("Patient", logicalId))
+                        .named("$everything")
+                        .withParameter(Parameters.class, "_count", new IntegerType(pageSize))
+                        .useHttpGet()
+                        .returnResourceType(Bundle.class)
+                        .execute(),
+                "retrieving Patient/" + logicalId + " $everything with _count=" + pageSize);
+    }
+
+    public Bundle getPatientEverythingByTypes(String logicalId, String... resourceTypes) {
+        requireText(logicalId, "Patient logical ID must be provided");
+        if (resourceTypes == null || resourceTypes.length == 0) {
+            throw new IllegalArgumentException("Patient $everything _type must be provided");
+        }
+        for (String resourceType : resourceTypes) {
+            requireText(resourceType, "Patient $everything _type must be provided");
+        }
+        String typeList = String.join(",", resourceTypes);
+        return execute(
+                () -> fhirClient.operation()
+                        .onInstance(new IdType("Patient", logicalId))
+                        .named("$everything")
+                        .withParameter(Parameters.class, "_type", new StringType(typeList))
+                        .useHttpGet()
+                        .returnResourceType(Bundle.class)
+                        .execute(),
+                "retrieving Patient/" + logicalId + " $everything with _type=" + typeList);
     }
 
     public MethodOutcome createPatient(Patient patient) {

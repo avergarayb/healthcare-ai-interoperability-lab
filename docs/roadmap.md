@@ -86,4 +86,4 @@ Package the laboratory as a coherent demonstration of healthcare interoperabilit
 
 ## Current Position
 
-The repository is in Phase 1. `fhir-integration-service` can search, write, chain, `_has`, call `$validate-code`, call `$validate`, send Bundle transaction/batch interactions, page `searchset` Bundles, and read Resource history/`_history` against local HAPI FHIR. Local HAPI does not ship LOINC/SNOMED CodeSystems.
+The repository is in Phase 1. `fhir-integration-service` can search, write, chain, `_has`, call `$validate-code`, call `$validate`, send Bundle transaction/batch interactions, page `searchset` Bundles, read Resource history/`_history`, and call Patient `$everything` against local HAPI FHIR. Local HAPI does not ship LOINC/SNOMED CodeSystems.
