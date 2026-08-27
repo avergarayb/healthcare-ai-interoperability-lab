@@ -71,7 +71,7 @@ Clients are cheap and thread-safe. We keep one Spring bean because the base URL 
 
 ## Base URL configuration
 
-The server address is not hard-coded in Java. Named **server profiles** live in Spring configuration. The active profile for this lab is `local-hapi`. See [fhir-server-configuration.md](fhir-server-configuration.md).
+The server address is not hard-coded in Java. Named **server profiles** live in Spring configuration. The active profile for this lab is `local-hapi` (`authentication.type = NONE`). OAuth 2.0 Client Credentials is optional on `secured-lab`. See [fhir-server-configuration.md](fhir-server-configuration.md) and [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md).
 
 ## CapabilityStatement
 
@@ -86,10 +86,12 @@ Our local HAPI server currently reports FHIR R4 `4.0.1`.
 ```text
 lab.healthcare.fhir.client
 ├── FhirServersProperties      # binds fhir.active-server and fhir.servers
-├── FhirServerProfile          # name, baseUrl, fhirVersion, enabled
+├── FhirServerProfile          # name, baseUrl, fhirVersion, enabled, authentication
 ├── FhirServerProfileRegistry  # selects and validates the active profile
 ├── FhirClientFactory          # FhirContext + IGenericClient from a profile
 ├── FhirClientConfiguration    # Spring beans
+├── OAuth2TokenClient          # Client Credentials token POST (optional)
+├── BearerAccessTokenInterceptor
 ├── FhirService                # metadata, Patient read, Patient search, …
 └── FhirClientException        # wraps connection/server errors
 ```

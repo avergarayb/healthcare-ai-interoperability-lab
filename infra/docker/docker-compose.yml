@@ -34,5 +34,29 @@ services:
       HIBERNATE_DIALECT: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect
       SPRING_JPA_PROPERTIES_HIBERNATE_SEARCH_ENABLED: "false"
 
+  lab-oauth:
+    build:
+      context: ./oauth
+    container_name: lab-oauth
+    restart: unless-stopped
+    environment:
+      LAB_OAUTH_CLIENT_ID: lab-client
+      LAB_OAUTH_CLIENT_SECRET: ${LAB_OAUTH_CLIENT_SECRET:-lab-secret}
+      LAB_OAUTH_ACCESS_TOKEN: lab-access-token
+      LAB_OAUTH_EXPIRES_IN: "3600"
+    ports:
+      - "9090:9090"
+
+  fhir-gateway:
+    image: nginx:1.27-alpine
+    container_name: fhir-gateway
+    restart: unless-stopped
+    depends_on:
+      - hapi-fhir
+    ports:
+      - "8180:80"
+    volumes:
+      - ./fhir-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+
 volumes:
   hapi-fhir-postgres-data:

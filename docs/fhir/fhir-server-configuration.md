@@ -2,7 +2,7 @@
 
 This note starts Phase 2: the Java client can describe **more than one** FHIR server in configuration, and pick one without changing `FhirService`. Read it after [fhir-client.md](fhir-client.md).
 
-There is still no OAuth, SMART, REST controller, or secret store.
+There is still no SMART, REST controller, or secret store. OAuth 2.0 Client Credentials is documented in [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md).
 
 ## Server vs client
 
@@ -45,15 +45,11 @@ Profile
  +-- baseUrl      http://localhost:8080/fhir
  +-- fhirVersion  R4
  +-- enabled      true
+ +-- authentication
+       +-- type   NONE
 ```
 
-Not included (later security tasks):
-
-```text
-clientId, clientSecret, tokenUrl, authorizationUrl
-```
-
-Configuration is connectivity. Authentication is a different concern.
+OAuth fields (`tokenUrl`, `clientId`, client secret via environment) belong to a **different** profile (`secured-lab`). See [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md).
 
 ## External configuration
 
@@ -159,11 +155,12 @@ That response is **server** metadata. The **client** only chooses which base URL
 
 ## What this task does not do
 
-- OAuth 2.0, SMART, JWT, client credentials
-- Secrets in YAML
+- OAuth 2.0 Client Credentials is implemented for `secured-lab`; `local-hapi` stays `NONE`
+- SMART, JWT login, client credentials against a real EHR
+- Secrets committed in YAML
 - Multi-tenant routing
 - Persisting profiles in a database
 - `@RestController` / business DTOs
 - FHIR R5
 
-Next planned lab tasks are authentication, then SMART on FHIR. Not implemented here.
+Next planned lab task is SMART on FHIR. Not implemented here.

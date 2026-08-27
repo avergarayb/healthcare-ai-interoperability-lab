@@ -28,7 +28,7 @@ class FhirClientConfigurationTest {
         FhirServerProfile profile = localHapi();
         FhirContext fhirContext = configuration.fhirContext(factory, profile);
 
-        IGenericClient client = configuration.fhirClient(factory, fhirContext, profile);
+        IGenericClient client = configuration.fhirClient(factory, fhirContext, profile, AccessTokenProvider.none());
 
         assertThat(client.getServerBase()).isEqualTo("http://localhost:8080/fhir");
     }
@@ -82,7 +82,7 @@ class FhirClientConfigurationTest {
         FhirServerProfileRegistry registry = new FhirServerProfileRegistry(
                 new FhirServersProperties(
                         "local-hapi",
-                        Map.of("local-hapi", new FhirServersProperties.ServerSettings(" ", "R4", true))));
+                        Map.of("local-hapi", new FhirServersProperties.ServerSettings(" ", "R4", true, null))));
 
         assertThatThrownBy(registry::activeProfile)
                 .isInstanceOf(IllegalStateException.class)
@@ -95,7 +95,7 @@ class FhirClientConfigurationTest {
                 new FhirServersProperties(
                         "local-hapi",
                         Map.of("local-hapi", new FhirServersProperties.ServerSettings(
-                                "http://localhost:8080/fhir", " ", true))));
+                                "http://localhost:8080/fhir", " ", true, null))));
 
         assertThatThrownBy(registry::activeProfile)
                 .isInstanceOf(IllegalStateException.class)
@@ -128,12 +128,72 @@ class FhirClientConfigurationTest {
                 .hasMessageContaining("unsupported fhir-version");
     }
 
+    @Test
+    void factoryRejectsOauthProfileWithoutTokenProvider() {
+        FhirServerProfile secured = securedLab();
+
+        assertThatThrownBy(() -> factory.createClient(factory.createContext(secured), secured))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("AccessTokenProvider");
+    }
+
+    @Test
+    void factoryRegistersBearerInterceptorOnlyForOauthProfiles() {
+        FhirContext noneContext = factory.createContext(localHapi());
+        IGenericClient noneClient = factory.createClient(noneContext, localHapi(), AccessTokenProvider.none());
+        FhirServerProfile secured = securedLab();
+        IGenericClient oauthClient = factory.createClient(
+                factory.createContext(secured),
+                secured,
+                () -> "lab-access-token");
+
+        assertThat(noneClient.getInterceptorService().getAllRegisteredInterceptors())
+                .noneMatch(interceptor -> interceptor instanceof BearerAccessTokenInterceptor);
+        assertThat(oauthClient.getInterceptorService().getAllRegisteredInterceptors())
+                .anyMatch(interceptor -> interceptor instanceof BearerAccessTokenInterceptor);
+    }
+
+    @Test
+    void registryMapsOauthSettingsAndRejectsMissingSecretOnActiveProfile() {
+        FhirServerProfileRegistry registry = new FhirServerProfileRegistry(securedServers(""));
+
+        FhirServerProfile disabled = registry.profile("secured-lab");
+        assertThat(disabled.enabled()).isFalse();
+        assertThat(disabled.authentication().type()).isEqualTo(FhirAuthenticationType.OAUTH2_CLIENT_CREDENTIALS);
+        assertThat(disabled.authentication().tokenUrl()).isEqualTo("http://localhost:9090/oauth/token");
+        assertThat(disabled.authentication().clientId()).isEqualTo("lab-client");
+
+        FhirServerProfileRegistry enabledWithoutSecret = new FhirServerProfileRegistry(securedServersEnabled(""));
+        assertThatThrownBy(enabledWithoutSecret::activeProfile)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("client-secret");
+    }
+
+    @Test
+    void registryRejectsUnsupportedAuthenticationType() {
+        FhirServerProfileRegistry registry = new FhirServerProfileRegistry(
+                new FhirServersProperties(
+                        "local-hapi",
+                        Map.of(
+                                "local-hapi",
+                                new FhirServersProperties.ServerSettings(
+                                        "http://localhost:8080/fhir",
+                                        "R4",
+                                        true,
+                                        new FhirServersProperties.AuthenticationSettings(
+                                                "AUTHORIZATION_CODE", null, null, null)))));
+
+        assertThatThrownBy(registry::activeProfile)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("authentication.type");
+    }
+
     private static FhirServerProfile localHapi() {
         return new FhirServerProfile("local-hapi", "http://localhost:8080/fhir", "R4", true);
     }
 
     private static FhirServersProperties.ServerSettings localSettings() {
-        return new FhirServersProperties.ServerSettings("http://localhost:8080/fhir", "R4", true);
+        return new FhirServersProperties.ServerSettings("http://localhost:8080/fhir", "R4", true, null);
     }
 
     private static FhirServersProperties twoServers() {
@@ -142,6 +202,51 @@ class FhirClientConfigurationTest {
                 Map.of(
                         "local-hapi", localSettings(),
                         "example-org", new FhirServersProperties.ServerSettings(
-                                "https://example.org/fhir", "R4", false)));
+                                "https://example.org/fhir", "R4", false, null)));
+    }
+
+    private static FhirServerProfile securedLab() {
+        return new FhirServerProfile(
+                "secured-lab",
+                "http://localhost:8180/fhir",
+                "R4",
+                true,
+                new FhirAuthenticationSettings(
+                        FhirAuthenticationType.OAUTH2_CLIENT_CREDENTIALS,
+                        "http://localhost:9090/oauth/token",
+                        "lab-client",
+                        "lab-secret"));
+    }
+
+    private static FhirServersProperties securedServers(String secret) {
+        return new FhirServersProperties(
+                "local-hapi",
+                Map.of(
+                        "local-hapi", localSettings(),
+                        "secured-lab", new FhirServersProperties.ServerSettings(
+                                "http://localhost:8180/fhir",
+                                "R4",
+                                false,
+                                new FhirServersProperties.AuthenticationSettings(
+                                        "OAUTH2_CLIENT_CREDENTIALS",
+                                        "http://localhost:9090/oauth/token",
+                                        "lab-client",
+                                        secret))));
+    }
+
+    private static FhirServersProperties securedServersEnabled(String secret) {
+        return new FhirServersProperties(
+                "secured-lab",
+                Map.of(
+                        "secured-lab",
+                        new FhirServersProperties.ServerSettings(
+                                "http://localhost:8180/fhir",
+                                "R4",
+                                true,
+                                new FhirServersProperties.AuthenticationSettings(
+                                        "OAUTH2_CLIENT_CREDENTIALS",
+                                        "http://localhost:9090/oauth/token",
+                                        "lab-client",
+                                        secret))));
     }
 }

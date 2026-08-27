@@ -22,7 +22,20 @@ fhir:
       base-url: http://localhost:8080/fhir
       fhir-version: R4
       enabled: true
+      authentication:
+        type: NONE
     example-org:
       base-url: https://example.org/fhir
       fhir-version: R4
       enabled: false
+      authentication:
+        type: NONE
+    secured-lab:
+      base-url: http://localhost:8180/fhir
+      fhir-version: R4
+      enabled: false
+      authentication:
+        type: OAUTH2_CLIENT_CREDENTIALS
+        token-url: http://localhost:9090/oauth/token
+        client-id: lab-client
+        client-secret: ${FHIR_SECURED_LAB_CLIENT_SECRET:}

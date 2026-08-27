@@ -11,6 +11,13 @@ public record FhirServersProperties(String activeServer, Map<String, ServerSetti
         servers = servers == null ? Map.of() : Map.copyOf(servers);
     }
 
-    public record ServerSettings(String baseUrl, String fhirVersion, Boolean enabled) {
+    public record ServerSettings(
+            String baseUrl,
+            String fhirVersion,
+            Boolean enabled,
+            AuthenticationSettings authentication) {
+    }
+
+    public record AuthenticationSettings(String type, String tokenUrl, String clientId, String clientSecret) {
     }
 }

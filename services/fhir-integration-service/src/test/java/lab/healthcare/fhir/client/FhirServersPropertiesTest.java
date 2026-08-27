@@ -30,12 +30,17 @@ class FhirServersPropertiesTest {
     @Test
     void applicationYamlBindsLocalHapiAsActiveProfile() {
         assertThat(properties.activeServer()).isEqualTo("local-hapi");
-        assertThat(properties.servers()).containsKeys("local-hapi", "example-org");
+        assertThat(properties.servers()).containsKeys("local-hapi", "example-org", "secured-lab");
         assertThat(activeFhirServerProfile.name()).isEqualTo("local-hapi");
         assertThat(activeFhirServerProfile.baseUrl()).isEqualTo("http://localhost:8080/fhir");
         assertThat(activeFhirServerProfile.fhirVersion()).isEqualTo("R4");
         assertThat(activeFhirServerProfile.enabled()).isTrue();
+        assertThat(activeFhirServerProfile.authentication().type()).isEqualTo(FhirAuthenticationType.NONE);
         assertThat(registry.profile("example-org").enabled()).isFalse();
+        assertThat(registry.profile("secured-lab").enabled()).isFalse();
+        assertThat(registry.profile("secured-lab").baseUrl()).isEqualTo("http://localhost:8180/fhir");
+        assertThat(registry.profile("secured-lab").authentication().type())
+                .isEqualTo(FhirAuthenticationType.OAUTH2_CLIENT_CREDENTIALS);
         assertThat(fhirContext.getVersion().getVersion()).isEqualTo(FhirVersionEnum.R4);
         assertThat(fhirClient.getServerBase()).isEqualTo("http://localhost:8080/fhir");
     }

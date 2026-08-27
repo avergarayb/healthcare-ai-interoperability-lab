@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Clock;
+
 @Configuration
 @EnableConfigurationProperties(FhirServersProperties.class)
 public class FhirClientConfiguration {
@@ -31,10 +33,27 @@ public class FhirClientConfiguration {
     }
 
     @Bean
+    public OAuth2TokenClient oauth2TokenClient() {
+        return new OAuth2TokenClient();
+    }
+
+    @Bean
+    public AccessTokenProvider accessTokenProvider(
+            FhirServerProfile activeFhirServerProfile,
+            OAuth2TokenClient oauth2TokenClient) {
+        FhirAuthenticationSettings authentication = activeFhirServerProfile.authentication();
+        if (!authentication.requiresBearerToken()) {
+            return AccessTokenProvider.none();
+        }
+        return new CachingAccessTokenProvider(oauth2TokenClient, authentication, Clock.systemUTC());
+    }
+
+    @Bean
     public IGenericClient fhirClient(
             FhirClientFactory factory,
             FhirContext fhirContext,
-            FhirServerProfile activeFhirServerProfile) {
-        return factory.createClient(fhirContext, activeFhirServerProfile);
+            FhirServerProfile activeFhirServerProfile,
+            AccessTokenProvider accessTokenProvider) {
+        return factory.createClient(fhirContext, activeFhirServerProfile, accessTokenProvider);
     }
 }
