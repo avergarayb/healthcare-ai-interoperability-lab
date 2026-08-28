@@ -92,6 +92,7 @@ lab.healthcare.fhir
 ├── auth       AccessToken, AccessTokenProvider, Bearer interceptor, cache
 │   └── oauth2 OAuth2TokenClient, OAuth2TokenException, token JSON parser
 ├── smart      discovery, PKCE, Authorization Code, SmartTokenProvider
+├── mapping    JSON → Patient / Observation
 └── exception  FhirClientException
 ```
 
