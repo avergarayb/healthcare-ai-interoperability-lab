@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.observability;
 
+import lab.healthcare.fhir.exception.FhirErrorCategory;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -47,12 +49,12 @@ class FhirAuditEventTest {
                 FhirAuditOutcome.FAILURE,
                 null,
                 5,
-                FhirAuditError.DESTINATION_NOT_FOUND);
+                FhirErrorCategory.VALIDATION_ERROR);
 
         String line = event.toLogLine();
 
         assertThat(line).contains("outcome=FAILURE");
-        assertThat(line).contains("error=DESTINATION_NOT_FOUND");
+        assertThat(line).contains("error=VALIDATION_ERROR");
         assertThat(line).contains("destination=does-not-exist");
         assertThat(line).doesNotContain("access_token");
         assertThat(line).doesNotContain("{");

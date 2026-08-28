@@ -95,7 +95,7 @@ lab.healthcare.fhir
 ├── mapping    JSON → Patient / Observation
 ├── routing    destination profile → FHIR client
 ├── observability  correlation ID + FHIR_AUDIT line + in-memory metrics
-└── exception  FhirClientException
+└── exception  FhirClientException + bounded FhirErrorCategory
 ```
 
 `client` is the FHIR operation and HAPI wiring layer, not a dump of every class in the service.
@@ -104,12 +104,13 @@ There is no `@RestController` for this feature. The learning goal is outbound FH
 
 ## Error handling
 
-`FhirService` does not swallow failures.
+`FhirService` does not swallow failures. They become `FhirClientException` with:
 
-- Connection problems become `FhirClientException` with a `FhirClientConnectionException` cause.
-- HTTP/FHIR server errors become `FhirClientException` with a `BaseServerResponseException` cause.
+- a bounded `FhirErrorCategory` (`NOT_FOUND`, `CONNECTION_ERROR`, `TIMEOUT`, `SERVER_ERROR`, …);
+- canned safe `getMessage()` text;
+- the original HAPI / OAuth / network exception as `getCause()`.
 
-There is no global exception handler yet. That can wait until we expose HTTP APIs.
+See [fhir-error-handling.md](fhir-error-handling.md). There is no retry and no global HTTP exception handler yet.
 
 ## Run the local FHIR server
 

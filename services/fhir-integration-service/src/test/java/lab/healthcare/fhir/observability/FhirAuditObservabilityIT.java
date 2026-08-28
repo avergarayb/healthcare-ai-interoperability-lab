@@ -1,6 +1,7 @@
 package lab.healthcare.fhir.observability;
 
 import lab.healthcare.fhir.client.SyntheticPatients;
+import lab.healthcare.fhir.exception.FhirErrorCategory;
 import lab.healthcare.fhir.routing.RoutingException;
 import lab.healthcare.fhir.routing.RoutingRequest;
 import lab.healthcare.fhir.routing.RoutingService;
@@ -64,10 +65,10 @@ class FhirAuditObservabilityIT {
 
         FhirAuditEvent event = event("audit-failure-021");
         assertThat(event.outcome()).isEqualTo(FhirAuditOutcome.FAILURE);
-        assertThat(event.error()).isEqualTo(FhirAuditError.DESTINATION_NOT_FOUND);
+        assertThat(event.error()).isEqualTo(FhirErrorCategory.VALIDATION_ERROR);
         assertThat(event.context().destination()).isEqualTo("does-not-exist");
         assertThat(event.context().resourceId()).isEqualTo("patient-001");
-        assertThat(event.toLogLine()).contains("error=DESTINATION_NOT_FOUND");
+        assertThat(event.toLogLine()).contains("error=VALIDATION_ERROR");
         assertThat(event.toLogLine()).doesNotContain("access_token");
     }
 

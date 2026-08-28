@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.observability;
 
+import lab.healthcare.fhir.exception.FhirErrorCategory;
+
 import java.time.Instant;
 import java.util.Locale;
 import java.util.StringJoiner;
@@ -10,7 +12,7 @@ public record FhirAuditEvent(
         FhirAuditOutcome outcome,
         Integer status,
         long durationMs,
-        FhirAuditError error) {
+        FhirErrorCategory error) {
 
     public FhirAuditEvent {
         if (timestamp == null) {

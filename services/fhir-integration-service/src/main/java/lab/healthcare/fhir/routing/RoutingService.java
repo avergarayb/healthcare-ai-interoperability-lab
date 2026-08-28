@@ -5,7 +5,9 @@ import lab.healthcare.fhir.client.FhirAccessTokenProviders;
 import lab.healthcare.fhir.client.FhirClientFactory;
 import lab.healthcare.fhir.client.FhirService;
 import lab.healthcare.fhir.exception.FhirClientException;
-import lab.healthcare.fhir.observability.FhirAuditError;
+import lab.healthcare.fhir.exception.FhirErrorCategory;
+import lab.healthcare.fhir.exception.FhirErrorClassifier;
+import lab.healthcare.fhir.exception.FhirErrorDetails;
 import lab.healthcare.fhir.observability.FhirAuditEvent;
 import lab.healthcare.fhir.observability.FhirAuditOperation;
 import lab.healthcare.fhir.observability.FhirAuditOutcome;
@@ -17,7 +19,6 @@ import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
-import ca.uhn.fhir.rest.server.exceptions.BaseServerResponseException;
 import org.hl7.fhir.r4.model.Patient;
 import org.springframework.stereotype.Service;
 
@@ -67,7 +68,7 @@ public class RoutingService {
         try {
             return registry.enabledProfile(request.destination());
         } catch (IllegalStateException | IllegalArgumentException ex) {
-            throw new RoutingException(ex.getMessage(), ex);
+            throw RoutingException.fromRegistry(request.destination(), ex);
         }
     }
 
@@ -95,11 +96,11 @@ public class RoutingService {
 
     private static String patientLogicalId(RoutingRequest request) {
         if (!(request.resource() instanceof Patient patient)) {
-            throw new RoutingException("Routing request resource must be a Patient");
+            throw new RoutingException(invalidRequest(request.destination(), "FHIR routing request is invalid: Patient resource required"));
         }
         String logicalId = patient.getIdElement().getIdPart();
         if (logicalId == null || logicalId.isBlank()) {
-            throw new RoutingException("Patient logical ID must be provided");
+            throw new RoutingException(invalidRequest(request.destination(), "FHIR routing request is invalid: Patient logical ID must be provided"));
         }
         return logicalId;
     }
@@ -133,46 +134,33 @@ public class RoutingService {
     }
 
     private static FhirAuditEvent failure(FhirOperationContext context, long startedNanos, RuntimeException ex) {
+        FhirErrorDetails details = detailsOf(ex);
         return new FhirAuditEvent(
                 Instant.now(),
                 context,
                 FhirAuditOutcome.FAILURE,
-                fhirStatus(ex),
+                details.status(),
                 elapsedMs(startedNanos),
-                errorCategory(ex));
+                details.category());
     }
 
     private static long elapsedMs(long startedNanos) {
         return TimeUnit.NANOSECONDS.toMillis(Math.max(0L, System.nanoTime() - startedNanos));
     }
 
-    private static Integer fhirStatus(RuntimeException ex) {
-        Throwable cause = ex.getCause();
-        if (cause instanceof BaseServerResponseException fhir) {
-            return fhir.getStatusCode();
+    private static FhirErrorDetails detailsOf(RuntimeException ex) {
+        if (ex instanceof RoutingException routing) {
+            return routing.details();
         }
-        return null;
+        if (ex instanceof FhirClientException fhir) {
+            return fhir.details();
+        }
+        return FhirErrorClassifier.classify(ex);
     }
 
-    private static FhirAuditError errorCategory(RuntimeException ex) {
-        if (ex instanceof RoutingException) {
-            String message = ex.getMessage() == null ? "" : ex.getMessage();
-            if (message.contains("Unknown FHIR server profile")) {
-                return FhirAuditError.DESTINATION_NOT_FOUND;
-            }
-            if (message.contains("disabled")) {
-                return FhirAuditError.DESTINATION_DISABLED;
-            }
-            return FhirAuditError.INVALID_REQUEST;
-        }
-        if (ex instanceof FhirClientException) {
-            Integer status = fhirStatus(ex);
-            if (status != null && status == 404) {
-                return FhirAuditError.RESOURCE_NOT_FOUND;
-            }
-            return FhirAuditError.FHIR_ERROR;
-        }
-        return FhirAuditError.FHIR_ERROR;
+    private static FhirErrorDetails invalidRequest(String destination, String message) {
+        return new FhirErrorDetails(
+                FhirErrorCategory.VALIDATION_ERROR, null, FhirAuditOperation.READ.name(), destination, null, null, message);
     }
 
     private static void requireRequest(RoutingRequest request) {

@@ -68,7 +68,7 @@ class RoutingServiceTest {
         assertThatThrownBy(() -> routing.resolve(RoutingRequest.readPatient("does-not-exist", "patient-001")))
                 .isInstanceOf(RoutingException.class)
                 .hasMessageContaining("does-not-exist")
-                .hasMessageContaining("Unknown FHIR server profile");
+                .hasMessageContaining("FHIR destination not found");
     }
 
     @Test

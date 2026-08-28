@@ -37,7 +37,7 @@ FhirAuditEvent
  ├── outcome          SUCCESS | FAILURE
  ├── status           HTTP/FHIR when known
  ├── durationMs
- └── error            DESTINATION_NOT_FOUND | DESTINATION_DISABLED | …
+ └── error            FhirErrorCategory (NOT_FOUND, VALIDATION_ERROR, …)
 ```
 
 Rendered line:
@@ -49,7 +49,7 @@ FHIR_AUDIT correlationId=abc-123 destination=local-hapi operation=READ resourceT
 Failed routing:
 
 ```text
-FHIR_AUDIT correlationId=def-456 destination=does-not-exist operation=READ resourceType=Patient resourceId=patient-001 outcome=FAILURE durationMs=5 error=DESTINATION_NOT_FOUND
+FHIR_AUDIT correlationId=def-456 destination=does-not-exist operation=READ resourceType=Patient resourceId=patient-001 outcome=FAILURE durationMs=5 error=VALIDATION_ERROR
 ```
 
 `FhirAuditRecorder` is the sink abstraction. The lab implementation (`LoggingFhirAuditRecorder`) writes that line to SLF4J and keeps a bounded in-memory buffer (not a database). A later recorder could target OpenTelemetry, SIEM, or an audit service without changing `FhirService`.
@@ -67,10 +67,10 @@ Mapping and authentication do not need to know the ID yet. The integration entry
 | Path | Outcome | error |
 |---|---|---|
 | `GET Patient/patient-001` on `local-hapi` | SUCCESS | — |
-| destination `does-not-exist` | FAILURE | `DESTINATION_NOT_FOUND` |
-| destination `example-org` (disabled) | FAILURE | `DESTINATION_DISABLED` |
-| FHIR HTTP 404 | FAILURE | `RESOURCE_NOT_FOUND` |
-| other FHIR/HAPI error | FAILURE | `FHIR_ERROR` |
+| destination `does-not-exist` | FAILURE | `VALIDATION_ERROR` |
+| destination `example-org` (disabled) | FAILURE | `VALIDATION_ERROR` |
+| FHIR HTTP 404 | FAILURE | `NOT_FOUND` |
+| other classified FHIR/HAPI error | FAILURE | matching `FhirErrorCategory` |
 
 Routing still selects the destination. Observability does not look up profiles.
 

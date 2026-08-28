@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.observability;
 
+import lab.healthcare.fhir.exception.FhirErrorCategory;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -22,14 +24,14 @@ class LoggingFhirAuditRecorderTest {
                 FhirAuditOutcome.FAILURE,
                 null,
                 3,
-                FhirAuditError.DESTINATION_NOT_FOUND);
+                FhirErrorCategory.VALIDATION_ERROR);
 
         recorder.record(success);
         recorder.record(failure);
 
         assertThat(recorder.recorded()).containsExactly(success, failure);
         assertThat(recorder.recorded().getFirst().toLogLine()).contains("outcome=SUCCESS");
-        assertThat(recorder.recorded().getLast().toLogLine()).contains("error=DESTINATION_NOT_FOUND");
+        assertThat(recorder.recorded().getLast().toLogLine()).contains("error=VALIDATION_ERROR");
     }
 
     @Test

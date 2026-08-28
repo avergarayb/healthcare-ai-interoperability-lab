@@ -3,7 +3,7 @@ package lab.healthcare.fhir.routing;
 import lab.healthcare.fhir.auth.oauth2.OAuth2TokenClient;
 import lab.healthcare.fhir.client.FhirAccessTokenProviders;
 import lab.healthcare.fhir.client.FhirClientFactory;
-import lab.healthcare.fhir.observability.FhirAuditError;
+import lab.healthcare.fhir.exception.FhirErrorCategory;
 import lab.healthcare.fhir.observability.FhirAuditEvent;
 import lab.healthcare.fhir.observability.FhirAuditOperation;
 import lab.healthcare.fhir.observability.FhirAuditOutcome;
@@ -44,7 +44,7 @@ class RoutingServiceAuditTest {
 
         FhirAuditEvent event = recorder.recorded().getFirst();
         assertThat(event.outcome()).isEqualTo(FhirAuditOutcome.FAILURE);
-        assertThat(event.error()).isEqualTo(FhirAuditError.DESTINATION_NOT_FOUND);
+        assertThat(event.error()).isEqualTo(FhirErrorCategory.VALIDATION_ERROR);
         assertThat(event.context().correlationId()).isEqualTo("corr-fail");
         assertThat(event.context().destination()).isEqualTo("does-not-exist");
         assertThat(event.context().operation()).isEqualTo(FhirAuditOperation.READ);
@@ -63,10 +63,10 @@ class RoutingServiceAuditTest {
                 .isInstanceOf(RoutingException.class);
 
         FhirAuditEvent event = recorder.recorded().getFirst();
-        assertThat(event.error()).isEqualTo(FhirAuditError.DESTINATION_DISABLED);
+        assertThat(event.error()).isEqualTo(FhirErrorCategory.VALIDATION_ERROR);
         assertThat(event.context().destination()).isEqualTo("example-org");
         assertThat(event.context().correlationId()).isEqualTo("corr-disabled");
-        assertThat(event.toLogLine()).contains("error=DESTINATION_DISABLED");
+        assertThat(event.toLogLine()).contains("error=VALIDATION_ERROR");
     }
 
     @Test

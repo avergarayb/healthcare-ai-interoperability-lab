@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.observability;
 
+import lab.healthcare.fhir.exception.FhirErrorCategory;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -92,7 +94,7 @@ class InMemoryFhirMetricsRecorderTest {
         assertThat(snapshot.operationsByOutcome().keySet()).containsExactly("FAILURE");
         assertThat(allDimensionKeys(snapshot)).doesNotContain("abc-123-correlation");
         assertThat(allDimensionKeys(snapshot)).doesNotContain("patient-001");
-        assertThat(allDimensionKeys(snapshot)).doesNotContain("DESTINATION_NOT_FOUND");
+        assertThat(allDimensionKeys(snapshot)).doesNotContain("VALIDATION_ERROR");
 
         String summary = snapshot.toSummaryLine();
         assertThat(summary).doesNotContain("abc-123-correlation");
@@ -105,7 +107,7 @@ class InMemoryFhirMetricsRecorderTest {
         assertThat(summary).doesNotContain("Bearer ");
         assertThat(summary).doesNotContain("Garcia");
         assertThat(summary).doesNotContain("resourceType\":\"Patient");
-        assertThat(summary).doesNotContain("DESTINATION_NOT_FOUND");
+        assertThat(summary).doesNotContain("VALIDATION_ERROR");
     }
 
     @Test
@@ -144,6 +146,6 @@ class InMemoryFhirMetricsRecorderTest {
                 FhirAuditOutcome.FAILURE,
                 null,
                 durationMs,
-                FhirAuditError.DESTINATION_NOT_FOUND);
+                FhirErrorCategory.VALIDATION_ERROR);
     }
 }
