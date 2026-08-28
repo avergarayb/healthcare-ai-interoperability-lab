@@ -1,6 +1,8 @@
 package lab.healthcare.fhir.client;
 
+import lab.healthcare.fhir.auth.oauth2.OAuth2TokenException;
 import lab.healthcare.fhir.exception.FhirClientException;
+import lab.healthcare.fhir.exception.FhirErrorCategory;
 
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
@@ -73,8 +75,10 @@ class FhirServiceTest {
 
         assertThatThrownBy(() -> fhirService.retrieveCapabilityStatement())
                 .isInstanceOf(FhirClientException.class)
-                .hasMessageContaining("Unable to connect")
-                .hasCauseInstanceOf(FhirClientConnectionException.class);
+                .hasMessage(FhirErrorCategory.CONNECTION_ERROR.safeMessage())
+                .hasCauseInstanceOf(FhirClientConnectionException.class)
+                .extracting(ex -> ((FhirClientException) ex).category())
+                .isEqualTo(FhirErrorCategory.CONNECTION_ERROR);
     }
 
     @Test
@@ -84,8 +88,10 @@ class FhirServiceTest {
 
         assertThatThrownBy(() -> fhirService.retrieveCapabilityStatement())
                 .isInstanceOf(FhirClientException.class)
-                .hasMessageContaining("returned an error")
-                .hasCauseInstanceOf(InternalErrorException.class);
+                .hasMessage(FhirErrorCategory.SERVER_ERROR.safeMessage())
+                .hasCauseInstanceOf(InternalErrorException.class)
+                .extracting(ex -> ((FhirClientException) ex).category())
+                .isEqualTo(FhirErrorCategory.SERVER_ERROR);
     }
 
     @Test
@@ -107,7 +113,41 @@ class FhirServiceTest {
 
         assertThatThrownBy(() -> fhirService.readPatient("missing"))
                 .isInstanceOf(FhirClientException.class)
-                .hasCauseInstanceOf(ResourceNotFoundException.class);
+                .hasMessage(FhirErrorCategory.NOT_FOUND.safeMessage())
+                .hasCauseInstanceOf(ResourceNotFoundException.class)
+                .extracting(ex -> ((FhirClientException) ex).category())
+                .isEqualTo(FhirErrorCategory.NOT_FOUND);
+    }
+
+    @Test
+    void readPatientClassifiesTimeoutSeparatelyFromConnectionFailure() {
+        when(fhirClient.read().resource(Patient.class).withId("patient-001").execute())
+                .thenThrow(new FhirClientConnectionException("read timed out", new java.net.SocketTimeoutException("Read timed out")));
+
+        assertThatThrownBy(() -> fhirService.readPatient("patient-001"))
+                .isInstanceOf(FhirClientException.class)
+                .hasMessage(FhirErrorCategory.TIMEOUT.safeMessage())
+                .hasCauseInstanceOf(FhirClientConnectionException.class)
+                .extracting(ex -> ((FhirClientException) ex).category())
+                .isEqualTo(FhirErrorCategory.TIMEOUT);
+    }
+
+    @Test
+    void readPatientClassifiesOAuthFailureAsAuthenticationError() {
+        when(fhirClient.read().resource(Patient.class).withId("patient-001").execute())
+                .thenThrow(new OAuth2TokenException("OAuth token acquisition failed: HTTP 401 invalid_client"));
+
+        assertThatThrownBy(() -> fhirService.readPatient("patient-001"))
+                .isInstanceOf(FhirClientException.class)
+                .hasMessage(FhirErrorCategory.AUTHENTICATION_ERROR.safeMessage())
+                .hasCauseInstanceOf(OAuth2TokenException.class)
+                .extracting(FhirClientException.class::cast)
+                .satisfies(ex -> {
+                    assertThat(ex.category()).isEqualTo(FhirErrorCategory.AUTHENTICATION_ERROR);
+                    assertThat(ex.getMessage()).doesNotContain("invalid_client");
+                    assertThat(ex.getMessage()).doesNotContain("access_token");
+                    assertThat(ex.details().toLogLine()).doesNotContain("access_token");
+                });
     }
 
     @Test
@@ -494,8 +534,10 @@ class FhirServiceTest {
 
         assertThatThrownBy(() -> fhirService.createPatient(new Patient()))
                 .isInstanceOf(FhirClientException.class)
-                .hasMessageContaining("creating Patient")
-                .hasCauseInstanceOf(InternalErrorException.class);
+                .hasMessage(FhirErrorCategory.SERVER_ERROR.safeMessage())
+                .hasCauseInstanceOf(InternalErrorException.class)
+                .extracting(ex -> ((FhirClientException) ex).category())
+                .isEqualTo(FhirErrorCategory.SERVER_ERROR);
     }
 
     @Test
@@ -704,8 +746,10 @@ class FhirServiceTest {
         assertThatThrownBy(() -> fhirService.updatePatientIfMatch(
                 syntheticPatient("history-patient-001", "History", "V4"), "999999"))
                 .isInstanceOf(FhirClientException.class)
-                .hasMessageContaining("If-Match")
-                .hasCauseInstanceOf(ResourceVersionConflictException.class);
+                .hasMessage(FhirErrorCategory.CONFLICT.safeMessage())
+                .hasCauseInstanceOf(ResourceVersionConflictException.class)
+                .extracting(ex -> ((FhirClientException) ex).category())
+                .isEqualTo(FhirErrorCategory.CONFLICT);
     }
 
     @Test

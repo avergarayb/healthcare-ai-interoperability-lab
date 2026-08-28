@@ -5,9 +5,7 @@ import lab.healthcare.fhir.exception.FhirClientException;
 import ca.uhn.fhir.model.api.IQueryParameterType;
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
-import ca.uhn.fhir.rest.client.exceptions.FhirClientConnectionException;
 import ca.uhn.fhir.rest.param.HasParam;
-import ca.uhn.fhir.rest.server.exceptions.BaseServerResponseException;
 import org.hl7.fhir.instance.model.api.IBaseOperationOutcome;
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.BooleanType;
@@ -964,10 +962,8 @@ public class FhirService {
     private <T> T execute(Supplier<T> operation, String action) {
         try {
             return operation.get();
-        } catch (FhirClientConnectionException ex) {
-            throw new FhirClientException("Unable to connect to the FHIR server while " + action, ex);
-        } catch (BaseServerResponseException ex) {
-            throw new FhirClientException("FHIR server returned an error while " + action, ex);
+        } catch (RuntimeException ex) {
+            throw FhirClientException.from(ex);
         }
     }
 
