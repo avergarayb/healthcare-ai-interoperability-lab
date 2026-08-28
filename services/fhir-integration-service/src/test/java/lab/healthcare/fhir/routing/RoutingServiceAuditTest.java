@@ -7,6 +7,7 @@ import lab.healthcare.fhir.observability.FhirAuditError;
 import lab.healthcare.fhir.observability.FhirAuditEvent;
 import lab.healthcare.fhir.observability.FhirAuditOperation;
 import lab.healthcare.fhir.observability.FhirAuditOutcome;
+import lab.healthcare.fhir.observability.InMemoryFhirMetricsRecorder;
 import lab.healthcare.fhir.observability.LoggingFhirAuditRecorder;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 import lab.healthcare.fhir.server.FhirServersProperties;
@@ -32,7 +33,8 @@ class RoutingServiceAuditTest {
                     new SmartConfigurationClient(),
                     new AuthorizationCodeClient(),
                     Clock.systemUTC()),
-            recorder);
+            recorder,
+            new InMemoryFhirMetricsRecorder());
 
     @Test
     void unknownDestinationRecordsFailureWithoutFallingBack() {

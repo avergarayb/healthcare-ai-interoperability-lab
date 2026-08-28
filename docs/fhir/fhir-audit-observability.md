@@ -87,10 +87,12 @@ RoutingService.readPatient
       ↓
 FhirService.readPatient   (unchanged FHIR logic)
       ↓
-FhirAuditRecorder.record
+FhirAuditEvent
+      ├── FhirAuditRecorder.record
+      └── FhirMetricsRecorder.record
 ```
 
-`FhirService` does not implement audit. Mapping does not record payloads.
+`FhirService` does not implement audit. Mapping does not record payloads. Metrics are a separate sink; see [fhir-metrics-observability.md](fhir-metrics-observability.md).
 
 ## Authentication safety
 
