@@ -23,7 +23,11 @@ public class FhirServerProfileRegistry {
         if (name == null || name.isBlank()) {
             throw new IllegalStateException("Property fhir.active-server must be set");
         }
-        FhirServerProfile profile = profile(name.trim());
+        return enabledProfile(name.trim());
+    }
+
+    public FhirServerProfile enabledProfile(String name) {
+        FhirServerProfile profile = profile(name);
         if (!profile.enabled()) {
             throw new IllegalStateException("FHIR server profile '" + profile.name() + "' is disabled");
         }
