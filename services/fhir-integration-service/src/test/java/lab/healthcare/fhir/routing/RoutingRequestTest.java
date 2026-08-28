@@ -15,6 +15,14 @@ class RoutingRequestTest {
         assertThat(request.destination()).isEqualTo("local-hapi");
         assertThat(request.resource()).isInstanceOf(Patient.class);
         assertThat(request.resource().getIdElement().getIdPart()).isEqualTo("patient-001");
+        assertThat(request.correlationId()).isNull();
+    }
+
+    @Test
+    void readPatientKeepsCallerCorrelationId() {
+        RoutingRequest request = RoutingRequest.readPatient("local-hapi", "patient-001", "corr-9");
+
+        assertThat(request.correlationId()).isEqualTo("corr-9");
     }
 
     @Test

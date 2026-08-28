@@ -82,6 +82,12 @@ lab.healthcare.fhir
 │   ├── RoutingRequest.java
 │   └── RoutingException.java
 │
+├── observability
+│   ├── FhirOperationContext.java
+│   ├── FhirAuditEvent.java
+│   ├── FhirAuditRecorder.java
+│   └── LoggingFhirAuditRecorder.java
+│
 └── exception
     └── FhirClientException.java
 ```
@@ -99,6 +105,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`) are un
 | `smart` | well-known, PKCE, authorization code, refresh | generic Client Credentials |
 | `mapping` | external JSON → HAPI R4 Resource | FHIR HTTP, OAuth, terminology `$validate-code` |
 | `routing` | destination profile name → enabled server + client | mapping, OAuth grant types, FHIR search logic |
+| `observability` | correlation, outcome, duration, safe audit line | FHIR payloads, tokens, destination lookup |
 | `exception` | FHIR call failures (`FhirClientException`) | OAuth token POST failures (`OAuth2TokenException` stays in `auth.oauth2`) |
 
 `FhirAuthenticationSettings` lives in `auth` because it is the **runtime** authentication model. `FhirServersProperties.AuthenticationSettings` stays nested in `server` as the YAML binding DTO. The registry maps one to the other. That keeps Spring Boot record binding on a single canonical constructor in the properties type.
@@ -130,6 +137,7 @@ mapping  (no imports of client / auth / smart)
 
 routing ──► server   (profile lookup)
 routing ──► client   (FhirClientFactory, FhirAccessTokenProviders, FhirService)
+routing ──► observability (record after destination is known)
 ```
 
 Intended runtime chain for an authenticated FHIR call:
@@ -228,5 +236,6 @@ Unit and feature tests follow the production packages where practical:
 | `client` | `FhirService` unit tests and FHIR operation ITs (search, CRUD, bundles, …) |
 | `mapping` | JSON → Patient/Observation unit tests, `FhirMappingIT` |
 | `routing` | destination resolution unit tests, `FhirRoutingIT` |
+| `observability` | audit event unit tests, `FhirAuditObservabilityIT` |
 
 Synthetic seed helpers stay next to the FHIR ITs in `client`.
