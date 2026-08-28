@@ -10,6 +10,7 @@ import lab.healthcare.fhir.observability.FhirAuditEvent;
 import lab.healthcare.fhir.observability.FhirAuditOperation;
 import lab.healthcare.fhir.observability.FhirAuditOutcome;
 import lab.healthcare.fhir.observability.FhirAuditRecorder;
+import lab.healthcare.fhir.observability.FhirMetricsRecorder;
 import lab.healthcare.fhir.observability.FhirOperationContext;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
@@ -31,12 +32,14 @@ public class RoutingService {
     private final FhirClientFactory clientFactory;
     private final FhirAccessTokenProviders tokenProviders;
     private final FhirAuditRecorder auditRecorder;
+    private final FhirMetricsRecorder metricsRecorder;
 
     public RoutingService(
             FhirServerProfileRegistry registry,
             FhirClientFactory clientFactory,
             FhirAccessTokenProviders tokenProviders,
-            FhirAuditRecorder auditRecorder) {
+            FhirAuditRecorder auditRecorder,
+            FhirMetricsRecorder metricsRecorder) {
         if (registry == null) {
             throw new IllegalArgumentException("FHIR server profile registry must be provided");
         }
@@ -49,10 +52,14 @@ public class RoutingService {
         if (auditRecorder == null) {
             throw new IllegalArgumentException("Audit recorder must be provided");
         }
+        if (metricsRecorder == null) {
+            throw new IllegalArgumentException("Metrics recorder must be provided");
+        }
         this.registry = registry;
         this.clientFactory = clientFactory;
         this.tokenProviders = tokenProviders;
         this.auditRecorder = auditRecorder;
+        this.metricsRecorder = metricsRecorder;
     }
 
     public FhirServerProfile resolve(RoutingRequest request) {
@@ -78,10 +85,10 @@ public class RoutingService {
         try {
             String logicalId = patientLogicalId(request);
             Patient patient = new FhirService(client(request)).readPatient(logicalId);
-            auditRecorder.record(success(context, started, 200));
+            observe(success(context, started, 200));
             return patient;
         } catch (RuntimeException ex) {
-            auditRecorder.record(failure(context, started, ex));
+            observe(failure(context, started, ex));
             throw ex;
         }
     }
@@ -95,6 +102,11 @@ public class RoutingService {
             throw new RoutingException("Patient logical ID must be provided");
         }
         return logicalId;
+    }
+
+    private void observe(FhirAuditEvent event) {
+        auditRecorder.record(event);
+        metricsRecorder.record(event);
     }
 
     private static FhirOperationContext context(RoutingRequest request) {
