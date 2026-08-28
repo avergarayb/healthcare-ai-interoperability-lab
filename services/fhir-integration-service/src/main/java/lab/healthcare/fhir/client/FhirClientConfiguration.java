@@ -1,15 +1,12 @@
 package lab.healthcare.fhir.client;
 
 import lab.healthcare.fhir.auth.AccessTokenProvider;
-import lab.healthcare.fhir.auth.CachingAccessTokenProvider;
-import lab.healthcare.fhir.auth.FhirAuthenticationSettings;
 import lab.healthcare.fhir.auth.oauth2.OAuth2TokenClient;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 import lab.healthcare.fhir.server.FhirServersProperties;
 import lab.healthcare.fhir.smart.AuthorizationCodeClient;
 import lab.healthcare.fhir.smart.SmartConfigurationClient;
-import lab.healthcare.fhir.smart.SmartTokenProvider;
 
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
@@ -59,20 +56,19 @@ public class FhirClientConfiguration {
     }
 
     @Bean
-    public AccessTokenProvider accessTokenProvider(
-            FhirServerProfile activeFhirServerProfile,
+    public FhirAccessTokenProviders fhirAccessTokenProviders(
             OAuth2TokenClient oauth2TokenClient,
             SmartConfigurationClient smartConfigurationClient,
             AuthorizationCodeClient authorizationCodeClient) {
-        FhirAuthenticationSettings authentication = activeFhirServerProfile.authentication();
-        if (authentication.isClientCredentials()) {
-            return new CachingAccessTokenProvider(oauth2TokenClient, authentication, Clock.systemUTC());
-        }
-        if (authentication.isSmartAuthorizationCode()) {
-            return new SmartTokenProvider(
-                    smartConfigurationClient, authorizationCodeClient, authentication, Clock.systemUTC());
-        }
-        return AccessTokenProvider.none();
+        return new FhirAccessTokenProviders(
+                oauth2TokenClient, smartConfigurationClient, authorizationCodeClient, Clock.systemUTC());
+    }
+
+    @Bean
+    public AccessTokenProvider accessTokenProvider(
+            FhirServerProfile activeFhirServerProfile,
+            FhirAccessTokenProviders fhirAccessTokenProviders) {
+        return fhirAccessTokenProviders.forProfile(activeFhirServerProfile);
     }
 
     @Bean

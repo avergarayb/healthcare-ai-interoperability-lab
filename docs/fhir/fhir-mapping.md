@@ -172,7 +172,7 @@ The mapper does not invent a name, identifier, or quantity to keep the Resource 
 - know OAuth or SMART;
 - read `fhir.active-server`.
 
-The same mapper can later sit behind a REST API, a queue, or a file drop. Transport is a separate concern from transformation.
+The same mapper can later sit behind a REST API, a queue, or a file drop. Transport is a separate concern from transformation. Destination selection is [fhir-routing.md](fhir-routing.md); mapping does not choose the FHIR server.
 
 ## Package
 

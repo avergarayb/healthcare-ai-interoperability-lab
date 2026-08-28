@@ -77,6 +77,11 @@ lab.healthcare.fhir
 │   ├── FieldMapping.java
 │   └── MappingException.java
 │
+├── routing
+│   ├── RoutingService.java
+│   ├── RoutingRequest.java
+│   └── RoutingException.java
+│
 └── exception
     └── FhirClientException.java
 ```
@@ -93,6 +98,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`) are un
 | `auth.oauth2` | Client Credentials HTTP token POST and JSON parse | SMART authorize URL, `FhirService` |
 | `smart` | well-known, PKCE, authorization code, refresh | generic Client Credentials |
 | `mapping` | external JSON → HAPI R4 Resource | FHIR HTTP, OAuth, terminology `$validate-code` |
+| `routing` | destination profile name → enabled server + client | mapping, OAuth grant types, FHIR search logic |
 | `exception` | FHIR call failures (`FhirClientException`) | OAuth token POST failures (`OAuth2TokenException` stays in `auth.oauth2`) |
 
 `FhirAuthenticationSettings` lives in `auth` because it is the **runtime** authentication model. `FhirServersProperties.AuthenticationSettings` stays nested in `server` as the YAML binding DTO. The registry maps one to the other. That keeps Spring Boot record binding on a single canonical constructor in the properties type.
@@ -121,6 +127,9 @@ smart ──► auth
 smart ──► oauth2  (token JSON parse + OAuth2TokenException)
 
 mapping  (no imports of client / auth / smart)
+
+routing ──► server   (profile lookup)
+routing ──► client   (FhirClientFactory, FhirAccessTokenProviders, FhirService)
 ```
 
 Intended runtime chain for an authenticated FHIR call:
@@ -218,5 +227,6 @@ Unit and feature tests follow the production packages where practical:
 | `server` | YAML binding, `FhirServerConfigurationIT` |
 | `client` | `FhirService` unit tests and FHIR operation ITs (search, CRUD, bundles, …) |
 | `mapping` | JSON → Patient/Observation unit tests, `FhirMappingIT` |
+| `routing` | destination resolution unit tests, `FhirRoutingIT` |
 
 Synthetic seed helpers stay next to the FHIR ITs in `client`.
