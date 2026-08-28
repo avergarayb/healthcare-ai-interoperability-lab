@@ -115,4 +115,4 @@ That is enough to prove:
 destination name → existing profile → existing factory → FHIR operation
 ```
 
-Future routing can add tenant, environment, or resource-type rules **without** putting those rules in `FhirService`.
+Future routing can add tenant, environment, or resource-type rules **without** putting those rules in `FhirService`. Routed Patient reads also emit a structured audit event; see [fhir-audit-observability.md](fhir-audit-observability.md).

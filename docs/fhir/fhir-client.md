@@ -94,6 +94,7 @@ lab.healthcare.fhir
 ├── smart      discovery, PKCE, Authorization Code, SmartTokenProvider
 ├── mapping    JSON → Patient / Observation
 ├── routing    destination profile → FHIR client
+├── observability  correlation ID + structured FHIR_AUDIT line
 └── exception  FhirClientException
 ```
 

@@ -4,6 +4,7 @@ import lab.healthcare.fhir.auth.FhirAuthenticationType;
 import lab.healthcare.fhir.auth.oauth2.OAuth2TokenClient;
 import lab.healthcare.fhir.client.FhirAccessTokenProviders;
 import lab.healthcare.fhir.client.FhirClientFactory;
+import lab.healthcare.fhir.observability.LoggingFhirAuditRecorder;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 import lab.healthcare.fhir.server.FhirServersProperties;
@@ -98,7 +99,7 @@ class RoutingServiceTest {
         when(mockFactory.createContext(any(FhirServerProfile.class))).thenReturn(context);
         when(mockFactory.createClient(eq(context), any(FhirServerProfile.class), any())).thenReturn(mockClient);
         RoutingService routing = new RoutingService(
-                new FhirServerProfileRegistry(twoServers()), mockFactory, tokenProviders);
+                new FhirServerProfileRegistry(twoServers()), mockFactory, tokenProviders, new LoggingFhirAuditRecorder());
         RoutingRequest request = RoutingRequest.readPatient("local-hapi", "patient-001");
 
         IGenericClient client = routing.client(request);
@@ -120,7 +121,8 @@ class RoutingServiceTest {
     }
 
     private RoutingService routing(FhirServersProperties properties) {
-        return new RoutingService(new FhirServerProfileRegistry(properties), factory, tokenProviders);
+        return new RoutingService(
+                new FhirServerProfileRegistry(properties), factory, tokenProviders, new LoggingFhirAuditRecorder());
     }
 
     private static FhirServersProperties twoServers() {
