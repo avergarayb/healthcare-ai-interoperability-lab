@@ -6,6 +6,7 @@ import lab.healthcare.fhir.client.FhirClientFactory;
 import lab.healthcare.fhir.observability.FhirMetricSnapshot;
 import lab.healthcare.fhir.observability.InMemoryFhirMetricsRecorder;
 import lab.healthcare.fhir.observability.LoggingFhirAuditRecorder;
+import lab.healthcare.fhir.resilience.FhirRetryExecutor;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 import lab.healthcare.fhir.server.FhirServersProperties;
 import lab.healthcare.fhir.smart.AuthorizationCodeClient;
@@ -32,7 +33,8 @@ class RoutingServiceMetricsTest {
                     new AuthorizationCodeClient(),
                     Clock.systemUTC()),
             auditRecorder,
-            metricsRecorder);
+            metricsRecorder,
+            FhirRetryExecutor.immediate());
 
     @Test
     void unknownDestinationRecordsIndependentAuditAndFailureMetric() {

@@ -95,7 +95,8 @@ lab.healthcare.fhir
 ├── mapping    JSON → Patient / Observation
 ├── routing    destination profile → FHIR client
 ├── observability  correlation ID + FHIR_AUDIT line + in-memory metrics
-└── exception  FhirClientException + bounded FhirErrorCategory
+├── exception  FhirClientException + bounded FhirErrorCategory
+└── resilience     bounded READ retry (not inside FhirService)
 ```
 
 `client` is the FHIR operation and HAPI wiring layer, not a dump of every class in the service.

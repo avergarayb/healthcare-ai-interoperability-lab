@@ -191,4 +191,4 @@ A `503` is `SERVER_ERROR` once. The client is not called again.
 027  Async Integration
 ```
 
-Those policies can switch on `FhirErrorCategory` without reading HAPI classes. `NOT_FOUND` and `VALIDATION_ERROR` normally should not retry; `TIMEOUT`, `CONNECTION_ERROR`, and `SERVER_ERROR` might.
+Task 024 implements that policy for routed Patient READ; see [fhir-retry-resilience.md](fhir-retry-resilience.md). `NOT_FOUND` and `VALIDATION_ERROR` do not retry; `TIMEOUT`, `CONNECTION_ERROR`, and `SERVER_ERROR` may.

@@ -17,6 +17,8 @@ public class InMemoryFhirMetricsRecorder implements FhirMetricsRecorder {
     private long failedOperations;
     private long totalDurationMs;
     private long operationCount;
+    private long retryAttempts;
+    private long operationsRetried;
     private final Map<String, Long> operationsByType = new LinkedHashMap<>();
     private final Map<String, Long> operationsByDestination = new LinkedHashMap<>();
     private final Map<String, Long> operationsByResourceType = new LinkedHashMap<>();
@@ -40,6 +42,10 @@ public class InMemoryFhirMetricsRecorder implements FhirMetricsRecorder {
         } else {
             failedOperations++;
         }
+        if (event.attempt() > 1) {
+            operationsRetried++;
+            retryAttempts += event.attempt() - 1L;
+        }
     }
 
     @Override
@@ -53,7 +59,9 @@ public class InMemoryFhirMetricsRecorder implements FhirMetricsRecorder {
                 Map.copyOf(operationsByResourceType),
                 Map.copyOf(operationsByOutcome),
                 totalDurationMs,
-                operationCount);
+                operationCount,
+                retryAttempts,
+                operationsRetried);
     }
 
     private static void increment(Map<String, Long> counters, String dimension) {

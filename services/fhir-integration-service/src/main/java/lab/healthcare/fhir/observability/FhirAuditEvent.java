@@ -12,7 +12,19 @@ public record FhirAuditEvent(
         FhirAuditOutcome outcome,
         Integer status,
         long durationMs,
-        FhirErrorCategory error) {
+        FhirErrorCategory error,
+        int attempt,
+        boolean willRetry) {
+
+    public FhirAuditEvent(
+            Instant timestamp,
+            FhirOperationContext context,
+            FhirAuditOutcome outcome,
+            Integer status,
+            long durationMs,
+            FhirErrorCategory error) {
+        this(timestamp, context, outcome, status, durationMs, error, 1, false);
+    }
 
     public FhirAuditEvent {
         if (timestamp == null) {
@@ -32,6 +44,10 @@ public record FhirAuditEvent(
         }
         if (outcome == FhirAuditOutcome.SUCCESS) {
             error = null;
+            willRetry = false;
+        }
+        if (attempt < 1) {
+            throw new IllegalArgumentException("Audit attempt must be at least 1");
         }
     }
 
@@ -48,6 +64,10 @@ public record FhirAuditEvent(
             add(line, "status", Integer.toString(status));
         }
         add(line, "durationMs", Long.toString(durationMs));
+        add(line, "attempt", Integer.toString(attempt));
+        if (willRetry) {
+            add(line, "retry", "true");
+        }
         if (error != null) {
             add(line, "error", error.name());
         }
