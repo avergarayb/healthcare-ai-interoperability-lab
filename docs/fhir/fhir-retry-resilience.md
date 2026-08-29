@@ -2,7 +2,7 @@
 
 This note adds a **bounded retry** around routed Patient **READ** only. Read it after [fhir-error-handling.md](fhir-error-handling.md). It does not replace classification, routing, audit, or metrics.
 
-There is still no Resilience4j, circuit breaker, jitter, or retry of CREATE/UPDATE/DELETE.
+There is still no Resilience4j, jitter, or retry of CREATE/UPDATE/DELETE. The per-destination circuit breaker is a later layer; see [fhir-circuit-breaker.md](fhir-circuit-breaker.md).
 
 ## Transient vs permanent
 
@@ -39,6 +39,8 @@ lab.healthcare.fhir.resilience
 ```text
 RoutingService
       │  destination + correlation + audit/metrics
+      ▼
+FhirCircuitBreaker          (Task 025; fail-fast when OPEN)
       ▼
 FhirRetryExecutor
       │  decide + backoff + bounded loop
@@ -112,7 +114,8 @@ When retries stop, the caller still receives the original `FhirClientException` 
 
 - retry CREATE / UPDATE / DELETE
 - retry OAuth token POST
-- circuit breaker
 - Resilience4j
 - random jitter
 - catch-all `Exception` retries
+
+The circuit breaker sits **above** this executor. OPEN skips the retry loop entirely.

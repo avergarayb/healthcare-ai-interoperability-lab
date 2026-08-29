@@ -126,6 +126,7 @@ Task 021 already measures elapsed time with `System.nanoTime()` and stores `dura
 |---|---|
 | routed `GET Patient/patient-001` on `local-hapi` | `total++` `success++` `destinations[local-hapi]++` |
 | destination `does-not-exist` | `total++` `failed++` `destinations[does-not-exist]++` |
+| circuit OPEN (blocked before FHIR) | `total++` `failed++`; `retryAttempts` unchanged |
 
 Routing still selects the destination. Metrics do not look up profiles.
 

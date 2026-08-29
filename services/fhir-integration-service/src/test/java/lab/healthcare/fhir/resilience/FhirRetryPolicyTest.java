@@ -19,6 +19,7 @@ class FhirRetryPolicyTest {
         assertThat(policy.isRetryable(FhirErrorCategory.NOT_FOUND)).isFalse();
         assertThat(policy.isRetryable(FhirErrorCategory.CONFLICT)).isFalse();
         assertThat(policy.isRetryable(FhirErrorCategory.UNKNOWN)).isFalse();
+        assertThat(policy.isRetryable(FhirErrorCategory.CIRCUIT_OPEN)).isFalse();
     }
 
     @Test

@@ -9,7 +9,8 @@ public enum FhirErrorCategory {
     SERVER_ERROR("FHIR server unavailable"),
     TIMEOUT("FHIR request timed out"),
     CONNECTION_ERROR("FHIR connection failed"),
-    UNKNOWN("FHIR integration failed");
+    UNKNOWN("FHIR integration failed"),
+    CIRCUIT_OPEN("FHIR destination circuit is open");
 
     private final String safeMessage;
 
