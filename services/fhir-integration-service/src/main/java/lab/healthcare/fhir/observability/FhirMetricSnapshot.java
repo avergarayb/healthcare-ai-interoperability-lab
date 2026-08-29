@@ -18,14 +18,18 @@ public record FhirMetricSnapshot(
         Map<String, Long> operationsByResourceType,
         Map<String, Long> operationsByOutcome,
         long totalDurationMs,
-        long operationCount) {
+        long operationCount,
+        long retryAttempts,
+        long operationsRetried) {
 
     public FhirMetricSnapshot {
         if (totalOperations < 0
                 || successfulOperations < 0
                 || failedOperations < 0
                 || totalDurationMs < 0
-                || operationCount < 0) {
+                || operationCount < 0
+                || retryAttempts < 0
+                || operationsRetried < 0) {
             throw new IllegalArgumentException("Metric counters must be zero or positive");
         }
         operationsByType = copy(operationsByType);
@@ -49,6 +53,8 @@ public record FhirMetricSnapshot(
         line.add("failed=" + failedOperations);
         line.add("durationMs=" + totalDurationMs);
         line.add("avgDurationMs=" + averageDurationMs());
+        line.add("retryAttempts=" + retryAttempts);
+        line.add("operationsRetried=" + operationsRetried);
         addGroup(line, "operations", operationsByType);
         addGroup(line, "destinations", operationsByDestination);
         addGroup(line, "resourceTypes", operationsByResourceType);

@@ -14,6 +14,8 @@ import lab.healthcare.fhir.observability.FhirAuditOutcome;
 import lab.healthcare.fhir.observability.FhirAuditRecorder;
 import lab.healthcare.fhir.observability.FhirMetricsRecorder;
 import lab.healthcare.fhir.observability.FhirOperationContext;
+import lab.healthcare.fhir.resilience.FhirRetryAttempt;
+import lab.healthcare.fhir.resilience.FhirRetryExecutor;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 
@@ -34,13 +36,15 @@ public class RoutingService {
     private final FhirAccessTokenProviders tokenProviders;
     private final FhirAuditRecorder auditRecorder;
     private final FhirMetricsRecorder metricsRecorder;
+    private final FhirRetryExecutor retryExecutor;
 
     public RoutingService(
             FhirServerProfileRegistry registry,
             FhirClientFactory clientFactory,
             FhirAccessTokenProviders tokenProviders,
             FhirAuditRecorder auditRecorder,
-            FhirMetricsRecorder metricsRecorder) {
+            FhirMetricsRecorder metricsRecorder,
+            FhirRetryExecutor retryExecutor) {
         if (registry == null) {
             throw new IllegalArgumentException("FHIR server profile registry must be provided");
         }
@@ -56,11 +60,15 @@ public class RoutingService {
         if (metricsRecorder == null) {
             throw new IllegalArgumentException("Metrics recorder must be provided");
         }
+        if (retryExecutor == null) {
+            throw new IllegalArgumentException("Retry executor must be provided");
+        }
         this.registry = registry;
         this.clientFactory = clientFactory;
         this.tokenProviders = tokenProviders;
         this.auditRecorder = auditRecorder;
         this.metricsRecorder = metricsRecorder;
+        this.retryExecutor = retryExecutor;
     }
 
     public FhirServerProfile resolve(RoutingRequest request) {
@@ -82,16 +90,19 @@ public class RoutingService {
     public Patient readPatient(RoutingRequest request) {
         requireRequest(request);
         FhirOperationContext context = context(request);
+        String logicalId;
+        IGenericClient fhirClient;
         long started = System.nanoTime();
         try {
-            String logicalId = patientLogicalId(request);
-            Patient patient = new FhirService(client(request)).readPatient(logicalId);
-            observe(success(context, started, 200));
-            return patient;
+            logicalId = patientLogicalId(request);
+            fhirClient = client(request);
         } catch (RuntimeException ex) {
-            observe(failure(context, started, ex));
+            observe(failure(context, elapsedMs(started), ex, 1, false), true);
             throw ex;
         }
+        return retryExecutor.execute(
+                () -> new FhirService(fhirClient).readPatient(logicalId),
+                attempt -> observeAttempt(context, attempt));
     }
 
     private static String patientLogicalId(RoutingRequest request) {
@@ -105,9 +116,18 @@ public class RoutingService {
         return logicalId;
     }
 
-    private void observe(FhirAuditEvent event) {
+    private void observeAttempt(FhirOperationContext context, FhirRetryAttempt attempt) {
+        FhirAuditEvent event = attempt.success()
+                ? success(context, attempt.durationMs(), attempt.attempt())
+                : failure(context, attempt.durationMs(), attempt.error(), attempt.attempt(), attempt.willRetry());
+        observe(event, attempt.success() || !attempt.willRetry());
+    }
+
+    private void observe(FhirAuditEvent event, boolean logicalOutcome) {
         auditRecorder.record(event);
-        metricsRecorder.record(event);
+        if (logicalOutcome) {
+            metricsRecorder.record(event);
+        }
     }
 
     private static FhirOperationContext context(RoutingRequest request) {
@@ -123,25 +143,34 @@ public class RoutingService {
                 resourceId);
     }
 
-    private static FhirAuditEvent success(FhirOperationContext context, long startedNanos, int status) {
+    private static FhirAuditEvent success(FhirOperationContext context, long durationMs, int attempt) {
         return new FhirAuditEvent(
                 Instant.now(),
                 context,
                 FhirAuditOutcome.SUCCESS,
-                status,
-                elapsedMs(startedNanos),
-                null);
+                200,
+                durationMs,
+                null,
+                attempt,
+                false);
     }
 
-    private static FhirAuditEvent failure(FhirOperationContext context, long startedNanos, RuntimeException ex) {
+    private static FhirAuditEvent failure(
+            FhirOperationContext context,
+            long durationMs,
+            RuntimeException ex,
+            int attempt,
+            boolean willRetry) {
         FhirErrorDetails details = detailsOf(ex);
         return new FhirAuditEvent(
                 Instant.now(),
                 context,
                 FhirAuditOutcome.FAILURE,
                 details.status(),
-                elapsedMs(startedNanos),
-                details.category());
+                durationMs,
+                details.category(),
+                attempt,
+                willRetry);
     }
 
     private static long elapsedMs(long startedNanos) {

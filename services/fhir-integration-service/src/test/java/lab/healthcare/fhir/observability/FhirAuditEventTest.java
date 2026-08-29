@@ -32,6 +32,8 @@ class FhirAuditEventTest {
         assertThat(line).contains("outcome=SUCCESS");
         assertThat(line).contains("status=200");
         assertThat(line).contains("durationMs=41");
+        assertThat(line).contains("attempt=1");
+        assertThat(line).doesNotContain("retry=true");
         assertThat(line).doesNotContain("access_token");
         assertThat(line).doesNotContain("client_secret");
         assertThat(line).doesNotContain("refresh_token");

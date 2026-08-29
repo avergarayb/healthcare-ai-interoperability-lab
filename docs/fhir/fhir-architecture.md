@@ -91,11 +91,16 @@ lab.healthcare.fhir
 │   ├── InMemoryFhirMetricsRecorder.java
 │   └── FhirMetricSnapshot.java
 │
-└── exception
-    ├── FhirClientException.java
-    ├── FhirErrorCategory.java
-    ├── FhirErrorDetails.java
-    └── FhirErrorClassifier.java
+├── exception
+│   ├── FhirClientException.java
+│   ├── FhirErrorCategory.java
+│   ├── FhirErrorDetails.java
+│   └── FhirErrorClassifier.java
+│
+└── resilience
+    ├── FhirRetryPolicy.java
+    ├── FhirRetryDecision.java
+    └── FhirRetryExecutor.java
 ```
 
 YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`) are unchanged. Spring still scans from `lab.healthcare.fhir`.
@@ -113,6 +118,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`) are un
 | `routing` | destination profile name → enabled server + client | mapping, OAuth grant types, FHIR search logic |
 | `observability` | correlation, outcome, duration, safe audit line, aggregated counters | FHIR payloads, tokens, destination lookup, Prometheus |
 | `exception` | bounded failure category, safe details, `FhirClientException` | OAuth token POST (`OAuth2TokenException` stays in `auth.oauth2`), retry/circuit breaker |
+| `resilience` | retry eligibility, bounded attempts, exponential backoff | FHIR operations, destination lookup, OAuth, CREATE/UPDATE/DELETE |
 
 `FhirAuthenticationSettings` lives in `auth` because it is the **runtime** authentication model. `FhirServersProperties.AuthenticationSettings` stays nested in `server` as the YAML binding DTO. The registry maps one to the other. That keeps Spring Boot record binding on a single canonical constructor in the properties type.
 
@@ -145,6 +151,7 @@ routing ──► server   (profile lookup)
 routing ──► client   (FhirClientFactory, FhirAccessTokenProviders, FhirService)
 routing ──► observability (audit event + metrics after destination is known)
 routing ──► exception     (RoutingException details; FhirClientException details)
+routing ──► resilience    (READ retry only; FhirService stays retry-free)
 ```
 
 Intended runtime chain for an authenticated FHIR call:
@@ -245,5 +252,6 @@ Unit and feature tests follow the production packages where practical:
 | `routing` | destination resolution unit tests, `FhirRoutingIT` |
 | `observability` | audit event unit tests, `FhirAuditObservabilityIT`, metrics counters, `FhirMetricsObservabilityIT` |
 | `exception` | classifier / details unit tests, `FhirErrorHandlingIT` |
+| `resilience` | retry policy / executor unit tests, `FhirRetryResilienceIT` |
 
 Synthetic seed helpers stay next to the FHIR ITs in `client`.

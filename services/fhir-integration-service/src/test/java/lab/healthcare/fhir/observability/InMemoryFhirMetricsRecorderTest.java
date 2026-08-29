@@ -75,6 +75,8 @@ class InMemoryFhirMetricsRecorderTest {
         FhirMetricSnapshot snapshot = recorder.snapshot();
         assertThat(snapshot.totalOperations()).isZero();
         assertThat(snapshot.averageDurationMs()).isZero();
+        assertThat(snapshot.retryAttempts()).isZero();
+        assertThat(snapshot.operationsRetried()).isZero();
         assertThat(snapshot.toSummaryLine()).startsWith("FHIR_METRICS");
     }
 
