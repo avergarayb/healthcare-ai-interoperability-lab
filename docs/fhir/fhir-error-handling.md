@@ -2,7 +2,7 @@
 
 This note adds a **bounded, safe error model** around FHIR integration failures. Read it after [fhir-audit-observability.md](fhir-audit-observability.md) and [fhir-metrics-observability.md](fhir-metrics-observability.md). It does not replace mapping, routing, OAuth, SMART, audit, or metrics.
 
-There is still no retry, backoff, circuit breaker, idempotency, or dead-letter queue.
+Retry, backoff, and a learning circuit breaker exist for routed Patient READ; see [fhir-retry-resilience.md](fhir-retry-resilience.md) and [fhir-circuit-breaker.md](fhir-circuit-breaker.md). There is still no idempotency or dead-letter queue.
 
 ## Why error handling exists
 
@@ -55,6 +55,7 @@ FhirErrorDetails
 | `TIMEOUT` | socket/request timeout, HTTP 408 | `FHIR request timed out` |
 | `CONNECTION_ERROR` | connection refused, DNS, unreachable | `FHIR connection failed` |
 | `UNKNOWN` | anything else | `FHIR integration failed` |
+| `CIRCUIT_OPEN` | destination circuit OPEN (Task 025; not from HAPI) | `FHIR destination circuit is open` |
 
 Do not add a category per HAPI class. Future retry policy will key off this list.
 
@@ -192,3 +193,5 @@ A `503` is `SERVER_ERROR` once. The client is not called again.
 ```
 
 Task 024 implements that policy for routed Patient READ; see [fhir-retry-resilience.md](fhir-retry-resilience.md). `NOT_FOUND` and `VALIDATION_ERROR` do not retry; `TIMEOUT`, `CONNECTION_ERROR`, and `SERVER_ERROR` may.
+
+Task 025 adds a per-destination circuit breaker that counts those same infrastructure categories as **logical** failures and fail-fasts with `CIRCUIT_OPEN` when OPEN; see [fhir-circuit-breaker.md](fhir-circuit-breaker.md). `FhirErrorClassifier` still does not invent that category from HAPI — only the breaker produces it.

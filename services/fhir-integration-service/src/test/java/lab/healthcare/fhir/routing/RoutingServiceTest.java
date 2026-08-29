@@ -6,6 +6,7 @@ import lab.healthcare.fhir.client.FhirAccessTokenProviders;
 import lab.healthcare.fhir.client.FhirClientFactory;
 import lab.healthcare.fhir.observability.InMemoryFhirMetricsRecorder;
 import lab.healthcare.fhir.observability.LoggingFhirAuditRecorder;
+import lab.healthcare.fhir.resilience.FhirCircuitBreakerRegistry;
 import lab.healthcare.fhir.resilience.FhirRetryExecutor;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
@@ -106,7 +107,8 @@ class RoutingServiceTest {
                 tokenProviders,
                 new LoggingFhirAuditRecorder(),
                 new InMemoryFhirMetricsRecorder(),
-                FhirRetryExecutor.immediate());
+                FhirRetryExecutor.immediate(),
+                new FhirCircuitBreakerRegistry());
         RoutingRequest request = RoutingRequest.readPatient("local-hapi", "patient-001");
 
         IGenericClient client = routing.client(request);
@@ -134,7 +136,8 @@ class RoutingServiceTest {
                 tokenProviders,
                 new LoggingFhirAuditRecorder(),
                 new InMemoryFhirMetricsRecorder(),
-                FhirRetryExecutor.immediate());
+                FhirRetryExecutor.immediate(),
+                new FhirCircuitBreakerRegistry());
     }
 
     private static FhirServersProperties twoServers() {

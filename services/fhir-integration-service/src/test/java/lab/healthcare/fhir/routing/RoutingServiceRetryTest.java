@@ -8,6 +8,7 @@ import lab.healthcare.fhir.exception.FhirErrorCategory;
 import lab.healthcare.fhir.observability.FhirAuditOutcome;
 import lab.healthcare.fhir.observability.InMemoryFhirMetricsRecorder;
 import lab.healthcare.fhir.observability.LoggingFhirAuditRecorder;
+import lab.healthcare.fhir.resilience.FhirCircuitBreakerRegistry;
 import lab.healthcare.fhir.resilience.FhirRetryExecutor;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
@@ -130,7 +131,8 @@ class RoutingServiceRetryTest {
                         Clock.systemUTC()),
                 auditRecorder,
                 metricsRecorder,
-                FhirRetryExecutor.immediate());
+                FhirRetryExecutor.immediate(),
+                new FhirCircuitBreakerRegistry());
     }
 
     private static Patient patient(String id) {
