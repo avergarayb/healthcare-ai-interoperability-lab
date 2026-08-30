@@ -19,6 +19,10 @@ import lab.healthcare.fhir.resilience.FhirCircuitBreaker;
 import lab.healthcare.fhir.resilience.FhirCircuitBreakerRegistry;
 import lab.healthcare.fhir.resilience.FhirRetryAttempt;
 import lab.healthcare.fhir.resilience.FhirRetryExecutor;
+import lab.healthcare.fhir.resilience.bulkhead.BulkheadFullException;
+import lab.healthcare.fhir.resilience.bulkhead.FhirBulkheadRegistry;
+import lab.healthcare.fhir.resilience.ratelimit.FhirRateLimiterRegistry;
+import lab.healthcare.fhir.resilience.ratelimit.RateLimitExceededException;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 
@@ -41,6 +45,8 @@ public class RoutingService {
     private final FhirMetricsRecorder metricsRecorder;
     private final FhirRetryExecutor retryExecutor;
     private final FhirCircuitBreakerRegistry circuitBreakers;
+    private final FhirRateLimiterRegistry rateLimiters;
+    private final FhirBulkheadRegistry bulkheads;
 
     public RoutingService(
             FhirServerProfileRegistry registry,
@@ -49,7 +55,9 @@ public class RoutingService {
             FhirAuditRecorder auditRecorder,
             FhirMetricsRecorder metricsRecorder,
             FhirRetryExecutor retryExecutor,
-            FhirCircuitBreakerRegistry circuitBreakers) {
+            FhirCircuitBreakerRegistry circuitBreakers,
+            FhirRateLimiterRegistry rateLimiters,
+            FhirBulkheadRegistry bulkheads) {
         if (registry == null) {
             throw new IllegalArgumentException("FHIR server profile registry must be provided");
         }
@@ -71,6 +79,12 @@ public class RoutingService {
         if (circuitBreakers == null) {
             throw new IllegalArgumentException("Circuit breaker registry must be provided");
         }
+        if (rateLimiters == null) {
+            throw new IllegalArgumentException("Rate limiter registry must be provided");
+        }
+        if (bulkheads == null) {
+            throw new IllegalArgumentException("Bulkhead registry must be provided");
+        }
         this.registry = registry;
         this.clientFactory = clientFactory;
         this.tokenProviders = tokenProviders;
@@ -78,6 +92,8 @@ public class RoutingService {
         this.metricsRecorder = metricsRecorder;
         this.retryExecutor = retryExecutor;
         this.circuitBreakers = circuitBreakers;
+        this.rateLimiters = rateLimiters;
+        this.bulkheads = bulkheads;
     }
 
     public FhirServerProfile resolve(RoutingRequest request) {
@@ -101,25 +117,37 @@ public class RoutingService {
         FhirOperationContext context = context(request);
         String logicalId;
         IGenericClient fhirClient;
-        FhirCircuitBreaker breaker;
         long started = System.nanoTime();
         try {
             logicalId = patientLogicalId(request);
             fhirClient = client(request);
-            breaker = circuitBreakers.forDestination(request.destination());
-            breaker.acquire();
+            rateLimiters.forDestination(request.destination()).acquire();
         } catch (RuntimeException ex) {
             observe(failure(context, elapsedMs(started), ex, 1, false), true);
             throw ex;
         }
+        FhirCircuitBreaker breaker = circuitBreakers.forDestination(request.destination());
         try {
-            Patient patient = retryExecutor.execute(
-                    () -> new FhirService(fhirClient).readPatient(logicalId),
-                    attempt -> observeAttempt(context, attempt));
-            breaker.recordSuccess();
-            return patient;
-        } catch (RuntimeException ex) {
-            breaker.recordFailure(ex);
+            return bulkheads.forDestination(request.destination()).execute(() -> {
+                try {
+                    breaker.acquire();
+                } catch (CircuitBreakerOpenException ex) {
+                    observe(failure(context, elapsedMs(started), ex, 1, false), true);
+                    throw ex;
+                }
+                try {
+                    Patient patient = retryExecutor.execute(
+                            () -> new FhirService(fhirClient).readPatient(logicalId),
+                            attempt -> observeAttempt(context, attempt));
+                    breaker.recordSuccess();
+                    return patient;
+                } catch (RuntimeException ex) {
+                    breaker.recordFailure(ex);
+                    throw ex;
+                }
+            });
+        } catch (BulkheadFullException ex) {
+            observe(failure(context, elapsedMs(started), ex, 1, false), true);
             throw ex;
         }
     }
@@ -197,6 +225,12 @@ public class RoutingService {
     }
 
     private static FhirErrorDetails detailsOf(RuntimeException ex) {
+        if (ex instanceof RateLimitExceededException limited) {
+            return limited.details();
+        }
+        if (ex instanceof BulkheadFullException full) {
+            return full.details();
+        }
         if (ex instanceof CircuitBreakerOpenException open) {
             return open.details();
         }

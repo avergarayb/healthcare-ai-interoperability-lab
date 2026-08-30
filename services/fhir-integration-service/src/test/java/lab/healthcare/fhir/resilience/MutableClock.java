@@ -9,20 +9,20 @@ import java.time.ZoneOffset;
 /**
  * Test clock. Production uses {@link Clock#systemUTC()}.
  */
-final class MutableClock extends Clock {
+public final class MutableClock extends Clock {
 
     private Instant instant;
     private final ZoneId zone = ZoneOffset.UTC;
 
-    MutableClock(Instant instant) {
+    public MutableClock(Instant instant) {
         this.instant = instant;
     }
 
-    static MutableClock epoch() {
+    public static MutableClock epoch() {
         return new MutableClock(Instant.EPOCH);
     }
 
-    void advance(Duration duration) {
+    public void advance(Duration duration) {
         instant = instant.plus(duration);
     }
 

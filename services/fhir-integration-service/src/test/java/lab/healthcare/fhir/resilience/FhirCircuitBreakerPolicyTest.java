@@ -31,6 +31,8 @@ class FhirCircuitBreakerPolicyTest {
         assertThat(policy.affectsCircuit(FhirErrorCategory.CONFLICT)).isFalse();
         assertThat(policy.affectsCircuit(FhirErrorCategory.UNKNOWN)).isFalse();
         assertThat(policy.affectsCircuit(FhirErrorCategory.CIRCUIT_OPEN)).isFalse();
+        assertThat(policy.affectsCircuit(FhirErrorCategory.RATE_LIMITED)).isFalse();
+        assertThat(policy.affectsCircuit(FhirErrorCategory.BULKHEAD_FULL)).isFalse();
     }
 
     @Test

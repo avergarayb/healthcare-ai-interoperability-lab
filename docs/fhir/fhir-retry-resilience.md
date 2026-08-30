@@ -40,6 +40,8 @@ lab.healthcare.fhir.resilience
 RoutingService
       │  destination + correlation + audit/metrics
       ▼
+FhirRateLimiter / FhirBulkhead   (Task 026)
+      ▼
 FhirCircuitBreaker          (Task 025; fail-fast when OPEN)
       ▼
 FhirRetryExecutor

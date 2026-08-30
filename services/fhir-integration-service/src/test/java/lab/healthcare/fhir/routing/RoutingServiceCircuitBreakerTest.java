@@ -12,6 +12,8 @@ import lab.healthcare.fhir.resilience.CircuitBreakerOpenException;
 import lab.healthcare.fhir.resilience.CircuitBreakerState;
 import lab.healthcare.fhir.resilience.FhirCircuitBreakerRegistry;
 import lab.healthcare.fhir.resilience.FhirRetryExecutor;
+import lab.healthcare.fhir.resilience.bulkhead.FhirBulkheadRegistry;
+import lab.healthcare.fhir.resilience.ratelimit.FhirRateLimiterRegistry;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 import lab.healthcare.fhir.server.FhirServersProperties;
@@ -151,7 +153,9 @@ class RoutingServiceCircuitBreakerTest {
                 auditRecorder,
                 metricsRecorder,
                 FhirRetryExecutor.immediate(),
-                circuitBreakers);
+                circuitBreakers,
+                new FhirRateLimiterRegistry(),
+                new FhirBulkheadRegistry());
     }
 
     private static FhirServersProperties servers() {

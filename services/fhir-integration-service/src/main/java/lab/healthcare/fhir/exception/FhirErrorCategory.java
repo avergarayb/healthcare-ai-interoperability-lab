@@ -10,7 +10,9 @@ public enum FhirErrorCategory {
     TIMEOUT("FHIR request timed out"),
     CONNECTION_ERROR("FHIR connection failed"),
     UNKNOWN("FHIR integration failed"),
-    CIRCUIT_OPEN("FHIR destination circuit is open");
+    CIRCUIT_OPEN("FHIR destination circuit is open"),
+    RATE_LIMITED("FHIR destination rate limit exceeded"),
+    BULKHEAD_FULL("FHIR destination bulkhead is full");
 
     private final String safeMessage;
 

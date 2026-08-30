@@ -21,6 +21,8 @@ Caller
   ↓
 RoutingService
   ↓
+Rate Limiter / Bulkhead   (Task 026; local admission)
+  ↓
 Circuit Breaker
   ↓
 Retry Executor
@@ -42,7 +44,9 @@ lab.healthcare.fhir.resilience
 ├── FhirCircuitBreakerRegistry
 ├── CircuitBreakerOpenException
 ├── FhirRetryPolicy
-└── FhirRetryExecutor
+├── FhirRetryExecutor
+├── ratelimit/     (Task 026)
+└── bulkhead/      (Task 026)
 ```
 
 `FhirService` does not import this package. Mapping does not import it either.
@@ -87,6 +91,8 @@ Reuse Task 023 `FhirErrorCategory`. Only infrastructure/transient categories cou
 | `CONFLICT` | no |
 | `UNKNOWN` | no |
 | `CIRCUIT_OPEN` | no (already blocked) |
+| `RATE_LIMITED` | no (local admission; Task 026) |
+| `BULKHEAD_FULL` | no (local capacity; Task 026) |
 
 A missing Patient is not an unhealthy FHIR destination.
 
@@ -144,6 +150,7 @@ Distinct from `FhirClientException` and `RoutingException`. No tokens, secrets, 
 |---|---|---|
 | FHIR request attempted and failed | `FAILURE` + Task 023 category, `attempt` / `retry` as in Task 024 | one logical row on the terminal attempt |
 | Circuit OPEN, request blocked | `FAILURE` `error=CIRCUIT_OPEN` `attempt=1` no `retry=true` | one logical **failed** operation; `retryAttempts` unchanged |
+| Rate / bulkhead rejected | `FAILURE` `error=RATE_LIMITED` or `BULKHEAD_FULL` | one logical **failed** operation; circuit unchanged |
 
 A blocked request is a logical operation from the caller. It did not execute an HTTP request. It must not look like a FHIR 5xx or inflate retry counters.
 

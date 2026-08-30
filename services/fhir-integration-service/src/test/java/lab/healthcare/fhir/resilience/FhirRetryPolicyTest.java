@@ -20,6 +20,8 @@ class FhirRetryPolicyTest {
         assertThat(policy.isRetryable(FhirErrorCategory.CONFLICT)).isFalse();
         assertThat(policy.isRetryable(FhirErrorCategory.UNKNOWN)).isFalse();
         assertThat(policy.isRetryable(FhirErrorCategory.CIRCUIT_OPEN)).isFalse();
+        assertThat(policy.isRetryable(FhirErrorCategory.RATE_LIMITED)).isFalse();
+        assertThat(policy.isRetryable(FhirErrorCategory.BULKHEAD_FULL)).isFalse();
     }
 
     @Test
