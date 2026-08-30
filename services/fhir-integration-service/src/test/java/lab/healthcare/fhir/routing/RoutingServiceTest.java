@@ -8,6 +8,8 @@ import lab.healthcare.fhir.observability.InMemoryFhirMetricsRecorder;
 import lab.healthcare.fhir.observability.LoggingFhirAuditRecorder;
 import lab.healthcare.fhir.resilience.FhirCircuitBreakerRegistry;
 import lab.healthcare.fhir.resilience.FhirRetryExecutor;
+import lab.healthcare.fhir.resilience.bulkhead.FhirBulkheadRegistry;
+import lab.healthcare.fhir.resilience.ratelimit.FhirRateLimiterRegistry;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 import lab.healthcare.fhir.server.FhirServersProperties;
@@ -108,7 +110,9 @@ class RoutingServiceTest {
                 new LoggingFhirAuditRecorder(),
                 new InMemoryFhirMetricsRecorder(),
                 FhirRetryExecutor.immediate(),
-                new FhirCircuitBreakerRegistry());
+                new FhirCircuitBreakerRegistry(),
+                new FhirRateLimiterRegistry(),
+                new FhirBulkheadRegistry());
         RoutingRequest request = RoutingRequest.readPatient("local-hapi", "patient-001");
 
         IGenericClient client = routing.client(request);
@@ -137,7 +141,9 @@ class RoutingServiceTest {
                 new LoggingFhirAuditRecorder(),
                 new InMemoryFhirMetricsRecorder(),
                 FhirRetryExecutor.immediate(),
-                new FhirCircuitBreakerRegistry());
+                new FhirCircuitBreakerRegistry(),
+                new FhirRateLimiterRegistry(),
+                new FhirBulkheadRegistry());
     }
 
     private static FhirServersProperties twoServers() {

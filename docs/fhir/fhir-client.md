@@ -96,7 +96,7 @@ lab.healthcare.fhir
 ├── routing    destination profile → FHIR client
 ├── observability  correlation ID + FHIR_AUDIT line + in-memory metrics
 ├── exception  FhirClientException + bounded FhirErrorCategory
-└── resilience     bounded READ retry + per-destination circuit breaker (not inside FhirService)
+└── resilience     READ retry, circuit breaker, rate limit, bulkhead (not inside FhirService)
 ```
 
 `client` is the FHIR operation and HAPI wiring layer, not a dump of every class in the service.
@@ -111,7 +111,7 @@ There is no `@RestController` for this feature. The learning goal is outbound FH
 - canned safe `getMessage()` text;
 - the original HAPI / OAuth / network exception as `getCause()`.
 
-See [fhir-error-handling.md](fhir-error-handling.md). Routed Patient READ may retry transient categories and fail-fast when a destination circuit is OPEN; those layers are outside `FhirService`. There is no global HTTP exception handler.
+See [fhir-error-handling.md](fhir-error-handling.md). Routed Patient READ may be rate-limited or bulkhead-rejected, fail-fast when a destination circuit is OPEN, and retry transient categories; those layers are outside `FhirService`. There is no global HTTP exception handler.
 
 ## Run the local FHIR server
 

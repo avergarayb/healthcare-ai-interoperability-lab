@@ -72,6 +72,8 @@ Mapping and authentication do not need to know the ID yet. The integration entry
 | FHIR HTTP 404 | FAILURE | `NOT_FOUND` |
 | other classified FHIR/HAPI error | FAILURE | matching `FhirErrorCategory` |
 | circuit OPEN (no FHIR HTTP) | FAILURE | `CIRCUIT_OPEN` |
+| rate limited (no FHIR HTTP) | FAILURE | `RATE_LIMITED` |
+| bulkhead full (no FHIR HTTP) | FAILURE | `BULKHEAD_FULL` |
 
 Routing still selects the destination. Observability does not look up profiles.
 
