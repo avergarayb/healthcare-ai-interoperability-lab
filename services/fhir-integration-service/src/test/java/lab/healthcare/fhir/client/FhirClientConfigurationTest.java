@@ -90,7 +90,7 @@ class FhirClientConfigurationTest {
         FhirServerProfileRegistry registry = new FhirServerProfileRegistry(
                 new FhirServersProperties(
                         "local-hapi",
-                        Map.of("local-hapi", new FhirServersProperties.ServerSettings(" ", "R4", true, null))));
+                        Map.of("local-hapi", FhirServersProperties.ServerSettings.of(" ", "R4", true, null))));
 
         assertThatThrownBy(registry::activeProfile)
                 .isInstanceOf(IllegalStateException.class)
@@ -102,7 +102,7 @@ class FhirClientConfigurationTest {
         FhirServerProfileRegistry registry = new FhirServerProfileRegistry(
                 new FhirServersProperties(
                         "local-hapi",
-                        Map.of("local-hapi", new FhirServersProperties.ServerSettings(
+                        Map.of("local-hapi", FhirServersProperties.ServerSettings.of(
                                 "http://localhost:8080/fhir", " ", true, null))));
 
         assertThatThrownBy(registry::activeProfile)
@@ -184,7 +184,7 @@ class FhirClientConfigurationTest {
                         "local-hapi",
                         Map.of(
                                 "local-hapi",
-                                new FhirServersProperties.ServerSettings(
+                                FhirServersProperties.ServerSettings.of(
                                         "http://localhost:8080/fhir",
                                         "R4",
                                         true,
@@ -203,7 +203,7 @@ class FhirClientConfigurationTest {
                         "smart-lab",
                         Map.of(
                                 "smart-lab",
-                                new FhirServersProperties.ServerSettings(
+                                FhirServersProperties.ServerSettings.of(
                                         "http://localhost:8180/fhir",
                                         "R4",
                                         true,
@@ -228,7 +228,7 @@ class FhirClientConfigurationTest {
     }
 
     private static FhirServersProperties.ServerSettings localSettings() {
-        return new FhirServersProperties.ServerSettings("http://localhost:8080/fhir", "R4", true, null);
+        return FhirServersProperties.ServerSettings.of("http://localhost:8080/fhir", "R4", true, null);
     }
 
     private static FhirServersProperties twoServers() {
@@ -236,7 +236,7 @@ class FhirClientConfigurationTest {
                 "local-hapi",
                 Map.of(
                         "local-hapi", localSettings(),
-                        "example-org", new FhirServersProperties.ServerSettings(
+                        "example-org", FhirServersProperties.ServerSettings.of(
                                 "https://example.org/fhir", "R4", false, null)));
     }
 
@@ -258,7 +258,7 @@ class FhirClientConfigurationTest {
                 "local-hapi",
                 Map.of(
                         "local-hapi", localSettings(),
-                        "secured-lab", new FhirServersProperties.ServerSettings(
+                        "secured-lab", FhirServersProperties.ServerSettings.of(
                                 "http://localhost:8180/fhir",
                                 "R4",
                                 false,
@@ -278,7 +278,7 @@ class FhirClientConfigurationTest {
                 "secured-lab",
                 Map.of(
                         "secured-lab",
-                        new FhirServersProperties.ServerSettings(
+                        FhirServersProperties.ServerSettings.of(
                                 "http://localhost:8180/fhir",
                                 "R4",
                                 true,

@@ -62,3 +62,20 @@ fhir:
         redirect-uri: http://127.0.0.1:8081/smart/callback
         scope: patient/Patient.read patient/Observation.read
         aud: http://localhost:8180/fhir
+    epic-sandbox:
+      enabled: false
+      vendor: EPIC
+      base-url: https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4/
+      fhir-version: R4
+      authentication:
+        type: SMART_AUTHORIZATION_CODE
+        client-id: ${EPIC_SANDBOX_CLIENT_ID:}
+        redirect-uri: ${EPIC_SANDBOX_REDIRECT_URI:}
+        scope: ${EPIC_SANDBOX_SCOPE:}
+        aud: https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4/
+        smart-configuration-url: ${EPIC_SANDBOX_SMART_CONFIGURATION_URL:}
+      vendor-integration:
+        environment: SANDBOX
+        launch-mode: STANDALONE
+        user-context: PATIENT
+        client-authentication: PUBLIC_PKCE

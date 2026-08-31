@@ -58,7 +58,7 @@ smart-lab:
     aud: http://localhost:8180/fhir
 ```
 
-A later real profile would replace those values. The SMART types stay the same.
+A later real profile would replace those values. The SMART types stay the same. Task 029 adds a disabled `epic-sandbox` destination that reuses these types without calling Epic; see [vendors/epic.md](vendors/epic.md).
 
 ## Optional metadata vs incompatibility
 

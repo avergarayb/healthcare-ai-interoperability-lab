@@ -2,7 +2,7 @@
 
 This note starts Phase 2: the Java client can describe **more than one** FHIR server in configuration, and pick one without changing `FhirService`. Read it after [fhir-client.md](fhir-client.md).
 
-OAuth 2.0 Client Credentials is documented in [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md). Synthetic SMART lives on the optional `smart-lab` profile; readiness for a later real provider is in [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). There is still no REST controller or secret store.
+OAuth 2.0 Client Credentials is documented in [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md). Synthetic SMART lives on the optional `smart-lab` profile; readiness for a later real provider is in [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). The Epic sandbox profile is a **disabled** placeholder; see [vendors/epic.md](vendors/epic.md). There is still no REST controller or secret store.
 
 ## Server vs client
 
@@ -159,7 +159,7 @@ That response is **server** metadata. The **client** only chooses which base URL
 
 - OAuth 2.0 Client Credentials is implemented for `secured-lab`; `local-hapi` stays `NONE`
 - JWT login, client credentials against a real EHR
-- Epic / Oracle Health SMART certification (Task 028 only prepares discovery/compatibility types)
+- Epic / Oracle Health live sandbox authorization (Task 029 only prepares an Epic profile; see [vendors/epic.md](vendors/epic.md))
 - Secrets committed in YAML
 - Multi-tenant routing
 - Persisting profiles in a database

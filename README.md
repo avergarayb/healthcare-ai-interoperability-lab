@@ -44,7 +44,7 @@ healthcare-ai-interoperability-lab/
 └── scripts/
 ```
 
-The Docker Compose project name is `healthcare-ai-interoperability-lab`. Services remain `hapi-fhir` and `hapi-fhir-postgres`, plus optional `lab-oauth` and `fhir-gateway` for OAuth/SMART. The initial application is `fhir-integration-service` (Java packages: `client`, `server`, `auth`, `smart`, `mapping`, `routing`, `observability`, `exception`, `resilience` — see [`docs/fhir/fhir-architecture.md`](docs/fhir/fhir-architecture.md)). SMART discovery is validated for Authorization Code + PKCE S256 without connecting Epic or Oracle Health; see [`docs/fhir/fhir-smart-real-world-readiness.md`](docs/fhir/fhir-smart-real-world-readiness.md). The future Python service `ai-service` is not created yet.
+The Docker Compose project name is `healthcare-ai-interoperability-lab`. Services remain `hapi-fhir` and `hapi-fhir-postgres`, plus optional `lab-oauth` and `fhir-gateway` for OAuth/SMART. The initial application is `fhir-integration-service` (Java packages: `client`, `server`, `auth`, `smart`, `mapping`, `routing`, `observability`, `exception`, `resilience`, `vendor` — see [`docs/fhir/fhir-architecture.md`](docs/fhir/fhir-architecture.md)). SMART discovery is validated for Authorization Code + PKCE S256 without connecting Epic or Oracle Health; see [`docs/fhir/fhir-smart-real-world-readiness.md`](docs/fhir/fhir-smart-real-world-readiness.md). An Epic sandbox profile is prepared but disabled; see [`docs/fhir/vendors/epic.md`](docs/fhir/vendors/epic.md). The future Python service `ai-service` is not created yet.
 
 ## Prerequisites
 
