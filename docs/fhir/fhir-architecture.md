@@ -1,6 +1,6 @@
 # FHIR Integration Service architecture
 
-This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md).
+This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). It does not connect to Epic.
 
 There is still no `@RestController`, no DTO layer, and no extra microservice.
 
@@ -103,7 +103,7 @@ lab.healthcare.fhir
 │   ├── FhirErrorDetails.java
 │   └── FhirErrorClassifier.java
 │
-└── resilience
+├── resilience
     ├── FhirResilienceProperties.java
     ├── FhirResilienceConfiguration.java
     ├── FhirRetryPolicy.java
@@ -124,9 +124,26 @@ lab.healthcare.fhir
         ├── FhirBulkhead.java
         ├── FhirBulkheadRegistry.java
         └── BulkheadFullException.java
+
+└── vendor
+    ├── FhirVendor.java
+    ├── FhirVendorProfile.java
+    └── epic
+        ├── EpicIntegrationProfile.java
+        ├── EpicProfileValidator.java
+        ├── EpicCapabilities.java
+        ├── EpicEnvironment.java
+        ├── EpicLaunchMode.java
+        ├── EpicUserContext.java
+        ├── EpicClientAuthentication.java
+        ├── EpicReadinessState.java
+        ├── EpicKnownApiSurface.java
+        ├── EpicSandboxEndpoints.java
+        ├── EpicProfileException.java
+        └── EpicVendorConfiguration.java
 ```
 
-YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, `fhir.resilience`) bind server profiles and the resilience policy. Spring still scans from `lab.healthcare.fhir`.
+YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, optional `vendor` / `vendor-integration`, `fhir.resilience`) bind server profiles, vendor metadata, and the resilience policy. Spring still scans from `lab.healthcare.fhir`.
 
 ## Package responsibilities
 
@@ -142,6 +159,8 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, `fhir.
 | `observability` | correlation, outcome, duration, safe audit line, aggregated counters | FHIR payloads, tokens, destination lookup, Prometheus |
 | `exception` | bounded failure category, safe details, `FhirClientException` | OAuth token POST (`OAuth2TokenException` stays in `auth.oauth2`), retry/circuit breaker |
 | `resilience` | retry, circuit breaker, rate limit, bulkhead, YAML policy sizes | FHIR operations, destination lookup, OAuth, CREATE/UPDATE/DELETE |
+| `vendor` | bounded vendor identity (`GENERIC`, `EPIC`) | FHIR operations, SMART HTTP, Oracle Health |
+| `vendor.epic` | Epic sandbox profile, launch/auth metadata, readiness, honest unimplemented modes | live Epic OAuth, Hyperspace, `private_key_jwt` |
 
 `FhirAuthenticationSettings` lives in `auth` because it is the **runtime** authentication model. `FhirServersProperties.AuthenticationSettings` stays nested in `server` as the YAML binding DTO. The registry maps one to the other. That keeps Spring Boot record binding on a single canonical constructor in the properties type.
 
@@ -175,6 +194,11 @@ routing ──► client   (FhirClientFactory, FhirAccessTokenProviders, FhirSer
 routing ──► observability (audit event + metrics after destination is known)
 routing ──► exception     (RoutingException details; FhirClientException details)
 routing ──► resilience    (READ rate limit → bulkhead → circuit → retry; FhirService stays unaware)
+
+server ──► vendor         (FhirVendor on the named profile)
+vendor.epic ──► server    (EpicIntegrationProfile from FhirServerProfile)
+vendor.epic ──► smart     (reuses SmartAuthorizationRequest / validator; does not duplicate discovery)
+vendor.epic ──► vendor    (FhirVendorProfile)
 ```
 
 Intended runtime chain for an authenticated FHIR call:
@@ -199,6 +223,7 @@ auth → smart → auth
 smart → client → smart
 server → smart → server
 FhirService → OAuth2TokenClient / Pkce / AuthorizationCodeClient
+FhirService → vendor.epic
 ```
 
 `auth` and `auth.oauth2` import each other. That is a **namespace** cycle, not a SMART/client cycle. `AccessToken` stays in `auth` because SMART also uses it. `CachingAccessTokenProvider` stays in `auth` because it is the Client Credentials `AccessTokenProvider`, not a SMART type. No extra interface was added solely to split those two packages.
@@ -276,5 +301,6 @@ Unit and feature tests follow the production packages where practical:
 | `observability` | audit event unit tests, `FhirAuditObservabilityIT`, metrics counters, `FhirMetricsObservabilityIT` |
 | `exception` | classifier / details unit tests, `FhirErrorHandlingIT` |
 | `resilience` | retry, circuit, rate/bulkhead, `FhirResiliencePipelineIT` |
+| `vendor.epic` | Epic profile / validator unit tests, `EpicIntegrationProfileIT` |
 
 Synthetic seed helpers stay next to the FHIR ITs in `client`.

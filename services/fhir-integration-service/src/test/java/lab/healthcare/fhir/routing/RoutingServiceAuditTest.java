@@ -89,9 +89,9 @@ class RoutingServiceAuditTest {
         return new FhirServersProperties(
                 "local-hapi",
                 Map.of(
-                        "local-hapi", new FhirServersProperties.ServerSettings(
+                        "local-hapi", FhirServersProperties.ServerSettings.of(
                                 "http://localhost:8080/fhir", "R4", true, null),
-                        "example-org", new FhirServersProperties.ServerSettings(
+                        "example-org", FhirServersProperties.ServerSettings.of(
                                 "https://example.org/fhir", "R4", false, null)));
     }
 }

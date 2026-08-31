@@ -202,7 +202,7 @@ class FhirResiliencePipelineTest {
     private static FhirServersProperties servers() {
         return new FhirServersProperties(
                 "local-hapi",
-                Map.of("local-hapi", new FhirServersProperties.ServerSettings(
+                Map.of("local-hapi", FhirServersProperties.ServerSettings.of(
                         "http://localhost:8080/fhir", "R4", true, null)));
     }
 }

@@ -1,6 +1,7 @@
 package lab.healthcare.fhir.server;
 
 import lab.healthcare.fhir.auth.FhirAuthenticationType;
+import lab.healthcare.fhir.vendor.FhirVendor;
 
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.context.FhirVersionEnum;
@@ -32,7 +33,7 @@ class FhirServersPropertiesTest {
     @Test
     void applicationYamlBindsLocalHapiAsActiveProfile() {
         assertThat(properties.activeServer()).isEqualTo("local-hapi");
-        assertThat(properties.servers()).containsKeys("local-hapi", "example-org", "secured-lab", "smart-lab");
+        assertThat(properties.servers()).containsKeys("local-hapi", "example-org", "secured-lab", "smart-lab", "epic-sandbox");
         assertThat(activeFhirServerProfile.name()).isEqualTo("local-hapi");
         assertThat(activeFhirServerProfile.baseUrl()).isEqualTo("http://localhost:8080/fhir");
         assertThat(activeFhirServerProfile.fhirVersion()).isEqualTo("R4");
@@ -46,6 +47,9 @@ class FhirServersPropertiesTest {
         assertThat(registry.profile("smart-lab").enabled()).isFalse();
         assertThat(registry.profile("smart-lab").authentication().type())
                 .isEqualTo(FhirAuthenticationType.SMART_AUTHORIZATION_CODE);
+        assertThat(registry.profile("epic-sandbox").enabled()).isFalse();
+        assertThat(registry.profile("epic-sandbox").vendor()).isEqualTo(FhirVendor.EPIC);
+        assertThat(registry.profile("epic-sandbox").authentication().clientId()).isEmpty();
         assertThat(fhirContext.getVersion().getVersion()).isEqualTo(FhirVersionEnum.R4);
         assertThat(fhirClient.getServerBase()).isEqualTo("http://localhost:8080/fhir");
     }

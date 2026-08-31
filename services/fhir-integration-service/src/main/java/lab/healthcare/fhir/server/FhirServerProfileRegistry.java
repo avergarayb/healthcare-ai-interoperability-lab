@@ -2,6 +2,7 @@ package lab.healthcare.fhir.server;
 
 import lab.healthcare.fhir.auth.FhirAuthenticationSettings;
 import lab.healthcare.fhir.auth.FhirAuthenticationType;
+import lab.healthcare.fhir.vendor.FhirVendor;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -32,6 +33,7 @@ public class FhirServerProfileRegistry {
             throw new IllegalStateException("FHIR server profile '" + profile.name() + "' is disabled");
         }
         requireSecretWhenClientCredentialsEnabled(profile);
+        requireSmartFieldsWhenEnabled(profile);
         return profile;
     }
 
@@ -56,8 +58,14 @@ public class FhirServerProfileRegistry {
             throw new IllegalStateException("Property fhir.servers." + name + ".fhir-version must be set");
         }
         boolean enabled = Boolean.TRUE.equals(settings.enabled());
-        FhirAuthenticationSettings authentication = authentication(name, settings.authentication());
-        return new FhirServerProfile(name, baseUrl.trim(), fhirVersion.trim(), enabled, authentication);
+        FhirAuthenticationSettings authentication = authentication(name, enabled, settings.authentication());
+        return new FhirServerProfile(
+                name,
+                baseUrl.trim(),
+                fhirVersion.trim(),
+                enabled,
+                FhirVendor.fromConfiguration(settings.vendor()),
+                authentication);
     }
 
     public Map<String, FhirServerProfile> profiles() {
@@ -70,13 +78,14 @@ public class FhirServerProfileRegistry {
 
     private static FhirAuthenticationSettings authentication(
             String profileName,
+            boolean enabled,
             FhirServersProperties.AuthenticationSettings raw) {
         if (raw == null || raw.type() == null || raw.type().isBlank()) {
             return FhirAuthenticationSettings.none();
         }
         FhirAuthenticationType type;
         try {
-            type = FhirAuthenticationType.valueOf(raw.type().trim().toUpperCase(Locale.ROOT));
+            type = parseAuthenticationType(raw.type());
         } catch (IllegalArgumentException ex) {
             throw new IllegalStateException(
                     "Property fhir.servers." + profileName + ".authentication.type is unsupported: " + raw.type(),
@@ -85,12 +94,24 @@ public class FhirServerProfileRegistry {
         if (type == FhirAuthenticationType.NONE) {
             return FhirAuthenticationSettings.none();
         }
-        String clientId = required(raw.clientId(), profileName, "client-id");
         if (type == FhirAuthenticationType.OAUTH2_CLIENT_CREDENTIALS) {
             String tokenUrl = required(raw.tokenUrl(), profileName, "token-url");
+            String clientId = required(raw.clientId(), profileName, "client-id");
             String clientSecret = raw.clientSecret() == null ? "" : raw.clientSecret();
             return new FhirAuthenticationSettings(type, tokenUrl, clientId, clientSecret);
         }
+        if (!enabled) {
+            return new FhirAuthenticationSettings(
+                    type,
+                    null,
+                    optional(raw.clientId()),
+                    "",
+                    blankToNull(raw.smartConfigurationUrl()),
+                    optional(raw.redirectUri()),
+                    optional(raw.scope()),
+                    optional(raw.aud()));
+        }
+        String clientId = required(raw.clientId(), profileName, "client-id");
         String smartConfigurationUrl = required(raw.smartConfigurationUrl(), profileName, "smart-configuration-url");
         String redirectUri = required(raw.redirectUri(), profileName, "redirect-uri");
         String scope = required(raw.scope(), profileName, "scope");
@@ -106,12 +127,28 @@ public class FhirServerProfileRegistry {
                 aud.trim());
     }
 
+    private static FhirAuthenticationType parseAuthenticationType(String raw) {
+        String normalized = raw.trim().toUpperCase(Locale.ROOT);
+        if ("SMART".equals(normalized)) {
+            return FhirAuthenticationType.SMART_AUTHORIZATION_CODE;
+        }
+        return FhirAuthenticationType.valueOf(normalized);
+    }
+
     private static String required(String value, String profileName, String property) {
         if (value == null || value.isBlank()) {
             throw new IllegalStateException(
                     "Property fhir.servers." + profileName + ".authentication." + property + " must be set");
         }
         return value.trim();
+    }
+
+    private static String optional(String value) {
+        return value == null || value.isBlank() ? "" : value.trim();
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private static void requireSecretWhenClientCredentialsEnabled(FhirServerProfile profile) {
@@ -123,6 +160,35 @@ public class FhirServerProfileRegistry {
         if (secret == null || secret.isBlank()) {
             throw new IllegalStateException(
                     "Property fhir.servers." + profile.name() + ".authentication.client-secret must be set");
+        }
+    }
+
+    private static void requireSmartFieldsWhenEnabled(FhirServerProfile profile) {
+        FhirAuthenticationSettings authentication = profile.authentication();
+        if (!authentication.isSmartAuthorizationCode()) {
+            return;
+        }
+        if (authentication.clientId() == null || authentication.clientId().isBlank()) {
+            throw new IllegalStateException(
+                    "Property fhir.servers." + profile.name() + ".authentication.client-id must be set");
+        }
+        if (authentication.redirectUri() == null || authentication.redirectUri().isBlank()) {
+            throw new IllegalStateException(
+                    "Property fhir.servers." + profile.name() + ".authentication.redirect-uri must be set");
+        }
+        if (authentication.scope() == null || authentication.scope().isBlank()) {
+            throw new IllegalStateException(
+                    "Property fhir.servers." + profile.name() + ".authentication.scope must be set");
+        }
+        if (authentication.aud() == null || authentication.aud().isBlank()) {
+            throw new IllegalStateException(
+                    "Property fhir.servers." + profile.name() + ".authentication.aud must be set");
+        }
+        if (authentication.smartConfigurationUrl() == null || authentication.smartConfigurationUrl().isBlank()) {
+            throw new IllegalStateException(
+                    "Property fhir.servers."
+                            + profile.name()
+                            + ".authentication.smart-configuration-url must be set");
         }
     }
 }

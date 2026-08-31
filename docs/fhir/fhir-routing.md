@@ -6,7 +6,7 @@ There is still no `@RestController`, no routing database, and no message broker.
 
 ## Why routing exists
 
-Task 015 already describes more than one FHIR server in YAML (`local-hapi`, `example-org`, `secured-lab`, `smart-lab`). The Spring bean `IGenericClient` talks to **one** of them: `fhir.active-server`.
+Task 015 already describes more than one FHIR server in YAML (`local-hapi`, `example-org`, `secured-lab`, `smart-lab`, `epic-sandbox`). The Spring bean `IGenericClient` talks to **one** of them: `fhir.active-server`. Destination `epic-sandbox` is a disabled vendor profile; routing does not contain Epic OAuth logic. See [vendors/epic.md](vendors/epic.md).
 
 A reusable integration component also needs to send a given Resource to a **named** destination without hard-coding `http://localhost:8080/fhir` in business code.
 

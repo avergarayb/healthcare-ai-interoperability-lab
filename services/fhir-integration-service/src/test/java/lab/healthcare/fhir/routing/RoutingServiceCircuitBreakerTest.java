@@ -162,9 +162,9 @@ class RoutingServiceCircuitBreakerTest {
         return new FhirServersProperties(
                 "local-hapi",
                 Map.of(
-                        "local-hapi", new FhirServersProperties.ServerSettings(
+                        "local-hapi", FhirServersProperties.ServerSettings.of(
                                 "http://localhost:8080/fhir", "R4", true, null),
-                        "secured-lab", new FhirServersProperties.ServerSettings(
+                        "secured-lab", FhirServersProperties.ServerSettings.of(
                                 "http://localhost:8180/fhir", "R4", true, null)));
     }
 }

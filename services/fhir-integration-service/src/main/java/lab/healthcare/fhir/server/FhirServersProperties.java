@@ -15,7 +15,17 @@ public record FhirServersProperties(String activeServer, Map<String, ServerSetti
             String baseUrl,
             String fhirVersion,
             Boolean enabled,
-            AuthenticationSettings authentication) {
+            AuthenticationSettings authentication,
+            String vendor,
+            VendorIntegrationSettings vendorIntegration) {
+
+        public static ServerSettings of(
+                String baseUrl,
+                String fhirVersion,
+                Boolean enabled,
+                AuthenticationSettings authentication) {
+            return new ServerSettings(baseUrl, fhirVersion, enabled, authentication, null, null);
+        }
     }
 
     public record AuthenticationSettings(
@@ -27,5 +37,12 @@ public record FhirServersProperties(String activeServer, Map<String, ServerSetti
             String redirectUri,
             String scope,
             String aud) {
+    }
+
+    public record VendorIntegrationSettings(
+            String environment,
+            String launchMode,
+            String userContext,
+            String clientAuthentication) {
     }
 }
