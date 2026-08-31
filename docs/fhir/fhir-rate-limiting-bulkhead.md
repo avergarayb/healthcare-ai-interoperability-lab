@@ -2,7 +2,7 @@
 
 This note adds **admission control** and **concurrency isolation** around routed Patient **READ**. Read it after [fhir-circuit-breaker.md](fhir-circuit-breaker.md). It does not replace classification, retry, or the circuit breaker.
 
-This is an in-memory learning foundation. It is not Redis, Spring Cloud Gateway rate limiting, Resilience4j, or a distributed tenant quota.
+This is an in-memory learning foundation. It is not Redis, Spring Cloud Gateway rate limiting, Resilience4j, or a distributed tenant quota. Window size and permit count are bound from `fhir.resilience`; see [fhir-resilience.md](fhir-resilience.md).
 
 ## Why both exist
 

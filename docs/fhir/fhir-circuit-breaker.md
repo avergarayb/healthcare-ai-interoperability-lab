@@ -2,7 +2,7 @@
 
 This note adds a **per-destination circuit breaker** around routed Patient **READ**. Read it after [fhir-retry-resilience.md](fhir-retry-resilience.md). It does not replace classification, retry, routing, audit, or metrics.
 
-This is an internal learning foundation. It is not a replacement for Resilience4j, Hystrix, or Spring Cloud Circuit Breaker.
+This is an internal learning foundation. It is not a replacement for Resilience4j, Hystrix, or Spring Cloud Circuit Breaker. Threshold and reset timeout are bound from `fhir.resilience.circuit-breaker`; see [fhir-resilience.md](fhir-resilience.md).
 
 ## Why a circuit breaker exists
 

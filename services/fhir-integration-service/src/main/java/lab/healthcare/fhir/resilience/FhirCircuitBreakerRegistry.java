@@ -1,7 +1,5 @@
 package lab.healthcare.fhir.resilience;
 
-import org.springframework.stereotype.Component;
-
 import java.time.Clock;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -9,7 +7,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * One breaker per destination/profile name. A failing server must not open
  * another destination's circuit.
  */
-@Component
 public class FhirCircuitBreakerRegistry {
 
     private final FhirCircuitBreakerPolicy policy;
