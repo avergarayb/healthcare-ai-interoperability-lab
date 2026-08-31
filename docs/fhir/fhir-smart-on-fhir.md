@@ -2,7 +2,7 @@
 
 This note adds a **synthetic SMART on FHIR** Authorization Code + PKCE flow to the Java FHIR client. Read it after [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md). It is **not** Epic, Oracle Health, OpenID Connect, or a login UI.
 
-There is still no `@RestController`, no real user identity, and no commercial EHR.
+There is still no `@RestController`, no real user identity, and no commercial EHR. Task 028 prepares discovery, capabilities, and authorization-request types for a later real provider; it does **not** certify Epic or Oracle Health. See [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md).
 
 ## OAuth 2.0 vs SMART
 
@@ -175,6 +175,10 @@ AccessTokenProvider
 | Class | Job |
 |---|---|
 | `SmartConfigurationClient` | `GET` well-known JSON |
+| `SmartConfiguration` | discovered endpoints plus optional issuer/scopes/grants/PKCE methods |
+| `SmartCapabilities` | interpretation of that metadata (declared vs absent) |
+| `SmartConfigurationValidator` | can this metadata run Authorization Code + PKCE S256? |
+| `SmartAuthorizationRequest` | one session: `aud` from the profile, scopes, state, S256 challenge |
 | `Pkce` | verifier, S256 challenge, `state` |
 | `AuthorizationCodeClient` | authorize URL, state check, code exchange, refresh |
 | `SmartTokenProvider` | cache + refresh for the SMART profile |

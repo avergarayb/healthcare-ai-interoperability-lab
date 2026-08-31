@@ -70,20 +70,33 @@ class FhirSmartOnFhirIT {
     @Test
     void smartDiscoveryExposesAuthorizationCodeAndPkce() {
         SmartConfiguration configuration = smartConfigurationClient.fetch(
-                activeFhirServerProfile.authentication().smartConfigurationUrl());
+                SmartDiscoveryUrl.from(activeFhirServerProfile.authentication()));
+        SmartCapabilities capabilities = SmartCapabilities.from(configuration);
+        new SmartConfigurationValidator().validate(configuration);
 
         assertThat(configuration.authorizationEndpoint()).isEqualTo("http://localhost:9090/authorize");
         assertThat(configuration.tokenEndpoint()).isEqualTo("http://localhost:9090/oauth/token");
+        assertThat(configuration.grantTypesSupported()).contains("authorization_code");
         assertThat(configuration.responseTypesSupported()).contains("code");
         assertThat(configuration.codeChallengeMethodsSupported()).contains("S256");
         assertThat(configuration.scopesSupported()).contains("patient/Patient.read", "patient/Observation.read");
         assertThat(configuration.capabilities()).contains("launch-standalone", "client-public");
+        assertThat(capabilities.declaresAuthorizationCode()).isTrue();
+        assertThat(capabilities.declaresPkceS256()).isTrue();
     }
 
     @Test
     void authorizationCodePkceExchangeReturnsPatientContext() throws Exception {
         FhirAuthenticationSettings authentication = activeFhirServerProfile.authentication();
-        SmartConfiguration configuration = smartConfigurationClient.fetch(authentication.smartConfigurationUrl());
+        SmartConfiguration configuration = smartConfigurationClient.fetch(SmartDiscoveryUrl.from(authentication));
+        String challenge = Pkce.codeChallengeS256("lab-it-pkce-verifier");
+        SmartAuthorizationRequest request = authorizationCodeClient.newAuthorizationRequest(
+                authentication, configuration, "lab-it-state", challenge);
+        assertThat(request.aud()).isEqualTo(authentication.aud());
+        assertThat(request.scope()).contains("patient/Patient.read");
+        assertThat(request.codeChallengeMethod()).isEqualTo("S256");
+        assertThat(request.toString()).doesNotContain("code_verifier");
+
         AuthorizationSession session = authorizationCodeClient.createAuthorization(authentication, configuration);
 
         HttpResponse<String> authorize = httpClient.send(

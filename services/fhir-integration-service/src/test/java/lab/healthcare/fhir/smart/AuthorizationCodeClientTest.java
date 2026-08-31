@@ -42,6 +42,33 @@ class AuthorizationCodeClientTest {
     }
 
     @Test
+    void authorizationRequestUsesProfileAudAndS256() {
+        String challenge = Pkce.codeChallengeS256("lab-pkce-verifier");
+        SmartAuthorizationRequest request = client.newAuthorizationRequest(
+                smartSettings(), configuration(), "lab-state", challenge);
+
+        assertThat(request.aud()).isEqualTo("http://localhost:8180/fhir");
+        assertThat(request.codeChallengeMethod()).isEqualTo("S256");
+        assertThat(request.toAuthorizationUrl()).contains("aud=http%3A%2F%2Flocalhost%3A8180%2Ffhir");
+        assertThat(request.toString()).doesNotContain("code_verifier");
+    }
+
+    @Test
+    void createAuthorizationRejectsDeclaredIncompatiblePkce() {
+        SmartConfiguration incompatible = new SmartConfiguration(
+                "http://localhost:9090/authorize",
+                "http://localhost:9090/oauth/token",
+                List.of(),
+                List.of("code"),
+                List.of("plain"),
+                List.of());
+
+        assertThatThrownBy(() -> client.createAuthorization(smartSettings(), incompatible))
+                .isInstanceOf(SmartCompatibilityException.class)
+                .hasMessageContaining("S256");
+    }
+
+    @Test
     void callbackRejectsMismatchedState() {
         assertThatThrownBy(() -> client.authorizationCodeFromRedirect(
                         "http://127.0.0.1:8081/smart/callback?code=abc&state=other", "expected"))

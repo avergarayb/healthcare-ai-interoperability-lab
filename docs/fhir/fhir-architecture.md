@@ -1,6 +1,6 @@
 # FHIR Integration Service architecture
 
-This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md).
+This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md).
 
 There is still no `@RestController`, no DTO layer, and no extra microservice.
 
@@ -66,6 +66,12 @@ lab.healthcare.fhir
 ├── smart
 │   ├── SmartConfiguration.java
 │   ├── SmartConfigurationClient.java
+│   ├── SmartDiscoveryUrl.java
+│   ├── SmartCapabilities.java
+│   ├── SmartFlowRequirements.java
+│   ├── SmartConfigurationValidator.java
+│   ├── SmartCompatibilityException.java
+│   ├── SmartAuthorizationRequest.java
 │   ├── AuthorizationCodeClient.java
 │   ├── AuthorizationSession.java
 │   ├── SmartTokenProvider.java
@@ -130,7 +136,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, `fhir.
 | `server` | named profiles, which server is active | how to obtain a token |
 | `auth` | token value, provider SPI, Bearer interceptor, cache for Client Credentials | SMART discovery, FHIR search |
 | `auth.oauth2` | Client Credentials HTTP token POST and JSON parse | SMART authorize URL, `FhirService` |
-| `smart` | well-known, PKCE, authorization code, refresh | generic Client Credentials |
+| `smart` | well-known, capabilities, compatibility, PKCE, authorization request, authorization code, refresh | generic Client Credentials, FHIR operations |
 | `mapping` | external JSON → HAPI R4 Resource | FHIR HTTP, OAuth, terminology `$validate-code` |
 | `routing` | destination profile name → enabled server + client | mapping, OAuth grant types, FHIR search logic |
 | `observability` | correlation, outcome, duration, safe audit line, aggregated counters | FHIR payloads, tokens, destination lookup, Prometheus |
@@ -262,7 +268,7 @@ Unit and feature tests follow the production packages where practical:
 | Production | Tests |
 |---|---|
 | `auth` / `auth.oauth2` | interceptor, token cache, `OAuth2TokenClient`, `FhirOauth2AuthenticationIT` |
-| `smart` | PKCE, discovery, code exchange, `FhirSmartOnFhirIT` |
+| `smart` | PKCE, discovery, capabilities, validator, authorization request, `FhirSmartOnFhirIT` |
 | `server` | YAML binding, `FhirServerConfigurationIT` |
 | `client` | `FhirService` unit tests and FHIR operation ITs (search, CRUD, bundles, …) |
 | `mapping` | JSON → Patient/Observation unit tests, `FhirMappingIT` |

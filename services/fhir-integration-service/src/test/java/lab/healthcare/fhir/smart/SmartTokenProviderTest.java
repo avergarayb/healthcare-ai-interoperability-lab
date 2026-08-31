@@ -15,6 +15,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -90,6 +92,25 @@ class SmartTokenProviderTest {
         clock.set(Instant.parse("2026-08-26T12:00:45Z"));
         assertThat(provider.accessToken()).isEqualTo("smart-2");
         verify(authorizationCodeClient, times(1)).refreshAccessToken(AUTH, CONFIG.tokenEndpoint(), "refresh-1");
+    }
+
+    @Test
+    void rejectsIncompatibleDiscoveredMetadataBeforeAuthorization() {
+        SmartConfiguration incompatible = new SmartConfiguration(
+                "http://localhost:9090/authorize",
+                "http://localhost:9090/oauth/token",
+                List.of(),
+                List.of("code"),
+                List.of("plain"),
+                List.of());
+        when(configurationClient.fetch(AUTH.smartConfigurationUrl())).thenReturn(incompatible);
+        SmartTokenProvider provider = new SmartTokenProvider(
+                configurationClient, authorizationCodeClient, AUTH, Clock.systemUTC());
+
+        assertThatThrownBy(provider::accessToken)
+                .isInstanceOf(SmartCompatibilityException.class)
+                .hasMessageContaining("S256");
+        verify(authorizationCodeClient, never()).authorizeSynthetically(AUTH, incompatible);
     }
 
     private static final class MutableClock extends Clock {

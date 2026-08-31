@@ -23,6 +23,7 @@ public class AuthorizationCodeClient {
 
     private final HttpClient httpClient;
     private final OAuth2TokenResponseParser parser;
+    private final SmartConfigurationValidator validator;
 
     public AuthorizationCodeClient() {
         this(
@@ -36,32 +37,29 @@ public class AuthorizationCodeClient {
     AuthorizationCodeClient(HttpClient httpClient, Clock clock) {
         this.httpClient = httpClient;
         this.parser = new OAuth2TokenResponseParser(new ObjectMapper(), clock);
+        this.validator = new SmartConfigurationValidator();
+    }
+
+    public SmartAuthorizationRequest newAuthorizationRequest(
+            FhirAuthenticationSettings authentication,
+            SmartConfiguration configuration,
+            String state,
+            String codeChallenge) {
+        requireSmart(authentication);
+        validator.validate(configuration, SmartFlowRequirements.authorizationCodePkceS256());
+        return SmartAuthorizationRequest.fromProfile(authentication, configuration, state, codeChallenge);
     }
 
     public AuthorizationSession createAuthorization(
             FhirAuthenticationSettings authentication,
             SmartConfiguration configuration) {
-        requireSmart(authentication);
-        if (configuration == null
-                || configuration.authorizationEndpoint() == null
-                || configuration.authorizationEndpoint().isBlank()) {
-            throw new IllegalArgumentException("SMART authorization_endpoint must be provided");
-        }
         String verifier = Pkce.codeVerifier();
         String challenge = Pkce.codeChallengeS256(verifier);
         String state = Pkce.newState();
-        String url = configuration.authorizationEndpoint()
-                + "?"
-                + query(
-                        "response_type", "code",
-                        "client_id", authentication.clientId(),
-                        "redirect_uri", authentication.redirectUri(),
-                        "scope", authentication.scope(),
-                        "state", state,
-                        "aud", authentication.aud(),
-                        "code_challenge", challenge,
-                        "code_challenge_method", "S256");
-        return new AuthorizationSession(url, state, verifier, challenge);
+        SmartAuthorizationRequest request = newAuthorizationRequest(
+                authentication, configuration, state, challenge);
+        return new AuthorizationSession(
+                request.toAuthorizationUrl(), request.state(), verifier, request.codeChallenge());
     }
 
     public String authorizationCodeFromRedirect(String redirectLocation, String expectedState) {
