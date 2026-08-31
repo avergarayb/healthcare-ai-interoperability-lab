@@ -191,7 +191,7 @@ A `503` is `SERVER_ERROR` once. The client is not called again.
 024  Retry / Backoff
 025  Circuit Breaker
 026  Rate Limiting / Bulkhead
-027  Idempotency
+027  Resilience configuration
 ```
 
 Task 024 implements that policy for routed Patient READ; see [fhir-retry-resilience.md](fhir-retry-resilience.md). `NOT_FOUND` and `VALIDATION_ERROR` do not retry; `TIMEOUT`, `CONNECTION_ERROR`, and `SERVER_ERROR` may.
@@ -199,3 +199,5 @@ Task 024 implements that policy for routed Patient READ; see [fhir-retry-resilie
 Task 025 adds a per-destination circuit breaker that counts those same infrastructure categories as **logical** failures and fail-fasts with `CIRCUIT_OPEN` when OPEN; see [fhir-circuit-breaker.md](fhir-circuit-breaker.md). `FhirErrorClassifier` still does not invent that category from HAPI — only the breaker produces it.
 
 Task 026 adds local `RATE_LIMITED` and `BULKHEAD_FULL` before the circuit; see [fhir-rate-limiting-bulkhead.md](fhir-rate-limiting-bulkhead.md). Those decisions do not come from HAPI and do not open the circuit.
+
+Task 027 binds the policy sizes in `fhir.resilience` YAML; see [fhir-resilience.md](fhir-resilience.md). Eligibility still uses these categories.

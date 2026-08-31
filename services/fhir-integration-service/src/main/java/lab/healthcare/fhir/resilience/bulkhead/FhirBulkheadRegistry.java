@@ -1,13 +1,10 @@
 package lab.healthcare.fhir.resilience.bulkhead;
 
-import org.springframework.stereotype.Component;
-
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * One bulkhead per destination/profile name.
  */
-@Component
 public class FhirBulkheadRegistry {
 
     private final FhirBulkheadPolicy policy;

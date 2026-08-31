@@ -98,6 +98,8 @@ lab.healthcare.fhir
 │   └── FhirErrorClassifier.java
 │
 └── resilience
+    ├── FhirResilienceProperties.java
+    ├── FhirResilienceConfiguration.java
     ├── FhirRetryPolicy.java
     ├── FhirRetryDecision.java
     ├── FhirRetryExecutor.java
@@ -118,7 +120,7 @@ lab.healthcare.fhir
         └── BulkheadFullException.java
 ```
 
-YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`) are unchanged. Spring still scans from `lab.healthcare.fhir`.
+YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, `fhir.resilience`) bind server profiles and the resilience policy. Spring still scans from `lab.healthcare.fhir`.
 
 ## Package responsibilities
 
@@ -133,7 +135,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`) are un
 | `routing` | destination profile name → enabled server + client | mapping, OAuth grant types, FHIR search logic |
 | `observability` | correlation, outcome, duration, safe audit line, aggregated counters | FHIR payloads, tokens, destination lookup, Prometheus |
 | `exception` | bounded failure category, safe details, `FhirClientException` | OAuth token POST (`OAuth2TokenException` stays in `auth.oauth2`), retry/circuit breaker |
-| `resilience` | retry, circuit breaker, per-destination rate limit and bulkhead | FHIR operations, destination lookup, OAuth, CREATE/UPDATE/DELETE |
+| `resilience` | retry, circuit breaker, rate limit, bulkhead, YAML policy sizes | FHIR operations, destination lookup, OAuth, CREATE/UPDATE/DELETE |
 
 `FhirAuthenticationSettings` lives in `auth` because it is the **runtime** authentication model. `FhirServersProperties.AuthenticationSettings` stays nested in `server` as the YAML binding DTO. The registry maps one to the other. That keeps Spring Boot record binding on a single canonical constructor in the properties type.
 
@@ -267,6 +269,6 @@ Unit and feature tests follow the production packages where practical:
 | `routing` | destination resolution unit tests, `FhirRoutingIT` |
 | `observability` | audit event unit tests, `FhirAuditObservabilityIT`, metrics counters, `FhirMetricsObservabilityIT` |
 | `exception` | classifier / details unit tests, `FhirErrorHandlingIT` |
-| `resilience` | retry, circuit breaker, `FhirRateLimitResilienceIT`, `FhirBulkheadResilienceIT` |
+| `resilience` | retry, circuit, rate/bulkhead, `FhirResiliencePipelineIT` |
 
 Synthetic seed helpers stay next to the FHIR ITs in `client`.

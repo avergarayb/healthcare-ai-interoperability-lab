@@ -4,8 +4,6 @@ import lab.healthcare.fhir.exception.FhirClientException;
 import lab.healthcare.fhir.exception.FhirErrorCategory;
 import lab.healthcare.fhir.exception.FhirErrorClassifier;
 
-import org.springframework.stereotype.Component;
-
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -13,7 +11,6 @@ import java.util.function.Supplier;
  * Runs an idempotent integration operation with bounded exponential backoff.
  * Does not know Patient JSON, destinations, or credentials.
  */
-@Component
 public class FhirRetryExecutor {
 
     private final FhirRetryPolicy policy;

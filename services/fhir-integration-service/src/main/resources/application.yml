@@ -16,6 +16,18 @@ management:
         enabled: true
 
 fhir:
+  resilience:
+    rate-limit:
+      max-operations: 10
+      window: 1s
+    bulkhead:
+      max-concurrent-operations: 5
+    circuit-breaker:
+      failure-threshold: 3
+      reset-timeout: 30s
+    retry:
+      max-attempts: 3
+      initial-backoff: 100ms
   active-server: local-hapi
   servers:
     local-hapi:

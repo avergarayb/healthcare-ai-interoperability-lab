@@ -1,14 +1,11 @@
 package lab.healthcare.fhir.resilience.ratelimit;
 
-import org.springframework.stereotype.Component;
-
 import java.time.Clock;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * One rate limiter per destination/profile name.
  */
-@Component
 public class FhirRateLimiterRegistry {
 
     private final FhirRateLimiterPolicy policy;
