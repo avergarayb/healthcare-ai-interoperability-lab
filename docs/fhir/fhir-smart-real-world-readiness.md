@@ -58,7 +58,7 @@ smart-lab:
     aud: http://localhost:8180/fhir
 ```
 
-A later real profile would replace those values. The SMART types stay the same. Task 029 adds a disabled `epic-sandbox` destination that reuses these types without calling Epic; see [vendors/epic.md](vendors/epic.md).
+A later real profile would replace those values. The SMART types stay the same. Disabled destinations `epic-sandbox` and `oracle-health-sandbox` reuse these types without calling a vendor; see [vendors/epic.md](vendors/epic.md) and [vendors/oracle-health.md](vendors/oracle-health.md).
 
 ## Optional metadata vs incompatibility
 

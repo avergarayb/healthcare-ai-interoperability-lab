@@ -159,7 +159,7 @@ That response is **server** metadata. The **client** only chooses which base URL
 
 - OAuth 2.0 Client Credentials is implemented for `secured-lab`; `local-hapi` stays `NONE`
 - JWT login, client credentials against a real EHR
-- Epic / Oracle Health live sandbox authorization (Task 029 only prepares an Epic profile; see [vendors/epic.md](vendors/epic.md))
+- Epic / Oracle Health live sandbox authorization (profiles only; see [vendors/epic.md](vendors/epic.md) and [vendors/oracle-health.md](vendors/oracle-health.md))
 - Secrets committed in YAML
 - Multi-tenant routing
 - Persisting profiles in a database
