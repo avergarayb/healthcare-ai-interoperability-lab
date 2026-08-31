@@ -50,18 +50,18 @@ public class FhirServerProfileRegistry {
             throw new IllegalStateException("Unknown FHIR server profile '" + name + "'");
         }
         String baseUrl = settings.baseUrl();
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException("Property fhir.servers." + name + ".base-url must be set");
-        }
         String fhirVersion = settings.fhirVersion();
         if (fhirVersion == null || fhirVersion.isBlank()) {
             throw new IllegalStateException("Property fhir.servers." + name + ".fhir-version must be set");
         }
         boolean enabled = Boolean.TRUE.equals(settings.enabled());
+        if ((baseUrl == null || baseUrl.isBlank()) && enabled) {
+            throw new IllegalStateException("Property fhir.servers." + name + ".base-url must be set");
+        }
         FhirAuthenticationSettings authentication = authentication(name, enabled, settings.authentication());
         return new FhirServerProfile(
                 name,
-                baseUrl.trim(),
+                baseUrl == null || baseUrl.isBlank() ? "" : baseUrl.trim(),
                 fhirVersion.trim(),
                 enabled,
                 FhirVendor.fromConfiguration(settings.vendor()),

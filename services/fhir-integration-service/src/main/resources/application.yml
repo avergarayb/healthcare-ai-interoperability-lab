@@ -79,3 +79,20 @@ fhir:
         launch-mode: STANDALONE
         user-context: PATIENT
         client-authentication: PUBLIC_PKCE
+    oracle-health-sandbox:
+      enabled: false
+      vendor: ORACLE_HEALTH
+      fhir-version: R4
+      base-url: ${ORACLE_HEALTH_SANDBOX_BASE_URL:}
+      authentication:
+        type: SMART_AUTHORIZATION_CODE
+        client-id: ${ORACLE_HEALTH_SANDBOX_CLIENT_ID:}
+        redirect-uri: ${ORACLE_HEALTH_SANDBOX_REDIRECT_URI:}
+        scope: ${ORACLE_HEALTH_SANDBOX_SCOPE:}
+        aud: ${ORACLE_HEALTH_SANDBOX_AUD:}
+        smart-configuration-url: ${ORACLE_HEALTH_SANDBOX_SMART_CONFIGURATION_URL:}
+      vendor-integration:
+        environment: SANDBOX
+        launch-mode: STANDALONE
+        user-context: PATIENT
+        client-authentication: PUBLIC_PKCE

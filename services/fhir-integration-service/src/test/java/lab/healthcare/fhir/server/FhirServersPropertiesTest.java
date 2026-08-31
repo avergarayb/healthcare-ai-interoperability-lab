@@ -33,7 +33,8 @@ class FhirServersPropertiesTest {
     @Test
     void applicationYamlBindsLocalHapiAsActiveProfile() {
         assertThat(properties.activeServer()).isEqualTo("local-hapi");
-        assertThat(properties.servers()).containsKeys("local-hapi", "example-org", "secured-lab", "smart-lab", "epic-sandbox");
+        assertThat(properties.servers()).containsKeys(
+                "local-hapi", "example-org", "secured-lab", "smart-lab", "epic-sandbox", "oracle-health-sandbox");
         assertThat(activeFhirServerProfile.name()).isEqualTo("local-hapi");
         assertThat(activeFhirServerProfile.baseUrl()).isEqualTo("http://localhost:8080/fhir");
         assertThat(activeFhirServerProfile.fhirVersion()).isEqualTo("R4");
@@ -50,6 +51,9 @@ class FhirServersPropertiesTest {
         assertThat(registry.profile("epic-sandbox").enabled()).isFalse();
         assertThat(registry.profile("epic-sandbox").vendor()).isEqualTo(FhirVendor.EPIC);
         assertThat(registry.profile("epic-sandbox").authentication().clientId()).isEmpty();
+        assertThat(registry.profile("oracle-health-sandbox").enabled()).isFalse();
+        assertThat(registry.profile("oracle-health-sandbox").vendor()).isEqualTo(FhirVendor.ORACLE_HEALTH);
+        assertThat(registry.profile("oracle-health-sandbox").baseUrl()).isEmpty();
         assertThat(fhirContext.getVersion().getVersion()).isEqualTo(FhirVersionEnum.R4);
         assertThat(fhirClient.getServerBase()).isEqualTo("http://localhost:8080/fhir");
     }

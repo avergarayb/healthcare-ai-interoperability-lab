@@ -90,3 +90,4 @@ Epic publishes a resource/API catalog rather than implying every FHIR R4 interac
 - `RoutingService` does not contain Epic OAuth logic.
 - SMART discovery / PKCE stay in `lab.healthcare.fhir.smart`.
 - Disabled missing credentials must not break `fhir.active-server=local-hapi`.
+- Oracle Health is a sibling vendor profile; see [oracle-health.md](oracle-health.md).

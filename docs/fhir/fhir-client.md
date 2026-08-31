@@ -71,7 +71,7 @@ Clients are cheap and thread-safe. We keep one Spring bean because the base URL 
 
 ## Base URL configuration
 
-The server address is not hard-coded in Java. Named **server profiles** live in Spring configuration. The active profile for this lab is `local-hapi` (`authentication.type = NONE`). OAuth 2.0 Client Credentials is optional on `secured-lab`. SMART Authorization Code + PKCE is optional on `smart-lab`. See [fhir-server-configuration.md](fhir-server-configuration.md), [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md), and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md).
+The server address is not hard-coded in Java. Named **server profiles** live in Spring configuration. The active profile for this lab is `local-hapi` (`authentication.type = NONE`). OAuth 2.0 Client Credentials is optional on `secured-lab`. SMART Authorization Code + PKCE is optional on `smart-lab`. Disabled vendor placeholders exist for Epic and Oracle Health; `FhirService` does not import those packages. See [fhir-server-configuration.md](fhir-server-configuration.md), [vendors/epic.md](vendors/epic.md), and [vendors/oracle-health.md](vendors/oracle-health.md).
 
 ## CapabilityStatement
 
