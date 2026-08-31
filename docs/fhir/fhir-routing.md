@@ -1,6 +1,6 @@
 # FHIR routing foundation
 
-This note adds **destination selection** in front of the FHIR client. Read it after [fhir-server-configuration.md](fhir-server-configuration.md) and [fhir-architecture.md](fhir-architecture.md). It does not replace [fhir-mapping.md](fhir-mapping.md) or OAuth/SMART.
+This note adds **destination selection** in front of the FHIR client. Read it after [fhir-server-configuration.md](fhir-server-configuration.md) and [fhir-architecture.md](fhir-architecture.md). It does not replace [fhir-mapping.md](fhir-mapping.md) or OAuth/SMART. Routing does not interpret SMART discovery; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md).
 
 There is still no `@RestController`, no routing database, and no message broker.
 

@@ -14,6 +14,7 @@ public class SmartTokenProvider implements AccessTokenProvider {
     private final SmartConfigurationClient configurationClient;
     private final AuthorizationCodeClient authorizationCodeClient;
     private final FhirAuthenticationSettings authentication;
+    private final SmartConfigurationValidator validator;
     private final Clock clock;
     private SmartConfiguration configuration;
     private AccessToken cached;
@@ -35,6 +36,7 @@ public class SmartTokenProvider implements AccessTokenProvider {
         this.configurationClient = configurationClient;
         this.authorizationCodeClient = authorizationCodeClient;
         this.authentication = authentication;
+        this.validator = new SmartConfigurationValidator();
         this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
@@ -62,7 +64,9 @@ public class SmartTokenProvider implements AccessTokenProvider {
 
     private SmartConfiguration configuration() {
         if (configuration == null) {
-            configuration = configurationClient.fetch(authentication.smartConfigurationUrl());
+            SmartConfiguration discovered = configurationClient.fetch(SmartDiscoveryUrl.from(authentication));
+            validator.validate(discovered, SmartFlowRequirements.authorizationCodePkceS256());
+            configuration = discovered;
         }
         return configuration;
     }

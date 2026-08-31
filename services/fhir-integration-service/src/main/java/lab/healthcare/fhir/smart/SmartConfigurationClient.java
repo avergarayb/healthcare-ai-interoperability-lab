@@ -65,8 +65,10 @@ public class SmartConfigurationClient {
         return new SmartConfiguration(
                 authorizationEndpoint,
                 tokenEndpoint,
+                text(json, "issuer"),
                 strings(json, "scopes_supported"),
                 strings(json, "response_types_supported"),
+                strings(json, "grant_types_supported"),
                 strings(json, "code_challenge_methods_supported"),
                 strings(json, "capabilities"));
     }

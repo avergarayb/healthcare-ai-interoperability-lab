@@ -28,10 +28,31 @@ class SmartConfigurationClientTest {
 
         assertThat(configuration.authorizationEndpoint()).isEqualTo("http://localhost:9090/authorize");
         assertThat(configuration.tokenEndpoint()).isEqualTo("http://localhost:9090/oauth/token");
+        assertThat(configuration.issuer()).isNull();
         assertThat(configuration.scopesSupported()).contains("patient/Patient.read", "patient/Observation.read");
         assertThat(configuration.responseTypesSupported()).containsExactly("code");
+        assertThat(configuration.grantTypesSupported()).isEmpty();
         assertThat(configuration.codeChallengeMethodsSupported()).containsExactly("S256");
         assertThat(configuration.capabilities()).contains("launch-standalone", "client-public");
+    }
+
+    @Test
+    void parseReadsOptionalIssuerAndGrantTypes() {
+        SmartConfiguration configuration = client.parse(
+                200,
+                """
+                {
+                  "authorization_endpoint": "http://localhost:9090/authorize",
+                  "token_endpoint": "http://localhost:9090/oauth/token",
+                  "issuer": "http://localhost:9090/",
+                  "grant_types_supported": ["authorization_code", "refresh_token"]
+                }
+                """);
+
+        assertThat(configuration.issuer()).isEqualTo("http://localhost:9090/");
+        assertThat(configuration.grantTypesSupported()).containsExactly("authorization_code", "refresh_token");
+        assertThat(configuration.scopesSupported()).isEmpty();
+        assertThat(configuration.codeChallengeMethodsSupported()).isEmpty();
     }
 
     @Test
