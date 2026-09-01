@@ -67,6 +67,13 @@ class OracleHealthIntegrationProfileTest {
                         "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
     }
 
+    static OracleHealthIntegrationProfile completePublicPkceEnabled() {
+        return OracleHealthIntegrationProfile.from(
+                oracleServer(true, smartAuth()),
+                new FhirServersProperties.VendorIntegrationSettings(
+                        "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
+    }
+
     static FhirServerProfile oracleServer(boolean enabled, FhirAuthenticationSettings authentication) {
         return new FhirServerProfile(
                 OracleHealthIntegrationProfile.SANDBOX_SERVER,

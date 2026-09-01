@@ -16,6 +16,16 @@ public class OracleHealthVendorConfiguration {
     }
 
     @Bean
+    public OracleSandboxProfileValidator oracleSandboxProfileValidator() {
+        return new OracleSandboxProfileValidator();
+    }
+
+    @Bean
+    public OracleSandboxConfiguration oracleSandboxConfiguration(OracleHealthIntegrationProfile profile) {
+        return OracleSandboxConfiguration.from(profile);
+    }
+
+    @Bean
     public OracleHealthIntegrationProfile oracleHealthSandboxProfile(
             FhirServerProfileRegistry registry,
             FhirServersProperties properties) {
