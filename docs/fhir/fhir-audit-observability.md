@@ -27,7 +27,7 @@ Traceability + operational visibility + security-conscious diagnostics
 FhirOperationContext
  ├── correlationId
  ├── destination
- ├── operation        READ (only the operation this task audits)
+ ├── operation        READ | CAPABILITY_DISCOVERY
  ├── resourceType
  └── resourceId
 

@@ -79,7 +79,7 @@ The server address is not hard-coded in Java. Named **server profiles** live in 
 
 It answers: which FHIR version the server implements, which resources it supports, and which interactions it allows. It is the server's "I can do this" document.
 
-Our local HAPI server currently reports FHIR R4 `4.0.1`.
+Our local HAPI server currently reports FHIR R4 `4.0.1`. Routed interpretation of that document is [fhir-capability-discovery.md](fhir-capability-discovery.md). `FhirService.retrieveCapabilityStatement()` remains the HTTP call; it does not become a capability query API.
 
 ## How the code is structured
 
@@ -94,6 +94,7 @@ lab.healthcare.fhir
 ├── smart      discovery, PKCE, Authorization Code, SmartTokenProvider
 ├── mapping    JSON → Patient / Observation
 ├── routing    destination profile → FHIR client
+├── capability interpret CapabilityStatement (not inside FhirService)
 ├── observability  correlation ID + FHIR_AUDIT line + in-memory metrics
 ├── exception  FhirClientException + bounded FhirErrorCategory
 └── resilience     pipeline + fhir.resilience YAML (not inside FhirService)

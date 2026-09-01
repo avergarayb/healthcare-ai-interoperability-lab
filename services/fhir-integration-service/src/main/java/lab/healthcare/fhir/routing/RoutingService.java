@@ -1,6 +1,9 @@
 package lab.healthcare.fhir.routing;
 
 import lab.healthcare.fhir.auth.AccessTokenProvider;
+import lab.healthcare.fhir.capability.FhirCapabilityDiscoveryService;
+import lab.healthcare.fhir.capability.FhirCapabilityException;
+import lab.healthcare.fhir.capability.FhirServerCapabilities;
 import lab.healthcare.fhir.client.FhirAccessTokenProviders;
 import lab.healthcare.fhir.client.FhirClientFactory;
 import lab.healthcare.fhir.client.FhirService;
@@ -34,6 +37,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 @Service
 public class RoutingService {
@@ -47,6 +51,7 @@ public class RoutingService {
     private final FhirCircuitBreakerRegistry circuitBreakers;
     private final FhirRateLimiterRegistry rateLimiters;
     private final FhirBulkheadRegistry bulkheads;
+    private final FhirCapabilityDiscoveryService capabilityDiscovery;
 
     public RoutingService(
             FhirServerProfileRegistry registry,
@@ -94,6 +99,7 @@ public class RoutingService {
         this.circuitBreakers = circuitBreakers;
         this.rateLimiters = rateLimiters;
         this.bulkheads = bulkheads;
+        this.capabilityDiscovery = new FhirCapabilityDiscoveryService();
     }
 
     public FhirServerProfile resolve(RoutingRequest request) {
@@ -106,29 +112,71 @@ public class RoutingService {
     }
 
     public IGenericClient client(RoutingRequest request) {
-        FhirServerProfile profile = resolve(request);
-        AccessTokenProvider tokenProvider = tokenProviders.forProfile(profile);
-        FhirContext fhirContext = clientFactory.createContext(profile);
-        return clientFactory.createClient(fhirContext, profile, tokenProvider);
+        requireRequest(request);
+        return clientFor(request.destination());
     }
 
     public Patient readPatient(RoutingRequest request) {
         requireRequest(request);
         FhirOperationContext context = context(request);
-        String logicalId;
-        IGenericClient fhirClient;
         long started = System.nanoTime();
+        String logicalId;
         try {
             logicalId = patientLogicalId(request);
-            fhirClient = client(request);
-            rateLimiters.forDestination(request.destination()).acquire();
         } catch (RuntimeException ex) {
             observe(failure(context, elapsedMs(started), ex, 1, false), true);
             throw ex;
         }
-        FhirCircuitBreaker breaker = circuitBreakers.forDestination(request.destination());
+        return executeAgainstDestination(
+                request.destination(),
+                context,
+                started,
+                fhirClient -> new FhirService(fhirClient).readPatient(logicalId));
+    }
+
+    public FhirServerCapabilities discoverCapabilities(String destination) {
+        return discoverCapabilities(destination, null);
+    }
+
+    public FhirServerCapabilities discoverCapabilities(String destination, String correlationId) {
+        if (destination == null || destination.isBlank()) {
+            throw new IllegalArgumentException("Destination must be provided");
+        }
+        String name = destination.trim();
+        return executeAgainstDestination(
+                name,
+                discoveryContext(name, correlationId),
+                System.nanoTime(),
+                fhirClient -> capabilityDiscovery.discover(name, fhirClient));
+    }
+
+    private IGenericClient clientFor(String destination) {
         try {
-            return bulkheads.forDestination(request.destination()).execute(() -> {
+            FhirServerProfile profile = registry.enabledProfile(destination);
+            AccessTokenProvider tokenProvider = tokenProviders.forProfile(profile);
+            FhirContext fhirContext = clientFactory.createContext(profile);
+            return clientFactory.createClient(fhirContext, profile, tokenProvider);
+        } catch (IllegalStateException | IllegalArgumentException ex) {
+            throw RoutingException.fromRegistry(destination, ex);
+        }
+    }
+
+    private <T> T executeAgainstDestination(
+            String destination,
+            FhirOperationContext context,
+            long started,
+            Function<IGenericClient, T> operation) {
+        IGenericClient fhirClient;
+        try {
+            fhirClient = clientFor(destination);
+            rateLimiters.forDestination(destination).acquire();
+        } catch (RuntimeException ex) {
+            observe(failure(context, elapsedMs(started), ex, 1, false), true);
+            throw ex;
+        }
+        FhirCircuitBreaker breaker = circuitBreakers.forDestination(destination);
+        try {
+            return bulkheads.forDestination(destination).execute(() -> {
                 try {
                     breaker.acquire();
                 } catch (CircuitBreakerOpenException ex) {
@@ -136,11 +184,11 @@ public class RoutingService {
                     throw ex;
                 }
                 try {
-                    Patient patient = retryExecutor.execute(
-                            () -> new FhirService(fhirClient).readPatient(logicalId),
+                    T result = retryExecutor.execute(
+                            () -> operation.apply(fhirClient),
                             attempt -> observeAttempt(context, attempt));
                     breaker.recordSuccess();
-                    return patient;
+                    return result;
                 } catch (RuntimeException ex) {
                     breaker.recordFailure(ex);
                     throw ex;
@@ -188,6 +236,18 @@ public class RoutingService {
                 FhirAuditOperation.READ,
                 request.resource().fhirType(),
                 resourceId);
+    }
+
+    private static FhirOperationContext discoveryContext(String destination, String correlationId) {
+        String id = correlationId == null || correlationId.isBlank()
+                ? UUID.randomUUID().toString()
+                : correlationId.trim();
+        return new FhirOperationContext(
+                id,
+                destination,
+                FhirAuditOperation.CAPABILITY_DISCOVERY,
+                "CapabilityStatement",
+                null);
     }
 
     private static FhirAuditEvent success(FhirOperationContext context, long durationMs, int attempt) {
@@ -239,6 +299,16 @@ public class RoutingService {
         }
         if (ex instanceof FhirClientException fhir) {
             return fhir.details();
+        }
+        if (ex instanceof FhirCapabilityException capability) {
+            return new FhirErrorDetails(
+                    FhirErrorCategory.VALIDATION_ERROR,
+                    null,
+                    FhirAuditOperation.CAPABILITY_DISCOVERY.name(),
+                    null,
+                    "CapabilityStatement",
+                    null,
+                    capability.getMessage());
         }
         return FhirErrorClassifier.classify(ex);
     }
