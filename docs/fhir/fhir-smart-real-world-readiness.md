@@ -2,7 +2,7 @@
 
 This note prepares the SMART layer for a later real Authorization Server. Read it after [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). It does **not** connect Epic, Oracle Health, or any external sandbox.
 
-Task 028 prepares the platform for real SMART providers, but it does **not** certify compatibility with Epic or Oracle Health.
+Task 028 prepares the platform for real SMART providers, but it does **not** certify compatibility with Epic or Oracle Health. FHIR `GET /metadata` is a different discovery; see [fhir-capability-discovery.md](fhir-capability-discovery.md).
 
 There is still no `@RestController`, no Dynamic Client Registration, and no new OAuth grant.
 

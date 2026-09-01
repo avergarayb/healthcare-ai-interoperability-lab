@@ -82,7 +82,7 @@ There is no `CERTIFIED`, `PRODUCTION_READY`, or `EPIC_APPROVED` state.
 
 ## Vendor-known APIs vs CapabilityStatement
 
-Epic publishes a resource/API catalog rather than implying every FHIR R4 interaction. `EpicKnownApiSurface` is a placeholder: this lab does **not** hardcode that catalog. Runtime inspection of a server's `CapabilityStatement` is a later discovery task.
+Epic publishes a resource/API catalog rather than implying every FHIR R4 interaction. `EpicKnownApiSurface` is a placeholder: this lab does **not** hardcode that catalog. Runtime inspection of a server's `CapabilityStatement` is [fhir-capability-discovery.md](../fhir-capability-discovery.md). That API is vendor-neutral; Epic identity does not imply Patient is available.
 
 ## Architecture rules
 

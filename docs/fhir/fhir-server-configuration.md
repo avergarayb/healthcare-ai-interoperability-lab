@@ -144,7 +144,7 @@ HTTP `200`, `CapabilityStatement`, `fhirVersion: 4.0.1`, `implementation.url: ht
 
 That response is **server** metadata. The **client** only chooses which base URL to call. After this task, that choice is `fhir.servers.local-hapi.base-url`.
 
-`FhirService.retrieveCapabilityStatement()` is unchanged. The IT `FhirServerConfigurationIT` reads `/metadata` and `Patient/patient-001` through the configured profile.
+`FhirService.retrieveCapabilityStatement()` is unchanged. The IT `FhirServerConfigurationIT` reads `/metadata` and `Patient/patient-001` through the configured profile. Routed interpretation of that document is [fhir-capability-discovery.md](fhir-capability-discovery.md).
 
 ## HTTP vs client
 

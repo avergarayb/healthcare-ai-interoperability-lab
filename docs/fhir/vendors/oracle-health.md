@@ -83,7 +83,7 @@ There is no `CERTIFIED`, `PRODUCTION_READY`, or `ORACLE_APPROVED` state.
 
 ## Vendor-known APIs vs CapabilityStatement
 
-`OracleHealthKnownApiSurface.assumesEveryR4Resource()` is `false`. Runtime inspection of a server's `CapabilityStatement` (`GET /metadata`) is Task 031.
+`OracleHealthKnownApiSurface.assumesEveryR4Resource()` is `false`. Runtime inspection of a server's `CapabilityStatement` (`GET /metadata`) is [fhir-capability-discovery.md](../fhir-capability-discovery.md). That API is vendor-neutral; Oracle Health identity does not imply Patient is available.
 
 ## Architecture rules
 
