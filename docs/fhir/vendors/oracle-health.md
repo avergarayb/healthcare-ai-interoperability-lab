@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. It does **not** connect to a real Oracle Health sandbox, register an application, or read Patient data.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. It does **not** perform Oracle OAuth, read Patient data, or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -39,7 +39,7 @@ Profile `oracle-health-sandbox` is **disabled** by default. Local startup still 
 
 ```yaml
 oracle-health-sandbox:
-  enabled: false
+  enabled: ${ORACLE_HEALTH_SANDBOX_ENABLED:false}
   vendor: ORACLE_HEALTH
   fhir-version: R4
   base-url: ${ORACLE_HEALTH_SANDBOX_BASE_URL:}
@@ -80,6 +80,19 @@ Unsupported modes fail with `OracleHealthProfileException` when selected for run
 | `READY_FOR_SANDBOX` | SMART-compatible sandbox configuration — **not** Oracle-approved |
 
 There is no `CERTIFIED`, `PRODUCTION_READY`, or `ORACLE_APPROVED` state.
+
+## Sandbox connection readiness (Task 032)
+
+Deployment environments are configuration identity: `LOCAL`, `SYNTHETIC`, `SANDBOX`, `PRODUCTION`. Oracle connectivity runtime is **SANDBOX only**.
+
+| Connection state | Meaning |
+|---|---|
+| `DISABLED` | `enabled=false`; local HAPI starts without Oracle credentials |
+| `INVALID_CONFIGURATION` | enabled but missing/malformed URI or unsupported auth — `VALIDATION_ERROR`, no HTTP |
+| `CONFIGURED` | PRODUCTION represented; not probed |
+| `READY_FOR_CONNECTIVITY_CHECK` | SANDBOX fields and http(s) URIs are complete |
+
+`OracleSandboxReadinessService.checkConnectivity` then uses [fhir-endpoint-connectivity.md](../fhir-endpoint-connectivity.md). Placeholders: [`.env.example`](../../../.env.example). Live IT is opt-in (`-Poracle-live` + `ORACLE_HEALTH_LIVE_IT=true`).
 
 ## Vendor-known APIs vs CapabilityStatement
 

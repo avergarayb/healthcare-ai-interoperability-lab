@@ -80,7 +80,7 @@ fhir:
         user-context: PATIENT
         client-authentication: PUBLIC_PKCE
     oracle-health-sandbox:
-      enabled: false
+      enabled: ${ORACLE_HEALTH_SANDBOX_ENABLED:false}
       vendor: ORACLE_HEALTH
       fhir-version: R4
       base-url: ${ORACLE_HEALTH_SANDBOX_BASE_URL:}

@@ -1,6 +1,6 @@
 # FHIR Integration Service architecture
 
-This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). Task 030 adds Oracle Health in `vendor.oracle`; see [vendors/oracle-health.md](vendors/oracle-health.md). Neither connects to a live vendor sandbox. Task 031 adds runtime `GET /metadata` interpretation in `capability`; see [fhir-capability-discovery.md](fhir-capability-discovery.md).
+This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). Task 030 adds Oracle Health in `vendor.oracle`; see [vendors/oracle-health.md](vendors/oracle-health.md). Neither connects to a live vendor sandbox. Task 031 adds runtime `GET /metadata` interpretation in `capability`; see [fhir-capability-discovery.md](fhir-capability-discovery.md). Task 032 adds vendor-neutral endpoint connectivity and Oracle sandbox connection readiness; see [fhir-endpoint-connectivity.md](fhir-endpoint-connectivity.md) and [vendors/oracle-health.md](vendors/oracle-health.md).
 
 There is still no `@RestController`, no DTO layer, and no extra microservice.
 
@@ -49,7 +49,8 @@ lab.healthcare.fhir
 ├── server
 │   ├── FhirServerProfile.java
 │   ├── FhirServersProperties.java
-│   └── FhirServerProfileRegistry.java
+│   ├── FhirServerProfileRegistry.java
+│   └── FhirDeploymentEnvironment.java
 │
 ├── auth
 │   ├── AccessToken.java
@@ -132,6 +133,11 @@ lab.healthcare.fhir
 │   ├── FhirInteraction.java
 │   └── FhirCapabilityException.java
 
+├── connectivity
+│   ├── FhirEndpointConnectivityVerifier.java
+│   ├── FhirConnectivityStatus.java
+│   └── FhirConnectivityOutcome.java
+
 └── vendor
     ├── FhirVendor.java
     ├── FhirVendorProfile.java
@@ -148,7 +154,12 @@ lab.healthcare.fhir
         ├── OracleHealthReadinessState.java
         ├── OracleHealthKnownApiSurface.java
         ├── OracleHealthProfileException.java
-        └── OracleHealthVendorConfiguration.java
+        ├── OracleHealthVendorConfiguration.java
+        ├── OracleSandboxConfiguration.java
+        ├── OracleSandboxProfileValidator.java
+        ├── OracleSandboxReadiness.java
+        ├── OracleSandboxReadinessState.java
+        └── OracleSandboxReadinessService.java
 ```
 
 YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, optional `vendor` / `vendor-integration`, `fhir.resilience`) bind server profiles, vendor metadata, and the resilience policy. Spring still scans from `lab.healthcare.fhir`.
@@ -158,7 +169,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, option
 | Package | Owns | Does not own |
 |---|---|---|
 | `client` | HAPI `FhirContext` / `IGenericClient` construction, FHIR operations | token URLs, PKCE, profile YAML binding |
-| `server` | named profiles, which server is active | how to obtain a token |
+| `server` | named profiles, which server is active, deployment environment identity | how to obtain a token |
 | `auth` | token value, provider SPI, Bearer interceptor, cache for Client Credentials | SMART discovery, FHIR search |
 | `auth.oauth2` | Client Credentials HTTP token POST and JSON parse | SMART authorize URL, `FhirService` |
 | `smart` | well-known, capabilities, compatibility, PKCE, authorization request, authorization code, refresh | generic Client Credentials, FHIR operations |
@@ -168,9 +179,10 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, option
 | `exception` | bounded failure category, safe details, `FhirClientException` | OAuth token POST (`OAuth2TokenException` stays in `auth.oauth2`), retry/circuit breaker |
 | `resilience` | retry, circuit breaker, rate limit, bulkhead, YAML policy sizes | FHIR operations, destination lookup, OAuth, CREATE/UPDATE/DELETE |
 | `capability` | interpret `CapabilityStatement` into `FhirServerCapabilities` | SMART well-known, vendor catalogs, cache, write-method generation |
+| `connectivity` | transport `GET /metadata` reachability | Patient reads, CapabilityStatement interpretation, vendor secrets |
 | `vendor` | bounded vendor identity (`GENERIC`, `EPIC`, `ORACLE_HEALTH`) | FHIR operations, SMART HTTP |
 | `vendor.epic` | Epic sandbox profile, launch/auth metadata, readiness, honest unimplemented modes | live Epic OAuth, Hyperspace, `private_key_jwt` |
-| `vendor.oracle` | Oracle Health sandbox profile, launch/auth metadata, readiness, honest unimplemented modes | live Oracle OAuth, EHR launch, `private_key_jwt` |
+| `vendor.oracle` | Oracle Health sandbox profile, launch/auth metadata, sandbox connection readiness | live Oracle OAuth, EHR launch, `private_key_jwt`, Patient access |
 
 `FhirAuthenticationSettings` lives in `auth` because it is the **runtime** authentication model. `FhirServersProperties.AuthenticationSettings` stays nested in `server` as the YAML binding DTO. The registry maps one to the other. That keeps Spring Boot record binding on a single canonical constructor in the properties type.
 
@@ -215,6 +227,10 @@ vendor.epic ──► vendor    (FhirVendorProfile)
 vendor.oracle ──► server
 vendor.oracle ──► smart
 vendor.oracle ──► vendor
+vendor.oracle ──► connectivity
+vendor.oracle ──► exception
+
+connectivity ──► exception
 ```
 
 Intended runtime chain for an authenticated FHIR call:
@@ -242,6 +258,7 @@ FhirService → OAuth2TokenClient / Pkce / AuthorizationCodeClient
 FhirService → vendor.epic
 FhirService → vendor.oracle
 FhirService → capability
+FhirService → connectivity
 ```
 
 `auth` and `auth.oauth2` import each other. That is a **namespace** cycle, not a SMART/client cycle. `AccessToken` stays in `auth` because SMART also uses it. `CachingAccessTokenProvider` stays in `auth` because it is the Client Credentials `AccessTokenProvider`, not a SMART type. No extra interface was added solely to split those two packages.
@@ -320,7 +337,8 @@ Unit and feature tests follow the production packages where practical:
 | `exception` | classifier / details unit tests, `FhirErrorHandlingIT` |
 | `resilience` | retry, circuit, rate/bulkhead, `FhirResiliencePipelineIT` |
 | `vendor.epic` | Epic profile / validator unit tests, `EpicIntegrationProfileIT` |
-| `vendor.oracle` | Oracle Health profile / validator unit tests, `OracleHealthIntegrationProfileIT` |
+| `vendor.oracle` | Oracle Health profile / validator unit tests, `OracleHealthIntegrationProfileIT`, sandbox readiness ITs |
 | `capability` | interpret / supports queries, `FhirCapabilityDiscoveryIT` |
+| `connectivity` | metadata URI / local probe unit tests |
 
 Synthetic seed helpers stay next to the FHIR ITs in `client`.
