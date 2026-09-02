@@ -31,6 +31,7 @@ import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
+import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Patient;
 import org.springframework.stereotype.Service;
 
@@ -145,15 +146,45 @@ public class RoutingService {
         String name = destination.trim();
         return executeAgainstDestination(
                 name,
+                null,
                 discoveryContext(name, correlationId),
                 System.nanoTime(),
                 fhirClient -> capabilityDiscovery.discover(name, fhirClient));
     }
 
+    public Bundle searchPatients(String destination, AccessTokenProvider tokenProvider, String patientName) {
+        return searchPatients(destination, tokenProvider, patientName, null);
+    }
+
+    public Bundle searchPatients(
+            String destination, AccessTokenProvider tokenProvider, String patientName, String correlationId) {
+        if (destination == null || destination.isBlank()) {
+            throw new IllegalArgumentException("Destination must be provided");
+        }
+        if (tokenProvider == null) {
+            throw new IllegalArgumentException("Access token provider must be provided");
+        }
+        if (patientName == null || patientName.isBlank()) {
+            throw new IllegalArgumentException("Patient name search parameter must be provided");
+        }
+        String dest = destination.trim();
+        String name = patientName.trim();
+        return executeAgainstDestination(
+                dest,
+                tokenProvider,
+                searchContext(dest, correlationId),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).searchPatientsByNameWithCount(name, 1));
+    }
+
     private IGenericClient clientFor(String destination) {
+        return clientFor(destination, null);
+    }
+
+    private IGenericClient clientFor(String destination, AccessTokenProvider override) {
         try {
             FhirServerProfile profile = registry.enabledProfile(destination);
-            AccessTokenProvider tokenProvider = tokenProviders.forProfile(profile);
+            AccessTokenProvider tokenProvider = override != null ? override : tokenProviders.forProfile(profile);
             FhirContext fhirContext = clientFactory.createContext(profile);
             return clientFactory.createClient(fhirContext, profile, tokenProvider);
         } catch (IllegalStateException | IllegalArgumentException ex) {
@@ -166,9 +197,18 @@ public class RoutingService {
             FhirOperationContext context,
             long started,
             Function<IGenericClient, T> operation) {
+        return executeAgainstDestination(destination, null, context, started, operation);
+    }
+
+    private <T> T executeAgainstDestination(
+            String destination,
+            AccessTokenProvider tokenProvider,
+            FhirOperationContext context,
+            long started,
+            Function<IGenericClient, T> operation) {
         IGenericClient fhirClient;
         try {
-            fhirClient = clientFor(destination);
+            fhirClient = clientFor(destination, tokenProvider);
             rateLimiters.forDestination(destination).acquire();
         } catch (RuntimeException ex) {
             observe(failure(context, elapsedMs(started), ex, 1, false), true);
@@ -236,6 +276,18 @@ public class RoutingService {
                 FhirAuditOperation.READ,
                 request.resource().fhirType(),
                 resourceId);
+    }
+
+    private static FhirOperationContext searchContext(String destination, String correlationId) {
+        String id = correlationId == null || correlationId.isBlank()
+                ? UUID.randomUUID().toString()
+                : correlationId.trim();
+        return new FhirOperationContext(
+                id,
+                destination,
+                FhirAuditOperation.PATIENT_SEARCH,
+                "Patient",
+                null);
     }
 
     private static FhirOperationContext discoveryContext(String destination, String correlationId) {

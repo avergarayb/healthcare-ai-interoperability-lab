@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 
 /**
  * Interactive Authorization Code + PKCE: generate a URL, store the verifier,
@@ -26,6 +27,7 @@ public class SmartAuthorizationCoordinator {
     private final AuthorizationSessionStore store;
     private final AuthorizationCodeClient authorizationCodeClient;
     private final Clock clock;
+    private volatile IssuedAccessTokenProvider lastIssued;
 
     @Autowired
     public SmartAuthorizationCoordinator(
@@ -114,6 +116,7 @@ public class SmartAuthorizationCoordinator {
         try {
             AccessToken token = authorizationCodeClient.exchangeAuthorizationCode(
                     authentication, session.tokenEndpoint(), callback.code(), session.codeVerifier());
+            this.lastIssued = new IssuedAccessTokenProvider(token);
             return new SmartTokenExchangeResult(
                     token, SmartTokenExchangeDiagnosis.issued(session.tokenEndpointAuthMethodsSupported()));
         } catch (OAuth2TokenException ex) {
@@ -126,5 +129,13 @@ public class SmartAuthorizationCoordinator {
 
     public IssuedAccessTokenProvider completeAsProvider(String redirectLocation) {
         return new IssuedAccessTokenProvider(complete(redirectLocation));
+    }
+
+    /**
+     * Last token issued by a successful interactive callback. Absent until
+     * exchange succeeds. Does not refresh and does not invent credentials.
+     */
+    public Optional<IssuedAccessTokenProvider> lastIssuedProvider() {
+        return Optional.ofNullable(lastIssued);
     }
 }
