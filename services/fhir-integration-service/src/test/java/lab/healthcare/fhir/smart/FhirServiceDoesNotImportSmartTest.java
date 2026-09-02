@@ -18,5 +18,9 @@ class FhirServiceDoesNotImportSmartTest {
         assertThat(contents).doesNotContain("SmartCapabilities");
         assertThat(contents).doesNotContain("SmartConfigurationValidator");
         assertThat(contents).doesNotContain("SmartAuthorizationRequest");
+        assertThat(contents).doesNotContain("SmartAuthorizationCoordinator");
+        assertThat(contents).doesNotContain("IssuedAccessTokenProvider");
+        assertThat(contents).doesNotContain("RestController");
+        assertThat(contents).doesNotContain("SmartAuthorizationCallbackController");
     }
 }

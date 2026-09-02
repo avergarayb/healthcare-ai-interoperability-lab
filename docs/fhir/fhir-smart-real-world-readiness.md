@@ -1,10 +1,10 @@
 # Real-world SMART on FHIR readiness
 
-This note prepares the SMART layer for a later real Authorization Server. Read it after [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). It does **not** connect Epic, Oracle Health, or any external sandbox.
+This note prepares the SMART layer for a later real Authorization Server. Read it after [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 033 adds an interactive Authorization Code + PKCE coordinator used by Oracle Health Secure Sandbox; see [fhir-smart-interactive-authorization.md](fhir-smart-interactive-authorization.md). Default tests still do not require Oracle credentials.
 
 Task 028 prepares the platform for real SMART providers, but it does **not** certify compatibility with Epic or Oracle Health. FHIR `GET /metadata` is a different discovery; see [fhir-capability-discovery.md](fhir-capability-discovery.md).
 
-There is still no `@RestController`, no Dynamic Client Registration, and no new OAuth grant.
+There is still no Dynamic Client Registration and no new OAuth grant. A minimal lab callback exists at `/smart/callback`; see [fhir-smart-interactive-authorization.md](fhir-smart-interactive-authorization.md).
 
 ## Three kinds of SMART information
 
@@ -33,7 +33,11 @@ SmartAuthorizationRequest           (this session)
         ↓
 AuthorizationCodeClient
         ↓
-SmartTokenProvider
+SmartAuthorizationCoordinator       (interactive: store verifier, validate state, exchange)
+        ↓
+IssuedAccessTokenProvider
+        ─ or ─
+SmartTokenProvider                  (synthetic smart-lab 302 only)
         ↓
 BearerAccessTokenInterceptor
         ↓
@@ -58,7 +62,7 @@ smart-lab:
     aud: http://localhost:8180/fhir
 ```
 
-A later real profile would replace those values. The SMART types stay the same. Disabled destinations `epic-sandbox` and `oracle-health-sandbox` reuse these types without calling a vendor; see [vendors/epic.md](vendors/epic.md) and [vendors/oracle-health.md](vendors/oracle-health.md).
+A later real profile would replace those values. The SMART types stay the same. Disabled destination `epic-sandbox` still does not call a vendor; see [vendors/epic.md](vendors/epic.md). `oracle-health-sandbox` can start interactive SMART when enabled; see [vendors/oracle-health.md](vendors/oracle-health.md).
 
 ## Optional metadata vs incompatibility
 

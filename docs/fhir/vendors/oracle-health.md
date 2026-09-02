@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. It does **not** perform Oracle OAuth, read Patient data, or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. It does **not** perform the first Patient read (Task 035) or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -94,6 +94,42 @@ Deployment environments are configuration identity: `LOCAL`, `SYNTHETIC`, `SANDB
 
 `OracleSandboxReadinessService.checkConnectivity` then uses [fhir-endpoint-connectivity.md](../fhir-endpoint-connectivity.md). Placeholders: [`.env.example`](../../../.env.example). Live IT is opt-in (`-Poracle-live` + `ORACLE_HEALTH_LIVE_IT=true`).
 
+## Secure sandbox SMART authentication (Task 033)
+
+Oracle configures the profile. Generic SMART types perform discovery, PKCE, callback `state` validation, and token exchange. There is no `OracleSmartConfigurationClient`, `OraclePkce`, or `OracleTokenProvider`.
+
+```text
+OracleHealthIntegrationProfile
+        ↓
+OracleSandboxAuthenticationService.inspect   (config only; disabled = no HTTP)
+        ↓
+READY_FOR_AUTHORIZATION
+        ↓
+discover /.well-known/smart-configuration
+        ↓
+SmartAuthorizationCoordinator.start
+        ↓
+browser login (manual)
+        ↓
+completeAuthorization → IssuedAccessTokenProvider
+```
+
+| Auth readiness | Meaning |
+|---|---|
+| `DISABLED` | `enabled=false`; no discovery |
+| `NOT_CONFIGURED` | profile missing |
+| `INVALID_CONFIGURATION` | enabled but incomplete URI or unsupported mode (`PRIVATE_KEY_JWT`) |
+| `CONFIGURED` | PRODUCTION represented; not authorized here |
+| `READY_FOR_AUTHORIZATION` | SANDBOX fields and `PUBLIC_PKCE` are complete |
+
+Browser login is **not** admitted through the FHIR resilience pipeline. Interactive flow: [fhir-smart-interactive-authorization.md](../fhir-smart-interactive-authorization.md).
+
+Live pages: `GET /oracle/sandbox/smart/start` then Oracle redirect to `GET /smart/callback`. See [fhir-smart-interactive-authorization.md](../fhir-smart-interactive-authorization.md).
+
+If discovery lists only `client_secret_basic` and `private_key_jwt`, public PKCE is still attempted. A rejected token POST is Result B: an explicit incompatibility, not a fabricated confidential client.
+
+Live auth IT discovers SMART and builds a real authorization URL. Completing Oracle login in a browser is a manual step. Synthetic `lab-oauth` proves callback → token → `AccessTokenProvider`.
+
 ## Vendor-known APIs vs CapabilityStatement
 
 `OracleHealthKnownApiSurface.assumesEveryR4Resource()` is `false`. Runtime inspection of a server's `CapabilityStatement` (`GET /metadata`) is [fhir-capability-discovery.md](../fhir-capability-discovery.md). That API is vendor-neutral; Oracle Health identity does not imply Patient is available.
@@ -104,3 +140,4 @@ Deployment environments are configuration identity: `LOCAL`, `SYNTHETIC`, `SANDB
 - Routing and resilience do not contain `if (vendor == ORACLE_HEALTH)`.
 - There is no `OracleSmartConfigurationClient`, `OraclePkce`, or `OracleTokenProvider`.
 - Disabled missing credentials must not break `fhir.active-server=local-hapi`.
+- `FhirService` does not import Oracle authentication types.

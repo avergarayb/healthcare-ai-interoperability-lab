@@ -70,7 +70,8 @@ public class SmartConfigurationClient {
                 strings(json, "response_types_supported"),
                 strings(json, "grant_types_supported"),
                 strings(json, "code_challenge_methods_supported"),
-                strings(json, "capabilities"));
+                strings(json, "capabilities"),
+                strings(json, "token_endpoint_auth_methods_supported"));
     }
 
     private JsonNode readJson(String body) {

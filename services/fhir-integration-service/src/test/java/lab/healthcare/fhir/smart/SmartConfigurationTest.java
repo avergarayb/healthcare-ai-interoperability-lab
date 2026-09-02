@@ -26,6 +26,7 @@ class SmartConfigurationTest {
         assertThat(configuration.scopesSupported()).containsExactly("patient/Patient.read");
         assertThat(configuration.grantTypesSupported()).contains("authorization_code", "refresh_token");
         assertThat(configuration.codeChallengeMethodsSupported()).containsExactly("S256");
+        assertThat(configuration.tokenEndpointAuthMethodsSupported()).isEmpty();
     }
 
     @Test
