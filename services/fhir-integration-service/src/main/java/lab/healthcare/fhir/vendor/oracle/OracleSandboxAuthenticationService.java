@@ -14,6 +14,8 @@ import lab.healthcare.fhir.smart.SmartTokenExchangeResult;
 
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
+
 /**
  * Oracle Health sandbox SMART authorization orchestrator. Discovers generic SMART
  * metadata and starts an interactive Authorization Code + PKCE flow. Does not
@@ -121,10 +123,16 @@ public class OracleSandboxAuthenticationService {
     }
 
     public AccessTokenProvider issuedTokenProvider() {
-        if (issued == null) {
-            throw new SmartAuthorizationException("SMART authorization failed: no issued access token");
+        return issuedProviderIfPresent()
+                .orElseThrow(() -> new SmartAuthorizationException(
+                        "SMART authorization failed: no issued access token"));
+    }
+
+    public Optional<IssuedAccessTokenProvider> issuedProviderIfPresent() {
+        if (issued != null) {
+            return Optional.of(issued);
         }
-        return issued;
+        return coordinator.lastIssuedProvider();
     }
 
     private static OracleSandboxAuthReadiness invalid(

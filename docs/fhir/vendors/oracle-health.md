@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. It does **not** perform the first Patient read (Task 035) or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. It does **not** assume Patient launch context or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -168,7 +168,49 @@ Other live findings: software name empty; publisher “Oracle Health”; Patient
 
 Live IT: `mvn verify -Poracle-live` with `ORACLE_HEALTH_LIVE_IT=true`. Default `mvn test` / `-Pintegration` stay disabled and do not call Oracle.
 
-Do not persist tokens for this GET. Do not read Patient here (Task 035). Do not add `client_secret_basic` or `private_key_jwt`.
+Do not persist tokens for this GET. Do not add `client_secret_basic` or `private_key_jwt`.
+
+## Authenticated Patient search (Task 035)
+
+Task 033 issued a token with `hasPatient=false`. Task 035 therefore does **not** call `GET /Patient/{id}`. The first authorized operation is a bounded type search.
+
+Live finding: Oracle Millennium rejected an unqualified search.
+
+```text
+GET /Patient?_count=1
+Authorization: Bearer <token>
+→ HTTP 400 VALIDATION_ERROR
+```
+
+`_count` is not a qualifying Patient search parameter. The lab therefore sends a generic `name` plus `_count=1`. The name `LabNoMatch` is a sentinel, not a real patient id and not a vendor host.
+
+```text
+Task 033 token  →  IssuedAccessTokenProvider
+Task 034 capabilities.supports("Patient", SEARCH_TYPE)
+        ↓
+RoutingService.searchPatients(destination, tokenProvider, name)
+        ↓
+FhirService.searchPatientsByNameWithCount(name, 1)
+        ↓
+GET /Patient?name=LabNoMatch&_count=1   Authorization: Bearer <token>
+```
+
+`FhirService` does not import Oracle. There is no `OraclePatientClient`. The issued token is stored on the generic SMART coordinator after `/smart/callback`; the Oracle orchestrator consumes `AccessTokenProvider` only.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `AUTHENTICATED_READ_SUCCEEDED` | Oracle returned a FHIR Bundle |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) — no Patient HTTP |
+| `AUTHENTICATION_REJECTED` | HTTP 401 |
+| `AUTHORIZATION_DENIED` | HTTP 403 |
+| `CAPABILITY_UNSUPPORTED` | Runtime model lacks Patient `search-type` — no Patient HTTP |
+| `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
+
+Authenticated ≠ authorized for every resource. Capability ≠ SMART scope. Both must be true for a successful search.
+
+Lab page: `GET /oracle/sandbox/fhir/patient-search` after SMART login. It returns only the diagnosis (no token, no Patient JSON). Maven live IT without a browser session is `AUTHENTICATION_REQUIRED`.
 
 ## Architecture rules
 

@@ -2,7 +2,7 @@
 
 Task 033 adds an explicit Authorization Code + PKCE S256 boundary and a minimal local callback.
 
-This is **not** a Patient READ (Task 035). Browser login is not routed through rate-limit → bulkhead → circuit → retry.
+Browser login is not routed through rate-limit → bulkhead → circuit → retry. The first authenticated Patient search after a token is issued is Task 035 (`GET /oracle/sandbox/fhir/patient-search`).
 
 Read this after [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Oracle Health wiring: [vendors/oracle-health.md](vendors/oracle-health.md).
 
@@ -39,6 +39,7 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/oracle/sandbox/smart` | short instructions |
 | `http://localhost:8081/oracle/sandbox/smart/start` | discover SMART and show the authorization URL |
 | `http://localhost:8081/smart/callback` | registered redirect; validates callback and attempts token exchange |
+| `http://localhost:8081/oracle/sandbox/fhir/patient-search` | after a token is issued: safe authenticated Patient search diagnosis |
 
 These are lab pages, not a product frontend. They never print access tokens, authorization codes, PKCE verifiers, or secrets.
 

@@ -1,5 +1,8 @@
 package lab.healthcare.fhir.auth;
 
+import java.time.Duration;
+import java.time.Instant;
+
 /**
  * Access token obtained from an interactive SMART callback. No refresh rotation.
  */
@@ -21,5 +24,14 @@ public class IssuedAccessTokenProvider implements AccessTokenProvider {
 
     public AccessToken token() {
         return token;
+    }
+
+    public boolean isUsableAt(Instant now, Duration skew) {
+        return token.isUsableAt(now, skew);
+    }
+
+    @Override
+    public String toString() {
+        return "IssuedAccessTokenProvider[" + token + "]";
     }
 }

@@ -82,6 +82,7 @@ public final class SmartLabPages {
                   <li>Open <a href="/oracle/sandbox/smart/start">/oracle/sandbox/smart/start</a> to discover SMART and get the authorization URL.</li>
                   <li>Log in at Oracle in the browser.</li>
                   <li>Oracle redirects to <code>/smart/callback</code>. This process validates state and attempts token exchange.</li>
+                  <li>After a token is issued, open <a href="/oracle/sandbox/fhir/patient-search">/oracle/sandbox/fhir/patient-search</a> for a safe authenticated Patient search diagnosis. The page does not show the token or Patient JSON.</li>
                 </ol>
                 """);
     }

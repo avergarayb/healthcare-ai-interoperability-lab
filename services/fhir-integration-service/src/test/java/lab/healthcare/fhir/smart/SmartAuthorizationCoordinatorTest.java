@@ -98,6 +98,9 @@ class SmartAuthorizationCoordinatorTest {
         assertThat(token.toString()).doesNotContain("refresh-1");
         IssuedAccessTokenProvider provider = new IssuedAccessTokenProvider(token);
         assertThat(provider.accessToken()).isEqualTo("smart-access");
+        assertThat(coordinator.lastIssuedProvider()).isPresent();
+        assertThat(coordinator.lastIssuedProvider().orElseThrow().accessToken()).isEqualTo("smart-access");
+        assertThat(coordinator.lastIssuedProvider().orElseThrow().toString()).doesNotContain("smart-access");
     }
 
     @Test
