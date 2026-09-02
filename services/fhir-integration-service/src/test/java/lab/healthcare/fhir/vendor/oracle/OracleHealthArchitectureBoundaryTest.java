@@ -17,6 +17,7 @@ class OracleHealthArchitectureBoundaryTest {
         assertThat(contents).doesNotContain("lab.healthcare.fhir.vendor.oracle");
         assertThat(contents).doesNotContain("OracleHealthIntegrationProfile");
         assertThat(contents).doesNotContain("OracleSandboxAuthenticationService");
+        assertThat(contents).doesNotContain("OracleSandboxCapabilityDiscoveryService");
         assertThat(contents).doesNotContain("ORACLE_HEALTH");
     }
 
@@ -53,6 +54,8 @@ class OracleHealthArchitectureBoundaryTest {
         assertThat(text).doesNotContain("OracleSmartConfigurationClient");
         assertThat(text).doesNotContain("OraclePkce");
         assertThat(text).doesNotContain("OracleTokenProvider");
+        assertThat(text).doesNotContain("OracleCapabilityStatement");
+        assertThat(text).doesNotContain("OracleCapabilityDiscoveryService");
         assertThat(text).doesNotContain("cerner.com");
         assertThat(text).doesNotContain("authorization.cerner");
     }

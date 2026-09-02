@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. It does **not** perform the first Patient read (Task 035) or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. It does **not** perform the first Patient read (Task 035) or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -134,10 +134,46 @@ Live auth IT discovers SMART and builds a real authorization URL. Completing Ora
 
 `OracleHealthKnownApiSurface.assumesEveryR4Resource()` is `false`. Runtime inspection of a server's `CapabilityStatement` (`GET /metadata`) is [fhir-capability-discovery.md](../fhir-capability-discovery.md). That API is vendor-neutral; Oracle Health identity does not imply Patient is available.
 
+## Real capability discovery (Task 034)
+
+Task 034 validates the existing `FhirCapabilityDiscoveryService` against the real Oracle Health Millennium FHIR R4 Code sandbox. It does **not** add `OracleCapabilityStatement` or duplicate interpret logic.
+
+```text
+OracleHealthIntegrationProfile
+        ↓
+inspect (disabled = no HTTP)
+        ↓
+FhirServerProfile copy with authentication NONE
+        ↓
+GET /metadata   (configured base URL; no Bearer)
+        ↓
+FhirCapabilityDiscoveryService
+        ↓
+FhirServerCapabilities
+```
+
+`RoutingService.discoverCapabilities("oracle-health-sandbox")` is the wrong entry point here: that profile is `SMART_AUTHORIZATION_CODE` and would request a synthetic SMART token.
+
+### Configuration vs live result
+
+| | Configuration assumption | Live validation |
+|---|---|---|
+| Endpoint | `{ORACLE_HEALTH_SANDBOX_BASE_URL}/metadata` | Same configured base URL |
+| Auth | Unknown until measured | **Not required** (HTTP 200, no `Authorization`) |
+| FHIR version | Profile `fhir-version: R4` | Document `fhirVersion` = `4.0.1` |
+| Patient | Not assumed by `OracleHealthKnownApiSurface` | Declared, with `read` and `search-type` |
+| Every R4 resource | `assumesEveryR4Resource() == false` | 44 types; `Medication` and `Claim` absent |
+
+Other live findings: software name empty; publisher “Oracle Health”; Patient also declares `create` and `patch` (`patch` is omitted by the internal interaction enum); `update`/`delete` are not declared for Patient; CORS + SMART-on-FHIR appear on `rest.security` but are not copied into `FhirServerCapabilities`; Patient operations `health-cards-issue` and `export` are not in the internal model.
+
+Live IT: `mvn verify -Poracle-live` with `ORACLE_HEALTH_LIVE_IT=true`. Default `mvn test` / `-Pintegration` stay disabled and do not call Oracle.
+
+Do not persist tokens for this GET. Do not read Patient here (Task 035). Do not add `client_secret_basic` or `private_key_jwt`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.oracle`.
 - Routing and resilience do not contain `if (vendor == ORACLE_HEALTH)`.
-- There is no `OracleSmartConfigurationClient`, `OraclePkce`, or `OracleTokenProvider`.
+- There is no `OracleSmartConfigurationClient`, `OraclePkce`, `OracleTokenProvider`, or `OracleCapabilityStatement`.
 - Disabled missing credentials must not break `fhir.active-server=local-hapi`.
 - `FhirService` does not import Oracle authentication types.
