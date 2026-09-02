@@ -130,6 +130,22 @@ public record OracleHealthIntegrationProfile(
                 aud);
     }
 
+    /**
+     * Public {@code GET /metadata} must not attach a SMART Bearer token. The named
+     * sandbox profile stays {@code SMART_AUTHORIZATION_CODE}; this copy uses the
+     * same configured base URL with {@code NONE} so discovery does not invent a
+     * synthetic authorization.
+     */
+    public FhirServerProfile toUnauthenticatedMetadataProfile() {
+        return new FhirServerProfile(
+                serverProfileName(),
+                fhirBaseUrl,
+                fhirVersion,
+                true,
+                vendor(),
+                FhirAuthenticationSettings.none());
+    }
+
     @Override
     public String toString() {
         return "OracleHealthIntegrationProfile[server="

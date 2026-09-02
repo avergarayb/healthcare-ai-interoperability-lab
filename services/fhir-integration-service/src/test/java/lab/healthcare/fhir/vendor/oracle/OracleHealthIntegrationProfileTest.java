@@ -34,6 +34,10 @@ class OracleHealthIntegrationProfileTest {
         assertThat(profile.toString()).doesNotContain("client_secret");
         assertThat(profile.toString()).doesNotContain("access_token");
         assertThat(OracleHealthKnownApiSurface.assumesEveryR4Resource()).isFalse();
+        assertThat(profile.toUnauthenticatedMetadataProfile().authentication().requiresBearerToken()).isFalse();
+        assertThat(profile.toUnauthenticatedMetadataProfile().baseUrl()).isEqualTo(SYNTHETIC_BASE);
+        assertThat(profile.toUnauthenticatedMetadataProfile().authentication().type())
+                .isEqualTo(FhirAuthenticationType.NONE);
     }
 
     @Test
