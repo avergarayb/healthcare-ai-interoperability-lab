@@ -14,6 +14,20 @@ public class OracleSandboxProfileValidator {
         profileValidator.validate(profile);
     }
 
+    public void validateForAuthorization(OracleHealthIntegrationProfile profile) {
+        if (profile == null) {
+            throw new OracleHealthProfileException("Oracle Health integration profile is missing");
+        }
+        if (!profile.enabled()) {
+            throw new OracleHealthProfileException("Oracle Health sandbox profile is disabled");
+        }
+        if (profile.environment() != OracleHealthEnvironment.SANDBOX) {
+            throw new OracleHealthProfileException(
+                    "Oracle Health authorization is only supported for SANDBOX");
+        }
+        validateForConnectivity(profile);
+    }
+
     public void validateForConnectivity(OracleHealthIntegrationProfile profile) {
         if (profile == null) {
             throw new OracleHealthProfileException("Oracle Health integration profile is missing");

@@ -34,6 +34,31 @@ class SmartConfigurationClientTest {
         assertThat(configuration.grantTypesSupported()).isEmpty();
         assertThat(configuration.codeChallengeMethodsSupported()).containsExactly("S256");
         assertThat(configuration.capabilities()).contains("launch-standalone", "client-public");
+        assertThat(configuration.tokenEndpointAuthMethodsSupported()).isEmpty();
+    }
+
+    @Test
+    void parseReadsTokenEndpointAuthMethodsWithoutInventingNone() {
+        SmartConfiguration configuration = client.parse(
+                200,
+                """
+                {
+                  "authorization_endpoint": "http://127.0.0.1/does-not-contact-oracle/authorize",
+                  "token_endpoint": "http://127.0.0.1/does-not-contact-oracle/token",
+                  "grant_types_supported": ["authorization_code"],
+                  "response_types_supported": ["code"],
+                  "code_challenge_methods_supported": ["S256"],
+                  "capabilities": ["client-public", "client-confidential-symmetric", "client-confidential-asymmetric"],
+                  "token_endpoint_auth_methods_supported": ["client_secret_basic", "private_key_jwt"]
+                }
+                """);
+
+        assertThat(configuration.tokenEndpointAuthMethodsSupported())
+                .containsExactly("client_secret_basic", "private_key_jwt");
+        assertThat(configuration.tokenEndpointAuthMethodsSupported()).doesNotContain("none");
+        assertThat(SmartTokenExchangeDiagnoser.advertisesConfidentialTokenAuth(
+                        configuration.tokenEndpointAuthMethodsSupported()))
+                .isTrue();
     }
 
     @Test

@@ -15,7 +15,8 @@ public record SmartConfiguration(
         List<String> responseTypesSupported,
         List<String> grantTypesSupported,
         List<String> codeChallengeMethodsSupported,
-        List<String> capabilities) {
+        List<String> capabilities,
+        List<String> tokenEndpointAuthMethodsSupported) {
 
     public SmartConfiguration {
         issuer = blankToNull(issuer);
@@ -24,6 +25,28 @@ public record SmartConfiguration(
         grantTypesSupported = copy(grantTypesSupported);
         codeChallengeMethodsSupported = copy(codeChallengeMethodsSupported);
         capabilities = copy(capabilities);
+        tokenEndpointAuthMethodsSupported = copy(tokenEndpointAuthMethodsSupported);
+    }
+
+    public SmartConfiguration(
+            String authorizationEndpoint,
+            String tokenEndpoint,
+            String issuer,
+            List<String> scopesSupported,
+            List<String> responseTypesSupported,
+            List<String> grantTypesSupported,
+            List<String> codeChallengeMethodsSupported,
+            List<String> capabilities) {
+        this(
+                authorizationEndpoint,
+                tokenEndpoint,
+                issuer,
+                scopesSupported,
+                responseTypesSupported,
+                grantTypesSupported,
+                codeChallengeMethodsSupported,
+                capabilities,
+                List.of());
     }
 
     public SmartConfiguration(
@@ -41,7 +64,8 @@ public record SmartConfiguration(
                 responseTypesSupported,
                 List.of(),
                 codeChallengeMethodsSupported,
-                capabilities);
+                capabilities,
+                List.of());
     }
 
     public SmartCapabilities interpretedCapabilities() {

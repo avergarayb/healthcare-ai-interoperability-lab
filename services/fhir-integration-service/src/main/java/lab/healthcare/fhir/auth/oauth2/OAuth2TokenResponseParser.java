@@ -23,9 +23,13 @@ public final class OAuth2TokenResponseParser {
         JsonNode json = readJson(body);
         if (statusCode < 200 || statusCode >= 300) {
             String error = text(json, "error");
+            String errorDescription = text(json, "error_description");
             throw new OAuth2TokenException(
                     "OAuth token acquisition failed: HTTP " + statusCode
-                            + (error == null ? "" : " " + error));
+                            + (error == null ? "" : " " + error),
+                    statusCode,
+                    error,
+                    errorDescription);
         }
         String token = text(json, "access_token");
         if (token == null || token.isBlank()) {

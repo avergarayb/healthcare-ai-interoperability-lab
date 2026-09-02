@@ -33,6 +33,19 @@ class OracleSandboxReadinessArchitectureBoundaryTest {
         assertThat(Files.readString(Path.of("src/main/java/lab/healthcare/fhir/smart/SmartConfigurationClient.java")))
                 .doesNotContain("ORACLE_HEALTH_SANDBOX")
                 .doesNotContain("OracleSandbox");
+        assertThat(Files.readString(Path.of("src/main/java/lab/healthcare/fhir/smart/SmartAuthorizationCoordinator.java")))
+                .doesNotContain("ORACLE_HEALTH_SANDBOX")
+                .doesNotContain("vendor.oracle")
+                .doesNotContain("readPatient")
+                .doesNotContain("cerner.com");
+        assertThat(Files.readString(
+                        Path.of("src/main/java/lab/healthcare/fhir/smart/web/SmartAuthorizationCallbackController.java")))
+                .doesNotContain("cerner.com")
+                .doesNotContain("ORACLE_HEALTH_SANDBOX")
+                .doesNotContain("log.info(request.getQueryString");
+        assertThat(Files.readString(Path.of("src/main/java/lab/healthcare/fhir/resilience/FhirRetryExecutor.java")))
+                .doesNotContain("SmartAuthorizationCoordinator")
+                .doesNotContain("authorizationUrl");
     }
 
     @Test

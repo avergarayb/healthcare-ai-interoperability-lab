@@ -9,6 +9,21 @@ public record AccessToken(String value, Instant expiresAt, String refreshToken, 
         this(value, expiresAt, null, null, null);
     }
 
+    @Override
+    public String toString() {
+        return "AccessToken[hasValue="
+                + (value != null && !value.isBlank())
+                + ", expiresAt="
+                + expiresAt
+                + ", hasRefreshToken="
+                + (refreshToken != null && !refreshToken.isBlank())
+                + ", hasScope="
+                + (scope != null && !scope.isBlank())
+                + ", hasPatient="
+                + (patient != null && !patient.isBlank())
+                + "]";
+    }
+
     public boolean isUsableAt(Instant now, Duration skew) {
         if (value == null || value.isBlank() || expiresAt == null || now == null) {
             return false;

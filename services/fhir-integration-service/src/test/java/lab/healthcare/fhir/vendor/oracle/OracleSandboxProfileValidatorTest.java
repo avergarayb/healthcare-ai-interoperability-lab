@@ -27,6 +27,16 @@ class OracleSandboxProfileValidatorTest {
         assertThatCode(() -> validator.validateForConnectivity(
                         OracleHealthIntegrationProfileTest.completePublicPkceEnabled()))
                 .doesNotThrowAnyException();
+        assertThatCode(() -> validator.validateForAuthorization(
+                        OracleHealthIntegrationProfileTest.completePublicPkceEnabled()))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void disabledProfileIsRejectedForAuthorization() {
+        assertThatThrownBy(() -> validator.validateForAuthorization(disabledEmpty()))
+                .isInstanceOf(OracleHealthProfileException.class)
+                .hasMessageContaining("disabled");
     }
 
     @Test
