@@ -43,6 +43,16 @@ public record FhirServersProperties(String activeServer, Map<String, ServerSetti
             String environment,
             String launchMode,
             String userContext,
-            String clientAuthentication) {
+            String clientAuthentication,
+            String patientId) {
+
+        /**
+         * Test helper. Not a binding constructor — Spring must use the
+         * five-component canonical constructor so {@code patient-id} is applied.
+         */
+        public static VendorIntegrationSettings of(
+                String environment, String launchMode, String userContext, String clientAuthentication) {
+            return new VendorIntegrationSettings(environment, launchMode, userContext, clientAuthentication, "");
+        }
     }
 }

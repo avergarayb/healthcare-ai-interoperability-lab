@@ -62,7 +62,7 @@ class OracleSandboxCapabilityDiscoveryServiceTest {
     void productionIsConfiguredNotDiscovered() {
         OracleHealthIntegrationProfile profile = OracleHealthIntegrationProfile.from(
                 OracleHealthIntegrationProfileTest.oracleServer(true, OracleHealthIntegrationProfileTest.smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "PRODUCTION", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
         OracleSandboxCapabilityDiscoveryService service = service();
 

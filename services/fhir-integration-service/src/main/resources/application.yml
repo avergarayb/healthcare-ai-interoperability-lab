@@ -96,3 +96,4 @@ fhir:
         launch-mode: STANDALONE
         user-context: PATIENT
         client-authentication: PUBLIC_PKCE
+        patient-id: ${ORACLE_HEALTH_SANDBOX_PATIENT_ID:}

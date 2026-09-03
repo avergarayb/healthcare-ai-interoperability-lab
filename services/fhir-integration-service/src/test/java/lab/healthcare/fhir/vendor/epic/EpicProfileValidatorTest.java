@@ -133,7 +133,7 @@ class EpicProfileValidatorTest {
     void rejectsUnsupportedRuntimeAuthWhenRequired() {
         EpicIntegrationProfile profile = EpicIntegrationProfile.from(
                 EpicIntegrationProfileTest.epicServer(false, EpicIntegrationProfileTest.smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "SANDBOX", "STANDALONE", "PATIENT", "PRIVATE_KEY_JWT"));
 
         assertThatCode(() -> validator.validate(profile)).doesNotThrowAnyException();

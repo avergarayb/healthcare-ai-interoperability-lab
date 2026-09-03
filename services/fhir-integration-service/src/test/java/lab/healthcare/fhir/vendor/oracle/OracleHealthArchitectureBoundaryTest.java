@@ -19,6 +19,8 @@ class OracleHealthArchitectureBoundaryTest {
         assertThat(contents).doesNotContain("OracleSandboxAuthenticationService");
         assertThat(contents).doesNotContain("OracleSandboxCapabilityDiscoveryService");
         assertThat(contents).doesNotContain("OracleSandboxAuthenticatedReadService");
+        assertThat(contents).doesNotContain("OracleSandboxPatientContextService");
+        assertThat(contents).doesNotContain("lab.healthcare.fhir.patient");
         assertThat(contents).doesNotContain("ORACLE_HEALTH");
     }
 
@@ -50,15 +52,17 @@ class OracleHealthArchitectureBoundaryTest {
         }
         String text = sources.toString();
         assertThat(text).doesNotContain("https://");
-        assertThat(text).doesNotContain("readPatient");
         assertThat(text).doesNotContain("IGenericClient");
+        assertThat(text).doesNotContain("new FhirService");
         assertThat(text).doesNotContain("OracleSmartConfigurationClient");
         assertThat(text).doesNotContain("OraclePkce");
         assertThat(text).doesNotContain("OracleTokenProvider");
         assertThat(text).doesNotContain("OracleCapabilityStatement");
         assertThat(text).doesNotContain("OracleCapabilityDiscoveryService");
         assertThat(text).doesNotContain("OraclePatientClient");
+        assertThat(text).doesNotContain("OraclePatientReadClient");
         assertThat(text).doesNotContain("cerner.com");
         assertThat(text).doesNotContain("authorization.cerner");
+        assertThat(text).doesNotContain("lab-configured-patient");
     }
 }

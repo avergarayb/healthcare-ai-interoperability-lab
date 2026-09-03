@@ -83,6 +83,7 @@ public final class SmartLabPages {
                   <li>Log in at Oracle in the browser.</li>
                   <li>Oracle redirects to <code>/smart/callback</code>. This process validates state and attempts token exchange.</li>
                   <li>After a token is issued, open <a href="/oracle/sandbox/fhir/patient-search">/oracle/sandbox/fhir/patient-search</a> for a safe authenticated Patient search diagnosis. The page does not show the token or Patient JSON.</li>
+                  <li>With <code>ORACLE_HEALTH_SANDBOX_PATIENT_ID</code> set, open <a href="/oracle/sandbox/fhir/patient">/oracle/sandbox/fhir/patient</a> for a controlled Patient read diagnosis. The page does not show Patient JSON.</li>
                 </ol>
                 """);
     }

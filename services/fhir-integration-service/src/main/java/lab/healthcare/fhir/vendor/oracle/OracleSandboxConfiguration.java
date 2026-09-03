@@ -17,7 +17,8 @@ public record OracleSandboxConfiguration(
         String redirectUri,
         String requestedScopes,
         String aud,
-        OracleHealthClientAuthentication clientAuthentication) {
+        OracleHealthClientAuthentication clientAuthentication,
+        String configuredPatientId) {
 
     public OracleSandboxConfiguration {
         if (destination == null || destination.isBlank()) {
@@ -39,6 +40,7 @@ public record OracleSandboxConfiguration(
         redirectUri = trimToEmpty(redirectUri);
         requestedScopes = trimToEmpty(requestedScopes);
         aud = trimToEmpty(aud);
+        configuredPatientId = trimToEmpty(configuredPatientId);
     }
 
     public static OracleSandboxConfiguration from(OracleHealthIntegrationProfile profile) {
@@ -59,7 +61,8 @@ public record OracleSandboxConfiguration(
                 profile.redirectUri(),
                 profile.requestedScopes(),
                 profile.aud(),
-                profile.clientAuthentication());
+                profile.clientAuthentication(),
+                profile.configuredPatientId());
     }
 
     @Override
@@ -86,6 +89,8 @@ public record OracleSandboxConfiguration(
                 + !requestedScopes.isBlank()
                 + ", hasAud="
                 + !aud.isBlank()
+                + ", hasConfiguredPatientId="
+                + !configuredPatientId.isBlank()
                 + "]";
     }
 

@@ -1,8 +1,8 @@
 # FHIR Integration Service architecture
 
-This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). Task 030 adds Oracle Health in `vendor.oracle`; see [vendors/oracle-health.md](vendors/oracle-health.md). Neither connects to a live vendor sandbox. Task 031 adds runtime `GET /metadata` interpretation in `capability`; see [fhir-capability-discovery.md](fhir-capability-discovery.md). Task 032 adds vendor-neutral endpoint connectivity and Oracle sandbox connection readiness; see [fhir-endpoint-connectivity.md](fhir-endpoint-connectivity.md) and [vendors/oracle-health.md](vendors/oracle-health.md). Task 033 adds interactive SMART Authorization Code + PKCE (generic coordinator + Oracle orchestrator); see [fhir-smart-interactive-authorization.md](fhir-smart-interactive-authorization.md). Task 034 reuses that capability model against the real Oracle Health sandbox `GET /metadata` (public, no Bearer); see [vendors/oracle-health.md](vendors/oracle-health.md). Task 035 uses an issued SMART token through `AccessTokenProvider` for a generic Patient `SEARCH_TYPE`; see [vendors/oracle-health.md](vendors/oracle-health.md).
+This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). Task 030 adds Oracle Health in `vendor.oracle`; see [vendors/oracle-health.md](vendors/oracle-health.md). Neither connects to a live vendor sandbox. Task 031 adds runtime `GET /metadata` interpretation in `capability`; see [fhir-capability-discovery.md](fhir-capability-discovery.md). Task 032 adds vendor-neutral endpoint connectivity and Oracle sandbox connection readiness; see [fhir-endpoint-connectivity.md](fhir-endpoint-connectivity.md) and [vendors/oracle-health.md](vendors/oracle-health.md). Task 033 adds interactive SMART Authorization Code + PKCE (generic coordinator + Oracle orchestrator); see [fhir-smart-interactive-authorization.md](fhir-smart-interactive-authorization.md). Task 034 reuses that capability model against the real Oracle Health sandbox `GET /metadata` (public, no Bearer); see [vendors/oracle-health.md](vendors/oracle-health.md). Task 035 uses an issued SMART token through `AccessTokenProvider` for a generic Patient `SEARCH_TYPE`; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 036 adds an explicit `PatientContext` and a capability-aware authenticated Patient read; see [vendors/oracle-health.md](vendors/oracle-health.md).
 
-There is still no product API or DTO layer. Lab HTTP pages are SMART start/callback and the authenticated Patient search diagnosis. Capability discovery has no extra HTTP page.
+There is still no product API or DTO layer. Lab HTTP pages are SMART start/callback, authenticated Patient search diagnosis, and controlled Patient read diagnosis. Capability discovery has no extra HTTP page.
 
 ## Previous architecture
 
@@ -96,10 +96,21 @@ lab.healthcare.fhir
 │   ├── FieldMapping.java
 │   └── MappingException.java
 │
+├── patient
+│   ├── PatientContext.java
+│   ├── PatientContextSource.java
+│   └── PatientContexts.java
+│
 ├── routing
 │   ├── RoutingService.java
 │   ├── RoutingRequest.java
-│   └── RoutingException.java
+│   ├── RoutingException.java
+│   ├── FhirAuthenticatedReadOutcome.java
+│   ├── FhirAuthenticatedReadResult.java
+│   ├── FhirAuthenticatedReadResults.java
+│   ├── FhirPatientReadOutcome.java
+│   ├── FhirPatientReadResult.java
+│   └── FhirPatientReadResults.java
 │
 ├── observability
 │   ├── FhirOperationContext.java
@@ -178,6 +189,8 @@ lab.healthcare.fhir
         ├── OracleSandboxCapabilityDiscoveryService.java
         ├── OracleSandboxAuthenticatedReadService.java
         ├── OracleSandboxAuthenticatedReadController.java
+        ├── OracleSandboxPatientContextService.java
+        ├── OracleSandboxPatientContextController.java
         └── OracleSandboxSmartInteractiveController.java
 ```
 
@@ -193,6 +206,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, option
 | `auth.oauth2` | Client Credentials HTTP token POST and JSON parse | SMART authorize URL, `FhirService` |
 | `smart` | well-known, capabilities, compatibility, PKCE, authorization request, interactive coordinator, authorization code, refresh | generic Client Credentials, FHIR operations, vendor hosts |
 | `mapping` | external JSON → HAPI R4 Resource | FHIR HTTP, OAuth, terminology `$validate-code` |
+| `patient` | explicit Patient context (destination, id, source) | FHIR HTTP, SMART launch, patient enumeration |
 | `routing` | destination profile name → enabled server + client | mapping, OAuth grant types, FHIR search logic |
 | `observability` | correlation, outcome, duration, safe audit line, aggregated counters | FHIR payloads, tokens, destination lookup, Prometheus |
 | `exception` | bounded failure category, safe details, `FhirClientException` | OAuth token POST (`OAuth2TokenException` stays in `auth.oauth2`), retry/circuit breaker |
@@ -201,7 +215,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, option
 | `connectivity` | transport `GET /metadata` reachability | Patient reads, CapabilityStatement interpretation, vendor secrets |
 | `vendor` | bounded vendor identity (`GENERIC`, `EPIC`, `ORACLE_HEALTH`) | FHIR operations, SMART HTTP |
 | `vendor.epic` | Epic sandbox profile, launch/auth metadata, readiness, honest unimplemented modes | live Epic OAuth, Hyperspace, `private_key_jwt` |
-| `vendor.oracle` | Oracle Health sandbox profile, launch/auth metadata, sandbox connection readiness, SMART auth orchestration, public metadata capability discovery, authenticated Patient search orchestration | Oracle OAuth protocol classes, EHR launch, `private_key_jwt`, `OraclePatientClient` |
+| `vendor.oracle` | Oracle Health sandbox profile, launch/auth metadata, sandbox connection readiness, SMART auth orchestration, public metadata capability discovery, authenticated Patient search and controlled Patient read orchestration | Oracle OAuth protocol classes, EHR launch, `private_key_jwt`, `OraclePatientClient` |
 
 `FhirAuthenticationSettings` lives in `auth` because it is the **runtime** authentication model. `FhirServersProperties.AuthenticationSettings` stays nested in `server` as the YAML binding DTO. The registry maps one to the other. That keeps Spring Boot record binding on a single canonical constructor in the properties type.
 
@@ -250,7 +264,8 @@ vendor.oracle ──► connectivity
 vendor.oracle ──► exception
 vendor.oracle ──► capability  (public GET /metadata; no Oracle CapabilityStatement model)
 vendor.oracle ──► client      (FhirClientFactory with NONE auth for that metadata GET)
-vendor.oracle ──► routing     (generic Patient SEARCH_TYPE with issued AccessTokenProvider)
+vendor.oracle ──► patient     (configured PatientContext; no Patient discovery)
+vendor.oracle ──► routing     (generic Patient SEARCH_TYPE / READ with issued AccessTokenProvider)
 
 connectivity ──► exception
 ```
@@ -280,6 +295,7 @@ server → smart → server
 FhirService → OAuth2TokenClient / Pkce / AuthorizationCodeClient
 FhirService → vendor.epic
 FhirService → vendor.oracle
+FhirService → patient
 FhirService → capability
 FhirService → connectivity
 ```
