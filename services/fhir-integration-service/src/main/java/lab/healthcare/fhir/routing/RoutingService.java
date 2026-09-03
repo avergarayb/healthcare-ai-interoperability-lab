@@ -152,6 +152,31 @@ public class RoutingService {
                 fhirClient -> capabilityDiscovery.discover(name, fhirClient));
     }
 
+    public Patient readPatient(String destination, AccessTokenProvider tokenProvider, String patientId) {
+        return readPatient(destination, tokenProvider, patientId, null);
+    }
+
+    public Patient readPatient(
+            String destination, AccessTokenProvider tokenProvider, String patientId, String correlationId) {
+        if (destination == null || destination.isBlank()) {
+            throw new IllegalArgumentException("Destination must be provided");
+        }
+        if (tokenProvider == null) {
+            throw new IllegalArgumentException("Access token provider must be provided");
+        }
+        if (patientId == null || patientId.isBlank()) {
+            throw new IllegalArgumentException("Patient logical ID must be provided");
+        }
+        String dest = destination.trim();
+        String logicalId = patientId.trim();
+        return executeAgainstDestination(
+                dest,
+                tokenProvider,
+                authenticatedReadContext(dest, logicalId, correlationId),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).readPatient(logicalId));
+    }
+
     public Bundle searchPatients(String destination, AccessTokenProvider tokenProvider, String patientName) {
         return searchPatients(destination, tokenProvider, patientName, null);
     }
@@ -276,6 +301,14 @@ public class RoutingService {
                 FhirAuditOperation.READ,
                 request.resource().fhirType(),
                 resourceId);
+    }
+
+    private static FhirOperationContext authenticatedReadContext(
+            String destination, String logicalId, String correlationId) {
+        String id = correlationId == null || correlationId.isBlank()
+                ? UUID.randomUUID().toString()
+                : correlationId.trim();
+        return new FhirOperationContext(id, destination, FhirAuditOperation.READ, "Patient", logicalId);
     }
 
     private static FhirOperationContext searchContext(String destination, String correlationId) {

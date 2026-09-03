@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. It does **not** assume Patient launch context or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. It does **not** assume EHR launch context or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -55,6 +55,7 @@ oracle-health-sandbox:
     launch-mode: STANDALONE
     user-context: PATIENT
     client-authentication: PUBLIC_PKCE
+    patient-id: ${ORACLE_HEALTH_SANDBOX_PATIENT_ID:}
 ```
 
 Do not commit client secrets, private keys, access tokens, or authorization codes.
@@ -211,6 +212,55 @@ GET /Patient?name=LabNoMatch&_count=1   Authorization: Bearer <token>
 Authenticated ≠ authorized for every resource. Capability ≠ SMART scope. Both must be true for a successful search.
 
 Lab page: `GET /oracle/sandbox/fhir/patient-search` after SMART login. It returns only the diagnosis (no token, no Patient JSON). Maven live IT without a browser session is `AUTHENTICATION_REQUIRED`.
+
+## Controlled Patient context and read (Task 036)
+
+Patient search is not Patient context. Standalone SMART (Task 033) ended with `hasPatient=false`. `fhirUser` is the authenticated user, not the clinical subject.
+
+```text
+Patient search        ≠  Patient context
+OAuth identity        ≠  clinical Patient
+fhirUser              ≠  Patient ID
+```
+
+The laboratory therefore requires an explicit opt-in identifier:
+
+```dotenv
+ORACLE_HEALTH_SANDBOX_PATIENT_ID=
+```
+
+Empty by default. Absent configuration sends **no** Patient HTTP and does not enumerate or guess identifiers.
+
+```text
+configured Patient ID
+        +
+usable SMART token
+        +
+capabilities.supports("Patient", READ)
+        ↓
+RoutingService.readPatient(destination, tokenProvider, patientId)
+        ↓
+FhirService.readPatient(logicalId)
+        ↓
+GET /Patient/{id}   Authorization: Bearer <token>
+```
+
+`FhirService` does not import Oracle. There is no `OraclePatientClient`. EHR launch is out of scope.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `PATIENT_READ_SUCCEEDED` | Oracle returned a FHIR Patient — JSON is not rendered |
+| `PATIENT_CONTEXT_NOT_CONFIGURED` | No sandbox Patient ID — no Patient HTTP |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) — no Patient HTTP |
+| `AUTHENTICATION_REJECTED` | HTTP 401 |
+| `AUTHORIZATION_DENIED` | HTTP 403 |
+| `CAPABILITY_UNSUPPORTED` | Runtime model lacks Patient `read` — no Patient HTTP |
+| `PATIENT_NOT_FOUND` | HTTP 404 — no fallback search |
+| `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
+
+Lab page: `GET /oracle/sandbox/fhir/patient` after SMART login **and** a configured Patient ID. It returns only the diagnosis (no token, no Patient JSON, no demographics).
 
 ## Architecture rules
 

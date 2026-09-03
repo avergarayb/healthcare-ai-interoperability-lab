@@ -38,13 +38,30 @@ class OracleHealthIntegrationProfileTest {
         assertThat(profile.toUnauthenticatedMetadataProfile().baseUrl()).isEqualTo(SYNTHETIC_BASE);
         assertThat(profile.toUnauthenticatedMetadataProfile().authentication().type())
                 .isEqualTo(FhirAuthenticationType.NONE);
+        assertThat(profile.hasConfiguredPatientId()).isFalse();
+        assertThat(profile.toString()).doesNotContain("hasConfiguredPatientId=true");
+    }
+
+    @Test
+    void configuredPatientIdIsPresentButNotPrinted() {
+        OracleHealthIntegrationProfile profile = OracleHealthIntegrationProfile.from(
+                oracleServer(true, smartAuth()),
+                new FhirServersProperties.VendorIntegrationSettings(
+                        "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE", "lab-configured-patient"));
+
+        assertThat(profile.hasConfiguredPatientId()).isTrue();
+        assertThat(profile.configuredPatientId()).isEqualTo("lab-configured-patient");
+        assertThat(profile.toString()).contains("hasConfiguredPatientId=true");
+        assertThat(profile.toString()).doesNotContain("lab-configured-patient");
+        assertThat(OracleSandboxConfiguration.from(profile).toString()).doesNotContain("lab-configured-patient");
+        assertThat(OracleSandboxConfiguration.from(profile).toString()).contains("hasConfiguredPatientId=true");
     }
 
     @Test
     void productionEnvironmentIsSmartCompatibleNotSandboxReady() {
         OracleHealthIntegrationProfile profile = OracleHealthIntegrationProfile.from(
                 oracleServer(false, smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "PRODUCTION", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
 
         assertThat(profile.environment()).isEqualTo(OracleHealthEnvironment.PRODUCTION);
@@ -55,7 +72,7 @@ class OracleHealthIntegrationProfileTest {
     void privateKeyJwtIsConfiguredButNotRuntimeSmartCompatible() {
         OracleHealthIntegrationProfile profile = OracleHealthIntegrationProfile.from(
                 oracleServer(false, smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "SANDBOX", "STANDALONE", "PATIENT", "PRIVATE_KEY_JWT"));
 
         assertThat(profile.clientAuthentication()).isEqualTo(OracleHealthClientAuthentication.PRIVATE_KEY_JWT);
@@ -67,14 +84,14 @@ class OracleHealthIntegrationProfileTest {
     static OracleHealthIntegrationProfile completePublicPkce() {
         return OracleHealthIntegrationProfile.from(
                 oracleServer(false, smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
     }
 
     static OracleHealthIntegrationProfile completePublicPkceEnabled() {
         return OracleHealthIntegrationProfile.from(
                 oracleServer(true, smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
     }
 

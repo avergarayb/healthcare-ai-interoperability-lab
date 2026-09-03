@@ -121,7 +121,7 @@ class OracleHealthProfileValidatorTest {
         OracleHealthIntegrationProfile profile = OracleHealthIntegrationProfile.from(
                 OracleHealthIntegrationProfileTest.oracleServer(
                         false, OracleHealthIntegrationProfileTest.smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "SANDBOX", "STANDALONE", "PATIENT", "PRIVATE_KEY_JWT"));
 
         assertThatCode(() -> validator.validate(profile)).doesNotThrowAnyException();

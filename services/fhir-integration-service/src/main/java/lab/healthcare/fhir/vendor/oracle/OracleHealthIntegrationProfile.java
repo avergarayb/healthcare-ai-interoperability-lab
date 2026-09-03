@@ -27,7 +27,8 @@ public record OracleHealthIntegrationProfile(
         OracleHealthUserContext userContext,
         OracleHealthClientAuthentication clientAuthentication,
         OracleHealthCapabilities capabilities,
-        OracleHealthReadinessState readiness) {
+        OracleHealthReadinessState readiness,
+        String configuredPatientId) {
 
     public static final String SANDBOX_SERVER = "oracle-health-sandbox";
 
@@ -60,6 +61,7 @@ public record OracleHealthIntegrationProfile(
         if (readiness == null) {
             readiness = OracleHealthReadinessState.NOT_CONFIGURED;
         }
+        configuredPatientId = trimToEmpty(configuredPatientId);
     }
 
     public static OracleHealthIntegrationProfile from(
@@ -103,7 +105,8 @@ public record OracleHealthIntegrationProfile(
                         authentication,
                         environment,
                         clientAuthentication,
-                        capabilities));
+                        capabilities),
+                extras == null ? "" : nullToEmpty(extras.patientId()));
     }
 
     public FhirVendor vendor() {
@@ -116,6 +119,10 @@ public record OracleHealthIntegrationProfile(
 
     public boolean hasRequestedScopes() {
         return !requestedScopes.isBlank();
+    }
+
+    public boolean hasConfiguredPatientId() {
+        return !configuredPatientId.isBlank();
     }
 
     public FhirAuthenticationSettings toAuthenticationSettings() {
@@ -176,6 +183,8 @@ public record OracleHealthIntegrationProfile(
                 + !aud.isBlank()
                 + ", hasBaseUrl="
                 + !fhirBaseUrl.isBlank()
+                + ", hasConfiguredPatientId="
+                + hasConfiguredPatientId()
                 + "]";
     }
 

@@ -100,7 +100,7 @@ class OracleSandboxAuthenticationServiceTest {
     void privateKeyJwtIsRejectedWithoutDiscovery() {
         OracleHealthIntegrationProfile profile = OracleHealthIntegrationProfile.from(
                 OracleHealthIntegrationProfileTest.oracleServer(true, OracleHealthIntegrationProfileTest.smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "SANDBOX", "STANDALONE", "PATIENT", "PRIVATE_KEY_JWT"));
         OracleSandboxAuthenticationService service = service();
 
@@ -163,7 +163,7 @@ class OracleSandboxAuthenticationServiceTest {
     void productionIsConfiguredNotReadyForAuthorization() {
         OracleHealthIntegrationProfile profile = OracleHealthIntegrationProfile.from(
                 OracleHealthIntegrationProfileTest.oracleServer(true, OracleHealthIntegrationProfileTest.smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "PRODUCTION", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
         OracleSandboxAuthenticationService service = service();
 

@@ -78,7 +78,7 @@ class OracleSandboxReadinessServiceTest {
                 new OracleSandboxReadinessService(new OracleSandboxProfileValidator(), verifier);
         OracleHealthIntegrationProfile profile = OracleHealthIntegrationProfile.from(
                 OracleHealthIntegrationProfileTest.oracleServer(true, OracleHealthIntegrationProfileTest.smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "PRODUCTION", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
 
         OracleSandboxReadiness readiness = service.inspect(profile);

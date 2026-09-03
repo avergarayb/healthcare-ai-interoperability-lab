@@ -38,7 +38,7 @@ class EpicIntegrationProfileTest {
     void privateKeyJwtIsConfiguredButNotRuntimeSmartCompatible() {
         EpicIntegrationProfile profile = EpicIntegrationProfile.from(
                 epicServer(false, smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "SANDBOX", "STANDALONE", "PATIENT", "PRIVATE_KEY_JWT"));
 
         assertThat(profile.clientAuthentication()).isEqualTo(EpicClientAuthentication.PRIVATE_KEY_JWT);
@@ -50,7 +50,7 @@ class EpicIntegrationProfileTest {
     static EpicIntegrationProfile completePublicPkce() {
         return EpicIntegrationProfile.from(
                 epicServer(false, smartAuth()),
-                new FhirServersProperties.VendorIntegrationSettings(
+                FhirServersProperties.VendorIntegrationSettings.of(
                         "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
     }
 
