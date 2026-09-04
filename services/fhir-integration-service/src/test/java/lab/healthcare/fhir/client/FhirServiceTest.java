@@ -258,6 +258,25 @@ class FhirServiceTest {
     }
 
     @Test
+    void searchObservationsByPatientWithCountReturnsBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .count(5)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientWithCount("patient-001", 5);
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractObservations(actual))
+                .extracting(observation -> observation.getIdElement().getIdPart())
+                .containsExactly("obs-001");
+    }
+
+    @Test
     void searchConditionsByPatientReturnsBundle() {
         Bundle expected = searchBundle(syntheticCondition("condition-001", "Patient/patient-001"));
         when(fhirClient.search()

@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. It does **not** assume EHR launch context or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. Task 038 searches `Observation` the same way. It does **not** assume EHR launch context or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -300,6 +300,43 @@ A 200 Bundle with `hasEntries=false` is still a valid authenticated search. HTTP
 | `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
 
 Lab page: `GET /oracle/sandbox/fhir/condition-search` after SMART login and a configured Patient ID.
+
+## Authenticated Observation search by Patient (Task 038)
+
+Condition access does not imply Observation access. The same Patient context and token are reused; the capability and scope are checked independently.
+
+```text
+configured Patient ID
+        +
+usable SMART token
+        +
+capabilities.supports("Observation", SEARCH_TYPE)
+        ↓
+RoutingService.searchObservations(destination, tokenProvider, patientId)
+        ↓
+FhirService.searchObservationsByPatientWithCount(id, 5)
+        ↓
+GET /Observation?patient={id}&_count=5
+Authorization: Bearer <token>
+```
+
+No `GET /Observation` without `patient`. There is no `OracleObservationClient`. Additional vendor search parameters are not added unless Oracle rejects this query.
+
+HTTP 403 usually means the token lacks `user/Observation.read` in Code Console and `.env`. The 60-second client socket timeout from Task 037 is reused as a generic transport policy.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `OBSERVATION_SEARCH_SUCCEEDED` | Oracle returned a FHIR Bundle — JSON is not rendered |
+| `PATIENT_CONTEXT_NOT_CONFIGURED` | No sandbox Patient ID — no Observation HTTP |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) |
+| `AUTHENTICATION_REJECTED` | HTTP 401 |
+| `AUTHORIZATION_DENIED` | HTTP 403 |
+| `CAPABILITY_UNSUPPORTED` | Runtime model lacks Observation `search-type` |
+| `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
+
+Lab page: `GET /oracle/sandbox/fhir/observation-search` after SMART login and a configured Patient ID.
 
 ## Architecture rules
 

@@ -124,6 +124,21 @@ public class FhirService {
                 "searching Observation by patient");
     }
 
+    public Bundle searchObservationsByPatientWithCount(String patientLogicalId, int pageSize) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Observation _count must be at least 1");
+        }
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasId(patientLogicalId))
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient with _count=" + pageSize);
+    }
+
     public Bundle searchConditionsByPatient(String patientLogicalId) {
         requireText(patientLogicalId, "Patient logical ID must be provided");
         return execute(

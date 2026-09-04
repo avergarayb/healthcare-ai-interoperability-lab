@@ -203,6 +203,31 @@ public class RoutingService {
                         .searchConditionsByPatientWithCount(logicalId, 5, "problem-list-item"));
     }
 
+    public Bundle searchObservations(String destination, AccessTokenProvider tokenProvider, String patientId) {
+        return searchObservations(destination, tokenProvider, patientId, null);
+    }
+
+    public Bundle searchObservations(
+            String destination, AccessTokenProvider tokenProvider, String patientId, String correlationId) {
+        if (destination == null || destination.isBlank()) {
+            throw new IllegalArgumentException("Destination must be provided");
+        }
+        if (tokenProvider == null) {
+            throw new IllegalArgumentException("Access token provider must be provided");
+        }
+        if (patientId == null || patientId.isBlank()) {
+            throw new IllegalArgumentException("Patient logical ID must be provided");
+        }
+        String dest = destination.trim();
+        String logicalId = patientId.trim();
+        return executeAgainstDestination(
+                dest,
+                tokenProvider,
+                observationSearchContext(dest, correlationId),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).searchObservationsByPatientWithCount(logicalId, 5));
+    }
+
     public Bundle searchPatients(String destination, AccessTokenProvider tokenProvider, String patientName) {
         return searchPatients(destination, tokenProvider, patientName, null);
     }
@@ -346,6 +371,18 @@ public class RoutingService {
                 destination,
                 FhirAuditOperation.CONDITION_SEARCH,
                 "Condition",
+                null);
+    }
+
+    private static FhirOperationContext observationSearchContext(String destination, String correlationId) {
+        String id = correlationId == null || correlationId.isBlank()
+                ? UUID.randomUUID().toString()
+                : correlationId.trim();
+        return new FhirOperationContext(
+                id,
+                destination,
+                FhirAuditOperation.OBSERVATION_SEARCH,
+                "Observation",
                 null);
     }
 
