@@ -116,6 +116,8 @@ class FhirClientConfigurationTest {
 
         assertThat(factory.fhirVersion(localHapi())).isEqualTo(FhirVersionEnum.R4);
         assertThat(context.getVersion().getVersion()).isEqualTo(FhirVersionEnum.R4);
+        assertThat(context.getRestfulClientFactory().getSocketTimeout())
+                .isEqualTo(FhirClientFactory.SOCKET_TIMEOUT_MS);
     }
 
     @Test

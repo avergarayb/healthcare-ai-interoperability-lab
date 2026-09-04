@@ -12,9 +12,14 @@ import java.util.Locale;
 
 public class FhirClientFactory {
 
+    /** HAPI default is 10s; some vendor searches exceed 30s before the first byte. */
+    static final int SOCKET_TIMEOUT_MS = 60_000;
+
     public FhirContext createContext(FhirServerProfile profile) {
         requireProfile(profile);
-        return FhirContext.forVersion(fhirVersion(profile));
+        FhirContext context = FhirContext.forVersion(fhirVersion(profile));
+        context.getRestfulClientFactory().setSocketTimeout(SOCKET_TIMEOUT_MS);
+        return context;
     }
 
     public IGenericClient createClient(FhirContext fhirContext, FhirServerProfile profile) {

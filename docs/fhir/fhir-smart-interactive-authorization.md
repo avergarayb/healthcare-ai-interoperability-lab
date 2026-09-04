@@ -2,7 +2,7 @@
 
 Task 033 adds an explicit Authorization Code + PKCE S256 boundary and a minimal local callback.
 
-Browser login is not routed through rate-limit → bulkhead → circuit → retry. The first authenticated Patient search after a token is issued is Task 035 (`GET /oracle/sandbox/fhir/patient-search`). A controlled Patient read (Task 036) is `GET /oracle/sandbox/fhir/patient` and requires an explicit sandbox Patient ID.
+Browser login is not routed through rate-limit → bulkhead → circuit → retry. The first authenticated Patient search after a token is issued is Task 035 (`GET /oracle/sandbox/fhir/patient-search`). A controlled Patient read (Task 036) is `GET /oracle/sandbox/fhir/patient` and requires an explicit sandbox Patient ID. An authenticated Condition search by that Patient (Task 037) is `GET /oracle/sandbox/fhir/condition-search`.
 
 Read this after [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Oracle Health wiring: [vendors/oracle-health.md](vendors/oracle-health.md).
 
@@ -41,6 +41,7 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/smart/callback` | registered redirect; validates callback and attempts token exchange |
 | `http://localhost:8081/oracle/sandbox/fhir/patient-search` | after a token is issued: safe authenticated Patient search diagnosis |
 | `http://localhost:8081/oracle/sandbox/fhir/patient` | after a token and `ORACLE_HEALTH_SANDBOX_PATIENT_ID`: controlled Patient read diagnosis |
+| `http://localhost:8081/oracle/sandbox/fhir/condition-search` | after a token and Patient ID: safe authenticated Condition search by Patient |
 
 These are lab pages, not a product frontend. They never print access tokens, authorization codes, PKCE verifiers, or secrets.
 

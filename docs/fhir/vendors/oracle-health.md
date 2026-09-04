@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. It does **not** assume EHR launch context or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. It does **not** assume EHR launch context or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -261,6 +261,45 @@ GET /Patient/{id}   Authorization: Bearer <token>
 | `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
 
 Lab page: `GET /oracle/sandbox/fhir/patient` after SMART login **and** a configured Patient ID. It returns only the diagnosis (no token, no Patient JSON, no demographics).
+
+## Authenticated Condition search by Patient (Task 037)
+
+Patient context is not clinical-resource authorization. A successful Patient read does not imply `Condition` access.
+
+```text
+configured Patient ID
+        +
+usable SMART token
+        +
+capabilities.supports("Condition", SEARCH_TYPE)
+        ↓
+RoutingService.searchConditions(destination, tokenProvider, patientId)
+        ↓
+FhirService.searchConditionsByPatientWithCount(id, 5, "problem-list-item")
+        ↓
+GET /Condition?patient={id}&category=problem-list-item&_count=5
+Authorization: Bearer <token>
+```
+
+No `GET /Condition` without `patient`. No Patient discovery. There is no `OracleConditionClient`.
+
+If `ORACLE_HEALTH_SANDBOX_PATIENT_ID` is empty: `PATIENT_CONTEXT_NOT_CONFIGURED` and no clinical HTTP.
+
+A 200 Bundle with `hasEntries=false` is still a valid authenticated search. HTTP 403 usually means the SMART scope is Patient-only (`user/Patient.read`); Condition needs a matching scope in Code Console and `.env` (`user/Condition.read`). Do not invent scopes in Java. The search is bounded with FHIR `category=problem-list-item`. Some sandbox Condition searches take 30–40 seconds and return a large Bundle; the client socket timeout is 60 seconds for every destination.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `CONDITION_SEARCH_SUCCEEDED` | Oracle returned a FHIR Bundle — JSON is not rendered |
+| `PATIENT_CONTEXT_NOT_CONFIGURED` | No sandbox Patient ID — no Condition HTTP |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) |
+| `AUTHENTICATION_REJECTED` | HTTP 401 |
+| `AUTHORIZATION_DENIED` | HTTP 403 |
+| `CAPABILITY_UNSUPPORTED` | Runtime model lacks Condition `search-type` |
+| `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
+
+Lab page: `GET /oracle/sandbox/fhir/condition-search` after SMART login and a configured Patient ID.
 
 ## Architecture rules
 
