@@ -4,5 +4,6 @@ public enum FhirAuditOperation {
     READ,
     CAPABILITY_DISCOVERY,
     PATIENT_SEARCH,
-    CONDITION_SEARCH
+    CONDITION_SEARCH,
+    OBSERVATION_SEARCH
 }
