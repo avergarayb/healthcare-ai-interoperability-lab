@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. It does **not** assume EHR launch context or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts. It does **not** assume EHR launch context or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -411,6 +411,36 @@ HTTP 403 usually means the token lacks `user/MedicationRequest.read` in Code Con
 | `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
 
 Lab page: `GET /oracle/sandbox/fhir/medication-request-search` after SMART login and a configured Patient ID.
+
+## Controlled clinical snapshot (Task 041)
+
+Individual resource 200s do not create a clinical record. Task 041 sequences the already-demonstrated operations once CapabilityStatement is discovered **once**:
+
+```text
+Patient READ
+        ↓
+Condition / Observation / DiagnosticReport / MedicationRequest SEARCH_TYPE
+        ↓
+ClinicalSnapshotAssembler
+        ↓
+status + counts only
+```
+
+Execution is sequential. A Patient failure (`UNAVAILABLE`, `UNAUTHORIZED`, or `FAILED`) is `SNAPSHOT_UNAVAILABLE` and skips collections. Collection failures stay isolated (`SNAPSHOT_PARTIAL`). Empty Bundles are `SUCCESS` with `count=0`. There is no `OracleSnapshotClient` and no clinical field model.
+
+A sequential run can take several minutes because each resource reuses the generic 60-second socket timeout. That is not a reason to add a short global timeout.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `SNAPSHOT_COMPLETE` | Patient and all four collections are `SUCCESS` |
+| `SNAPSHOT_PARTIAL` | Patient is `SUCCESS` and at least one collection is not |
+| `SNAPSHOT_UNAVAILABLE` | Patient could not be established — no collection HTTP |
+| `PATIENT_CONTEXT_NOT_CONFIGURED` | No sandbox Patient ID — zero clinical HTTP |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) |
+
+Lab page: `GET /oracle/sandbox/fhir/clinical-snapshot` after SMART login and a configured Patient ID. HTTP 200 for complete **and** partial. The page does not show Patient ID or clinical JSON.
 
 ## Architecture rules
 
