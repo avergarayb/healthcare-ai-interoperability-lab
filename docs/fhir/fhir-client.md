@@ -55,6 +55,8 @@ Only R4 is accepted in this lab. If the context were R5, the client would not ma
 
 `FhirContext` is expensive to build and is thread-safe. Spring holds a single bean for the life of the process.
 
+`FhirClientFactory` sets the HAPI socket timeout to 60 seconds (HAPI's default is 10). That applies to every destination, not to a vendor. Connect timeout stays at HAPI's default.
+
 ## IGenericClient
 
 `IGenericClient` is the fluent FHIR REST client.

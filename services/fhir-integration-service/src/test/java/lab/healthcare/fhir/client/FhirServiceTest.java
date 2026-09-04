@@ -276,6 +276,45 @@ class FhirServiceTest {
     }
 
     @Test
+    void searchConditionsByPatientWithCountReturnsBundle() {
+        Bundle expected = searchBundle(syntheticCondition("condition-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Condition.class))
+                .where(any(ICriterion.class))
+                .count(5)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchConditionsByPatientWithCount("patient-001", 5);
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractConditions(actual))
+                .extracting(condition -> condition.getIdElement().getIdPart())
+                .containsExactly("condition-001");
+    }
+
+    @Test
+    void searchConditionsByPatientWithCountAndCategoryReturnsBundle() {
+        Bundle expected = searchBundle(syntheticCondition("condition-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Condition.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .count(5)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchConditionsByPatientWithCount("patient-001", 5, "problem-list-item");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractConditions(actual))
+                .extracting(condition -> condition.getIdElement().getIdPart())
+                .containsExactly("condition-001");
+    }
+
+    @Test
     void readObservationDoesNotSwallowNotFound() {
         when(fhirClient.read().resource(Observation.class).withId("missing").execute())
                 .thenThrow(new ResourceNotFoundException("Observation/missing"));

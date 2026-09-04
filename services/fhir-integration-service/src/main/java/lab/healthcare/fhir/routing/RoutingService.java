@@ -177,6 +177,32 @@ public class RoutingService {
                 fhirClient -> new FhirService(fhirClient).readPatient(logicalId));
     }
 
+    public Bundle searchConditions(String destination, AccessTokenProvider tokenProvider, String patientId) {
+        return searchConditions(destination, tokenProvider, patientId, null);
+    }
+
+    public Bundle searchConditions(
+            String destination, AccessTokenProvider tokenProvider, String patientId, String correlationId) {
+        if (destination == null || destination.isBlank()) {
+            throw new IllegalArgumentException("Destination must be provided");
+        }
+        if (tokenProvider == null) {
+            throw new IllegalArgumentException("Access token provider must be provided");
+        }
+        if (patientId == null || patientId.isBlank()) {
+            throw new IllegalArgumentException("Patient logical ID must be provided");
+        }
+        String dest = destination.trim();
+        String logicalId = patientId.trim();
+        return executeAgainstDestination(
+                dest,
+                tokenProvider,
+                conditionSearchContext(dest, correlationId),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient)
+                        .searchConditionsByPatientWithCount(logicalId, 5, "problem-list-item"));
+    }
+
     public Bundle searchPatients(String destination, AccessTokenProvider tokenProvider, String patientName) {
         return searchPatients(destination, tokenProvider, patientName, null);
     }
@@ -309,6 +335,18 @@ public class RoutingService {
                 ? UUID.randomUUID().toString()
                 : correlationId.trim();
         return new FhirOperationContext(id, destination, FhirAuditOperation.READ, "Patient", logicalId);
+    }
+
+    private static FhirOperationContext conditionSearchContext(String destination, String correlationId) {
+        String id = correlationId == null || correlationId.isBlank()
+                ? UUID.randomUUID().toString()
+                : correlationId.trim();
+        return new FhirOperationContext(
+                id,
+                destination,
+                FhirAuditOperation.CONDITION_SEARCH,
+                "Condition",
+                null);
     }
 
     private static FhirOperationContext searchContext(String destination, String correlationId) {

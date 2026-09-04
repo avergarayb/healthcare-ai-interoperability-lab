@@ -51,6 +51,7 @@ RoutingRequest.readPatient("local-hapi", "patient-001")
 | `readPatient` | `GET Patient/{id}` on the selected client |
 | `readPatient(destination, AccessTokenProvider, id)` | same read using a caller-supplied token (no synthetic SMART authorize) |
 | `searchPatients(destination, AccessTokenProvider, name)` | qualified Patient `SEARCH_TYPE` with a caller-supplied token |
+| `searchConditions(destination, AccessTokenProvider, patientId)` | qualified Condition `SEARCH_TYPE` by Patient, `category=problem-list-item`, `_count=5`, and a caller-supplied token |
 | `discoverCapabilities` | `GET /metadata` → `FhirServerCapabilities` through the same resilience pipeline |
 
 Unknown or disabled destinations throw `RoutingException`. There is no fallback to `local-hapi`.
@@ -118,4 +119,4 @@ That is enough to prove:
 destination name → existing profile → existing factory → FHIR operation
 ```
 
-Future routing can add tenant, environment, or resource-type rules **without** putting those rules in `FhirService`. Routed Patient reads, Patient search, and capability discovery emit a structured audit event and increment bounded metrics; see [fhir-audit-observability.md](fhir-audit-observability.md) and [fhir-metrics-observability.md](fhir-metrics-observability.md). The routed pipeline is rate limit → bulkhead → circuit → retry; sizes come from `fhir.resilience` YAML. See [fhir-resilience.md](fhir-resilience.md). Capability discovery: [fhir-capability-discovery.md](fhir-capability-discovery.md). `RoutingService.searchPatients` and `RoutingService.readPatient(destination, AccessTokenProvider, id)` reuse that pipeline (`PATIENT_SEARCH` / `READ`) and do not invent an Oracle Patient client.
+Future routing can add tenant, environment, or resource-type rules **without** putting those rules in `FhirService`. Routed Patient reads, Patient search, and capability discovery emit a structured audit event and increment bounded metrics; see [fhir-audit-observability.md](fhir-audit-observability.md) and [fhir-metrics-observability.md](fhir-metrics-observability.md). The routed pipeline is rate limit → bulkhead → circuit → retry; sizes come from `fhir.resilience` YAML. See [fhir-resilience.md](fhir-resilience.md). Capability discovery: [fhir-capability-discovery.md](fhir-capability-discovery.md). `RoutingService.searchPatients`, `RoutingService.readPatient(destination, AccessTokenProvider, id)`, and `RoutingService.searchConditions(destination, AccessTokenProvider, patientId)` reuse that pipeline (`PATIENT_SEARCH` / `READ` / `CONDITION_SEARCH`) and do not invent an Oracle Patient or Condition client.
