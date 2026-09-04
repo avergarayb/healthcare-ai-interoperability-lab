@@ -87,6 +87,7 @@ public final class SmartLabPages {
                   <li>Then open <a href="/oracle/sandbox/fhir/condition-search">/oracle/sandbox/fhir/condition-search</a> for a safe authenticated Condition search. The page does not show Condition JSON.</li>
                   <li>Then open <a href="/oracle/sandbox/fhir/observation-search">/oracle/sandbox/fhir/observation-search</a> for a safe authenticated Observation search. The page does not show Observation JSON.</li>
                   <li>Then open <a href="/oracle/sandbox/fhir/diagnostic-report-search">/oracle/sandbox/fhir/diagnostic-report-search</a> for a safe authenticated DiagnosticReport search. The page does not show DiagnosticReport JSON.</li>
+                  <li>Then open <a href="/oracle/sandbox/fhir/medication-request-search">/oracle/sandbox/fhir/medication-request-search</a> for a safe authenticated MedicationRequest search. The page does not show MedicationRequest JSON.</li>
                 </ol>
                 """);
     }

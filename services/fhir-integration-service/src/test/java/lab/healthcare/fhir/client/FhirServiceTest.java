@@ -23,6 +23,7 @@ import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.DiagnosticReport;
 import org.hl7.fhir.r4.model.Enumerations;
+import org.hl7.fhir.r4.model.MedicationRequest;
 import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.OperationOutcome;
@@ -294,6 +295,25 @@ class FhirServiceTest {
         assertThat(fhirService.extractDiagnosticReports(actual))
                 .extracting(report -> report.getIdElement().getIdPart())
                 .containsExactly("dr-001");
+    }
+
+    @Test
+    void searchMedicationRequestsByPatientWithCountReturnsBundle() {
+        Bundle expected = searchBundle(syntheticMedicationRequest("mr-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(MedicationRequest.class))
+                .where(any(ICriterion.class))
+                .count(5)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchMedicationRequestsByPatientWithCount("patient-001", 5);
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractMedicationRequests(actual))
+                .extracting(request -> request.getIdElement().getIdPart())
+                .containsExactly("mr-001");
     }
 
     @Test
@@ -1634,6 +1654,15 @@ class FhirServiceTest {
                 .setDisplay("Complete blood count");
         report.setSubject(new Reference(patientReference));
         return report;
+    }
+
+    private static MedicationRequest syntheticMedicationRequest(String logicalId, String patientReference) {
+        MedicationRequest request = new MedicationRequest();
+        request.setId(logicalId);
+        request.setStatus(MedicationRequest.MedicationRequestStatus.ACTIVE);
+        request.setIntent(MedicationRequest.MedicationRequestIntent.ORDER);
+        request.setSubject(new Reference(patientReference));
+        return request;
     }
 
     private static Bundle historyBundle(Bundle.BundleEntryComponent... entries) {

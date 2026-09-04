@@ -253,6 +253,31 @@ public class RoutingService {
                 fhirClient -> new FhirService(fhirClient).searchDiagnosticReportsByPatientWithCount(logicalId, 5));
     }
 
+    public Bundle searchMedicationRequests(String destination, AccessTokenProvider tokenProvider, String patientId) {
+        return searchMedicationRequests(destination, tokenProvider, patientId, null);
+    }
+
+    public Bundle searchMedicationRequests(
+            String destination, AccessTokenProvider tokenProvider, String patientId, String correlationId) {
+        if (destination == null || destination.isBlank()) {
+            throw new IllegalArgumentException("Destination must be provided");
+        }
+        if (tokenProvider == null) {
+            throw new IllegalArgumentException("Access token provider must be provided");
+        }
+        if (patientId == null || patientId.isBlank()) {
+            throw new IllegalArgumentException("Patient logical ID must be provided");
+        }
+        String dest = destination.trim();
+        String logicalId = patientId.trim();
+        return executeAgainstDestination(
+                dest,
+                tokenProvider,
+                medicationRequestSearchContext(dest, correlationId),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).searchMedicationRequestsByPatientWithCount(logicalId, 5));
+    }
+
     public Bundle searchPatients(String destination, AccessTokenProvider tokenProvider, String patientName) {
         return searchPatients(destination, tokenProvider, patientName, null);
     }
@@ -420,6 +445,18 @@ public class RoutingService {
                 destination,
                 FhirAuditOperation.DIAGNOSTIC_REPORT_SEARCH,
                 "DiagnosticReport",
+                null);
+    }
+
+    private static FhirOperationContext medicationRequestSearchContext(String destination, String correlationId) {
+        String id = correlationId == null || correlationId.isBlank()
+                ? UUID.randomUUID().toString()
+                : correlationId.trim();
+        return new FhirOperationContext(
+                id,
+                destination,
+                FhirAuditOperation.MEDICATION_REQUEST_SEARCH,
+                "MedicationRequest",
                 null);
     }
 

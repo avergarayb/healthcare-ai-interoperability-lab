@@ -20,6 +20,7 @@ import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.DiagnosticReport;
 import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.IntegerType;
+import org.hl7.fhir.r4.model.MedicationRequest;
 import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.OperationOutcome;
 import org.hl7.fhir.r4.model.Parameters;
@@ -155,6 +156,21 @@ public class FhirService {
                 "searching DiagnosticReport by patient with _count=" + pageSize);
     }
 
+    public Bundle searchMedicationRequestsByPatientWithCount(String patientLogicalId, int pageSize) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("MedicationRequest _count must be at least 1");
+        }
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(MedicationRequest.class)
+                        .where(MedicationRequest.PATIENT.hasId(patientLogicalId))
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching MedicationRequest by patient with _count=" + pageSize);
+    }
+
     public Bundle searchConditionsByPatient(String patientLogicalId) {
         requireText(patientLogicalId, "Patient logical ID must be provided");
         return execute(
@@ -207,6 +223,10 @@ public class FhirService {
 
     public List<DiagnosticReport> extractDiagnosticReports(Bundle bundle) {
         return extractResources(bundle, DiagnosticReport.class);
+    }
+
+    public List<MedicationRequest> extractMedicationRequests(Bundle bundle) {
+        return extractResources(bundle, MedicationRequest.class);
     }
 
     public Bundle searchPatientsByNameAndGender(String name, String gender) {
