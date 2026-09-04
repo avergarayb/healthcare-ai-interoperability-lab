@@ -21,6 +21,7 @@ import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.CodeSystem;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Condition;
+import org.hl7.fhir.r4.model.DiagnosticReport;
 import org.hl7.fhir.r4.model.Enumerations;
 import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.Observation;
@@ -274,6 +275,25 @@ class FhirServiceTest {
         assertThat(fhirService.extractObservations(actual))
                 .extracting(observation -> observation.getIdElement().getIdPart())
                 .containsExactly("obs-001");
+    }
+
+    @Test
+    void searchDiagnosticReportsByPatientWithCountReturnsBundle() {
+        Bundle expected = searchBundle(syntheticDiagnosticReport("dr-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(DiagnosticReport.class))
+                .where(any(ICriterion.class))
+                .count(5)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchDiagnosticReportsByPatientWithCount("patient-001", 5);
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractDiagnosticReports(actual))
+                .extracting(report -> report.getIdElement().getIdPart())
+                .containsExactly("dr-001");
     }
 
     @Test
@@ -1602,6 +1622,18 @@ class FhirServiceTest {
                 .setDisplay("Hypertensive disorder");
         condition.setSubject(new Reference(patientReference));
         return condition;
+    }
+
+    private static DiagnosticReport syntheticDiagnosticReport(String logicalId, String patientReference) {
+        DiagnosticReport report = new DiagnosticReport();
+        report.setId(logicalId);
+        report.setStatus(DiagnosticReport.DiagnosticReportStatus.FINAL);
+        report.getCode().addCoding()
+                .setSystem("http://loinc.org")
+                .setCode("58410-2")
+                .setDisplay("Complete blood count");
+        report.setSubject(new Reference(patientReference));
+        return report;
     }
 
     private static Bundle historyBundle(Bundle.BundleEntryComponent... entries) {
