@@ -86,6 +86,7 @@ public final class SmartLabPages {
                   <li>With <code>ORACLE_HEALTH_SANDBOX_PATIENT_ID</code> set, open <a href="/oracle/sandbox/fhir/patient">/oracle/sandbox/fhir/patient</a> for a controlled Patient read diagnosis. The page does not show Patient JSON.</li>
                   <li>Then open <a href="/oracle/sandbox/fhir/condition-search">/oracle/sandbox/fhir/condition-search</a> for a safe authenticated Condition search. The page does not show Condition JSON.</li>
                   <li>Then open <a href="/oracle/sandbox/fhir/observation-search">/oracle/sandbox/fhir/observation-search</a> for a safe authenticated Observation search. The page does not show Observation JSON.</li>
+                  <li>Then open <a href="/oracle/sandbox/fhir/diagnostic-report-search">/oracle/sandbox/fhir/diagnostic-report-search</a> for a safe authenticated DiagnosticReport search. The page does not show DiagnosticReport JSON.</li>
                 </ol>
                 """);
     }
