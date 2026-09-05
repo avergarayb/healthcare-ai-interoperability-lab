@@ -1,8 +1,8 @@
 # FHIR Integration Service architecture
 
-This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). Task 030 adds Oracle Health in `vendor.oracle`; see [vendors/oracle-health.md](vendors/oracle-health.md). Neither connects to a live vendor sandbox. Task 031 adds runtime `GET /metadata` interpretation in `capability`; see [fhir-capability-discovery.md](fhir-capability-discovery.md). Task 032 adds vendor-neutral endpoint connectivity and Oracle sandbox connection readiness; see [fhir-endpoint-connectivity.md](fhir-endpoint-connectivity.md) and [vendors/oracle-health.md](vendors/oracle-health.md). Task 033 adds interactive SMART Authorization Code + PKCE (generic coordinator + Oracle orchestrator); see [fhir-smart-interactive-authorization.md](fhir-smart-interactive-authorization.md). Task 034 reuses that capability model against the real Oracle Health sandbox `GET /metadata` (public, no Bearer); see [vendors/oracle-health.md](vendors/oracle-health.md). Task 035 uses an issued SMART token through `AccessTokenProvider` for a generic Patient `SEARCH_TYPE`; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 036 adds an explicit `PatientContext` and a capability-aware authenticated Patient read; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 037 searches `Condition` for that configured Patient; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts.
+This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). Task 030 adds Oracle Health in `vendor.oracle`; see [vendors/oracle-health.md](vendors/oracle-health.md). Neither connects to a live vendor sandbox. Task 031 adds runtime `GET /metadata` interpretation in `capability`; see [fhir-capability-discovery.md](fhir-capability-discovery.md). Task 032 adds vendor-neutral endpoint connectivity and Oracle sandbox connection readiness; see [fhir-endpoint-connectivity.md](fhir-endpoint-connectivity.md) and [vendors/oracle-health.md](vendors/oracle-health.md). Task 033 adds interactive SMART Authorization Code + PKCE (generic coordinator + Oracle orchestrator); see [fhir-smart-interactive-authorization.md](fhir-smart-interactive-authorization.md). Task 034 reuses that capability model against the real Oracle Health sandbox `GET /metadata` (public, no Bearer); see [vendors/oracle-health.md](vendors/oracle-health.md). Task 035 uses an issued SMART token through `AccessTokenProvider` for a generic Patient `SEARCH_TYPE`; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 036 adds an explicit `PatientContext` and a capability-aware authenticated Patient read; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 037 searches `Condition` for that configured Patient; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts. Task 042 applies an application retention ceiling and an explicit allowlist as a controlled projection.
 
-There is still no product API or DTO layer. Lab HTTP pages are SMART start/callback, authenticated Patient search diagnosis, controlled Patient read diagnosis, authenticated Condition search diagnosis, authenticated Observation search diagnosis, authenticated DiagnosticReport search diagnosis, authenticated MedicationRequest search diagnosis, and controlled clinical snapshot diagnosis. Capability discovery has no extra HTTP page.
+There is still no product API or DTO layer. Lab HTTP pages are SMART start/callback, authenticated Patient search diagnosis, controlled Patient read diagnosis, authenticated Condition search diagnosis, authenticated Observation search diagnosis, authenticated DiagnosticReport search diagnosis, authenticated MedicationRequest search diagnosis, controlled clinical snapshot diagnosis, and controlled clinical projection diagnosis. Capability discovery has no extra HTTP page.
 
 ## Previous architecture
 
@@ -107,6 +107,18 @@ lab.healthcare.fhir
 │   ├── ClinicalSnapshotResult.java
 │   ├── ClinicalSnapshotStatuses.java
 │   └── ClinicalSnapshotAssembler.java
+│
+├── projection
+│   ├── RetentionCeiling.java
+│   ├── ProjectedCollection.java
+│   ├── RetainedPatient.java
+│   ├── RetainedCondition.java
+│   ├── RetainedObservation.java
+│   ├── RetainedDiagnosticReport.java
+│   ├── RetainedMedicationRequest.java
+│   ├── ClinicalProjectionResult.java
+│   ├── ClinicalProjectionMapper.java
+│   └── ClinicalProjectionAssembler.java
 │
 ├── routing
 │   ├── RoutingService.java
@@ -214,6 +226,8 @@ lab.healthcare.fhir
         ├── OracleSandboxMedicationRequestSearchController.java
         ├── OracleSandboxClinicalSnapshotService.java
         ├── OracleSandboxClinicalSnapshotController.java
+        ├── OracleSandboxClinicalProjectionService.java
+        ├── OracleSandboxClinicalProjectionController.java
         └── OracleSandboxSmartInteractiveController.java
 ```
 
@@ -231,6 +245,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, option
 | `mapping` | external JSON → HAPI R4 Resource | FHIR HTTP, OAuth, terminology `$validate-code` |
 | `patient` | explicit Patient context (destination, id, source) | FHIR HTTP, SMART launch, patient enumeration |
 | `snapshot` | sequential assembly of status + counts for already-supported resources | clinical field models, IA, persistence, vendor hosts |
+| `projection` | application retention ceiling and explicit allowlist over the same operations | clinical ranking, AI context, persistence, vendor hosts, raw Bundle |
 | `routing` | destination profile name → enabled server + client | mapping, OAuth grant types, FHIR search logic |
 | `observability` | correlation, outcome, duration, safe audit line, aggregated counters | FHIR payloads, tokens, destination lookup, Prometheus |
 | `exception` | bounded failure category, safe details, `FhirClientException` | OAuth token POST (`OAuth2TokenException` stays in `auth.oauth2`), retry/circuit breaker |
@@ -239,7 +254,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, option
 | `connectivity` | transport `GET /metadata` reachability | Patient reads, CapabilityStatement interpretation, vendor secrets |
 | `vendor` | bounded vendor identity (`GENERIC`, `EPIC`, `ORACLE_HEALTH`) | FHIR operations, SMART HTTP |
 | `vendor.epic` | Epic sandbox profile, launch/auth metadata, readiness, honest unimplemented modes | live Epic OAuth, Hyperspace, `private_key_jwt` |
-| `vendor.oracle` | Oracle Health sandbox profile, launch/auth metadata, sandbox connection readiness, SMART auth orchestration, public metadata capability discovery, authenticated Patient search, controlled Patient read, Condition search, Observation search, DiagnosticReport search, MedicationRequest search, and controlled snapshot orchestration | Oracle OAuth protocol classes, EHR launch, `private_key_jwt`, `OraclePatientClient`, `OracleConditionClient`, `OracleObservationClient`, `OracleDiagnosticReportClient`, `OracleMedicationRequestClient`, `OracleSnapshotClient` |
+| `vendor.oracle` | Oracle Health sandbox profile, launch/auth metadata, sandbox connection readiness, SMART auth orchestration, public metadata capability discovery, authenticated Patient search, controlled Patient read, Condition search, Observation search, DiagnosticReport search, MedicationRequest search, controlled snapshot orchestration, and controlled projection orchestration | Oracle OAuth protocol classes, EHR launch, `private_key_jwt`, `OraclePatientClient`, `OracleConditionClient`, `OracleObservationClient`, `OracleDiagnosticReportClient`, `OracleMedicationRequestClient`, `OracleSnapshotClient`, `OracleProjectionClient` |
 
 `FhirAuthenticationSettings` lives in `auth` because it is the **runtime** authentication model. `FhirServersProperties.AuthenticationSettings` stays nested in `server` as the YAML binding DTO. The registry maps one to the other. That keeps Spring Boot record binding on a single canonical constructor in the properties type.
 
@@ -273,6 +288,12 @@ snapshot ──► capability  (supports checks; one CapabilityStatement from th
 snapshot ──► auth        (AccessTokenProvider argument)
 snapshot ──► patient     (PatientContextSource on the result)
 
+projection ──► routing     (existing read/search operations only)
+projection ──► capability  (supports checks; one CapabilityStatement from the caller)
+projection ──► auth        (AccessTokenProvider argument)
+projection ──► patient     (PatientContextSource on the result)
+projection ──► snapshot    (reuses outcome and resource status enums)
+
 routing ──► server   (profile lookup)
 routing ──► client   (FhirClientFactory, FhirAccessTokenProviders, FhirService)
 routing ──► observability (audit event + metrics after destination is known)
@@ -296,6 +317,7 @@ vendor.oracle ──► client      (FhirClientFactory with NONE auth for that m
 vendor.oracle ──► patient     (configured PatientContext; no Patient discovery)
 vendor.oracle ──► routing     (generic Patient SEARCH_TYPE / READ and clinical SEARCH_TYPE with issued AccessTokenProvider)
 vendor.oracle ──► snapshot    (controlled assembly of status and counts)
+vendor.oracle ──► projection  (controlled retention ceiling and allowlist)
 
 connectivity ──► exception
 ```

@@ -2,7 +2,7 @@
 
 Task 033 adds an explicit Authorization Code + PKCE S256 boundary and a minimal local callback.
 
-Browser login is not routed through rate-limit → bulkhead → circuit → retry. The first authenticated Patient search after a token is issued is Task 035 (`GET /oracle/sandbox/fhir/patient-search`). A controlled Patient read (Task 036) is `GET /oracle/sandbox/fhir/patient` and requires an explicit sandbox Patient ID. An authenticated Condition search by that Patient (Task 037) is `GET /oracle/sandbox/fhir/condition-search`. An authenticated Observation search (Task 038) is `GET /oracle/sandbox/fhir/observation-search`. An authenticated DiagnosticReport search (Task 039) is `GET /oracle/sandbox/fhir/diagnostic-report-search`. An authenticated MedicationRequest search (Task 040) is `GET /oracle/sandbox/fhir/medication-request-search`. A controlled clinical snapshot (Task 041) is `GET /oracle/sandbox/fhir/clinical-snapshot`.
+Browser login is not routed through rate-limit → bulkhead → circuit → retry. The first authenticated Patient search after a token is issued is Task 035 (`GET /oracle/sandbox/fhir/patient-search`). A controlled Patient read (Task 036) is `GET /oracle/sandbox/fhir/patient` and requires an explicit sandbox Patient ID. An authenticated Condition search by that Patient (Task 037) is `GET /oracle/sandbox/fhir/condition-search`. An authenticated Observation search (Task 038) is `GET /oracle/sandbox/fhir/observation-search`. An authenticated DiagnosticReport search (Task 039) is `GET /oracle/sandbox/fhir/diagnostic-report-search`. An authenticated MedicationRequest search (Task 040) is `GET /oracle/sandbox/fhir/medication-request-search`. A controlled clinical snapshot (Task 041) is `GET /oracle/sandbox/fhir/clinical-snapshot`. A controlled clinical projection (Task 042) is `GET /oracle/sandbox/fhir/clinical-projection`.
 
 Read this after [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Oracle Health wiring: [vendors/oracle-health.md](vendors/oracle-health.md).
 
@@ -46,6 +46,7 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/oracle/sandbox/fhir/diagnostic-report-search` | after a token and Patient ID: safe authenticated DiagnosticReport search by Patient |
 | `http://localhost:8081/oracle/sandbox/fhir/medication-request-search` | after a token and Patient ID: safe authenticated MedicationRequest search by Patient |
 | `http://localhost:8081/oracle/sandbox/fhir/clinical-snapshot` | after a token and Patient ID: controlled snapshot of status and counts |
+| `http://localhost:8081/oracle/sandbox/fhir/clinical-projection` | after a token and Patient ID: controlled projection of status, received/retained counts, and truncated |
 
 These are lab pages, not a product frontend. They never print access tokens, authorization codes, PKCE verifiers, or secrets.
 
