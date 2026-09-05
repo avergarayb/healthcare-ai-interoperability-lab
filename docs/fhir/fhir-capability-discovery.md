@@ -76,7 +76,7 @@ Live result (Oracle Health Millennium FHIR R4 Code sandbox, no Authorization hea
 | Internal model | `patch` omitted (unknown `FhirInteraction`); `update` / `delete` not declared |
 | Search / operations | Patient search params and operations (`health-cards-issue`, `export`) exist in the raw document; `FhirServerCapabilities` records `SEARCH_TYPE`, not param names or operations |
 
-This is **not** Patient search (Task 035), Patient read (Task 036), Condition search (Task 037), Observation search (Task 038), DiagnosticReport search (Task 039), MedicationRequest search (Task 040), the Task 041 snapshot, or the Task 042 projection. Tokens are not fetched or persisted for `/metadata`.
+This is **not** Patient search (Task 035), Patient read (Task 036), Condition search (Task 037), Observation search (Task 038), DiagnosticReport search (Task 039), MedicationRequest search (Task 040), the Task 041 snapshot, the Task 042 projection, or the Task 043 model boundary. Tokens are not fetched or persisted for `/metadata`.
 
 ## What this is not
 
