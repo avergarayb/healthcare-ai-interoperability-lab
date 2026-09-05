@@ -1,8 +1,8 @@
 # FHIR Integration Service architecture
 
-This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). Task 030 adds Oracle Health in `vendor.oracle`; see [vendors/oracle-health.md](vendors/oracle-health.md). Neither connects to a live vendor sandbox. Task 031 adds runtime `GET /metadata` interpretation in `capability`; see [fhir-capability-discovery.md](fhir-capability-discovery.md). Task 032 adds vendor-neutral endpoint connectivity and Oracle sandbox connection readiness; see [fhir-endpoint-connectivity.md](fhir-endpoint-connectivity.md) and [vendors/oracle-health.md](vendors/oracle-health.md). Task 033 adds interactive SMART Authorization Code + PKCE (generic coordinator + Oracle orchestrator); see [fhir-smart-interactive-authorization.md](fhir-smart-interactive-authorization.md). Task 034 reuses that capability model against the real Oracle Health sandbox `GET /metadata` (public, no Bearer); see [vendors/oracle-health.md](vendors/oracle-health.md). Task 035 uses an issued SMART token through `AccessTokenProvider` for a generic Patient `SEARCH_TYPE`; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 036 adds an explicit `PatientContext` and a capability-aware authenticated Patient read; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 037 searches `Condition` for that configured Patient; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts. Task 042 applies an application retention ceiling and an explicit allowlist as a controlled projection. Task 043 maps that projection onto a vendor-neutral v1 model boundary contract without calling a model. Task 044 exposes that contract on `GET /api/model-boundary/v1` as JSON, separate from the laboratory HTML page.
+This note is the package map after Tasks 001–017. It does **not** add a FHIR capability. Read it after [fhir-client.md](fhir-client.md). OAuth and SMART behavior is unchanged: see [fhir-oauth2-authentication.md](fhir-oauth2-authentication.md) and [fhir-smart-on-fhir.md](fhir-smart-on-fhir.md). Task 028 adds SMART readiness types in `smart` only; see [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Task 029 adds an Epic vendor profile in `vendor` / `vendor.epic`; see [vendors/epic.md](vendors/epic.md). Task 030 adds Oracle Health in `vendor.oracle`; see [vendors/oracle-health.md](vendors/oracle-health.md). Neither connects to a live vendor sandbox. Task 031 adds runtime `GET /metadata` interpretation in `capability`; see [fhir-capability-discovery.md](fhir-capability-discovery.md). Task 032 adds vendor-neutral endpoint connectivity and Oracle sandbox connection readiness; see [fhir-endpoint-connectivity.md](fhir-endpoint-connectivity.md) and [vendors/oracle-health.md](vendors/oracle-health.md). Task 033 adds interactive SMART Authorization Code + PKCE (generic coordinator + Oracle orchestrator); see [fhir-smart-interactive-authorization.md](fhir-smart-interactive-authorization.md). Task 034 reuses that capability model against the real Oracle Health sandbox `GET /metadata` (public, no Bearer); see [vendors/oracle-health.md](vendors/oracle-health.md). Task 035 uses an issued SMART token through `AccessTokenProvider` for a generic Patient `SEARCH_TYPE`; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 036 adds an explicit `PatientContext` and a capability-aware authenticated Patient read; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 037 searches `Condition` for that configured Patient; see [vendors/oracle-health.md](vendors/oracle-health.md). Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts. Task 042 applies an application retention ceiling and an explicit allowlist as a controlled projection. Task 043 maps that projection onto a vendor-neutral v1 model boundary contract without calling a model. Task 044 exposes that contract on `GET /api/model-boundary/v1` as JSON, separate from the laboratory HTML page. Task 045 adds a contract-consuming agent stub that observes the contract and does not call a model.
 
-There is still no product API or DTO layer. Lab HTTP pages are SMART start/callback, authenticated Patient search diagnosis, controlled Patient read diagnosis, authenticated Condition search diagnosis, authenticated Observation search diagnosis, authenticated DiagnosticReport search diagnosis, authenticated MedicationRequest search diagnosis, controlled clinical snapshot diagnosis, controlled clinical projection diagnosis, and vendor-neutral model boundary diagnosis. Task 044 adds a versioned machine surface (`GET /api/model-boundary/v1`) that returns the v1 contract as JSON. Capability discovery has no extra HTTP page.
+There is still no product API or DTO layer. Lab HTTP pages are SMART start/callback, authenticated Patient search diagnosis, controlled Patient read diagnosis, authenticated Condition search diagnosis, authenticated Observation search diagnosis, authenticated DiagnosticReport search diagnosis, authenticated MedicationRequest search diagnosis, controlled clinical snapshot diagnosis, controlled clinical projection diagnosis, and vendor-neutral model boundary diagnosis. Task 044 adds a versioned machine surface (`GET /api/model-boundary/v1`) that returns the v1 contract as JSON. Task 045 adds a stub consumer (`GET /lab/agent-stub`, `GET /api/agent-stub/v1`) that observes that contract without calling a model. Capability discovery has no extra HTTP page.
 
 ## Previous architecture
 
@@ -135,6 +135,13 @@ lab.healthcare.fhir
 │   └── web
 │       └── ModelBoundaryContractController.java
 │
+├── agentstub
+│   ├── ObservedCollection.java
+│   ├── AgentStubObservation.java
+│   ├── AgentStub.java
+│   └── web
+│       └── AgentStubController.java
+│
 ├── routing
 │   ├── RoutingService.java
 │   ├── RoutingRequest.java
@@ -265,6 +272,7 @@ YAML keys (`fhir.active-server`, `fhir.servers`, nested `authentication`, option
 | `snapshot` | sequential assembly of status + counts for already-supported resources | clinical field models, IA, persistence, vendor hosts |
 | `projection` | application retention ceiling and explicit allowlist over the same operations | clinical ranking, AI context, persistence, vendor hosts, raw Bundle |
 | `modelboundary` | vendor-neutral v1 contract mapped from the projection, plus versioned JSON consumer surface | LLM calls, vendor contracts, HAPI types, new FHIR queries, agent runtime |
+| `agentstub` | consumes the v1 contract and emits a blind observation (`modelCalled=false`) | LLM, prompts, `ai-service`, FHIR fetch, record republication |
 | `routing` | destination profile name → enabled server + client | mapping, OAuth grant types, FHIR search logic |
 | `observability` | correlation, outcome, duration, safe audit line, aggregated counters | FHIR payloads, tokens, destination lookup, Prometheus |
 | `exception` | bounded failure category, safe details, `FhirClientException` | OAuth token POST (`OAuth2TokenException` stays in `auth.oauth2`), retry/circuit breaker |
@@ -317,6 +325,9 @@ modelboundary ──► projection  (maps retained projection only)
 modelboundary ──► snapshot    (reuses outcome and resource status enums)
 modelboundary ──► patient     (PatientContextSource on the contract)
 modelboundary.web ──► modelboundary  (GET /api/model-boundary/v1; no vendor import)
+agentstub ──► modelboundary  (observe contract only)
+agentstub.web ──► agentstub
+agentstub.web ──► modelboundary  (provider + HTTP statuses)
 
 routing ──► server   (profile lookup)
 routing ──► client   (FhirClientFactory, FhirAccessTokenProviders, FhirService)

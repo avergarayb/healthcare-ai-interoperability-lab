@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts. Task 042 applies an application retention ceiling and an explicit allowlist as a controlled projection. Task 043 maps that projection onto a vendor-neutral v1 model boundary contract. Task 044 exposes that contract on `GET /api/model-boundary/v1`. It does **not** assume EHR launch context or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts. Task 042 applies an application retention ceiling and an explicit allowlist as a controlled projection. Task 043 maps that projection onto a vendor-neutral v1 model boundary contract. Task 044 exposes that contract on `GET /api/model-boundary/v1`. Task 045 consumes it with a non-LLM stub. It does **not** assume EHR launch context or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -495,6 +495,17 @@ STOP
 ```
 
 No Patient ID in the path. Same session outcomes as Task 043. The JSON includes allowlisted `records`; the HTML page remains blind. There is no event bus, no `ai-service`, and no Epic connection.
+
+## Contract-consuming agent stub (Task 045)
+
+A vendor-neutral stub consumes the v1 contract through `ModelBoundaryContractProvider` and stops. It does not call a model and does not republish `records`.
+
+```text
+GET /lab/agent-stub          HTML observation (counts only)
+GET /api/agent-stub/v1       JSON AgentStubObservation
+```
+
+`modelCalled` is always false. Oracle is only the current provider behind the contract. There is no Python `ai-service` and no HTTP self-call to `/api/model-boundary/v1`.
 
 ## Architecture rules
 

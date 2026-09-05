@@ -2,7 +2,7 @@
 
 Task 033 adds an explicit Authorization Code + PKCE S256 boundary and a minimal local callback.
 
-Browser login is not routed through rate-limit → bulkhead → circuit → retry. The first authenticated Patient search after a token is issued is Task 035 (`GET /oracle/sandbox/fhir/patient-search`). A controlled Patient read (Task 036) is `GET /oracle/sandbox/fhir/patient` and requires an explicit sandbox Patient ID. An authenticated Condition search by that Patient (Task 037) is `GET /oracle/sandbox/fhir/condition-search`. An authenticated Observation search (Task 038) is `GET /oracle/sandbox/fhir/observation-search`. An authenticated DiagnosticReport search (Task 039) is `GET /oracle/sandbox/fhir/diagnostic-report-search`. An authenticated MedicationRequest search (Task 040) is `GET /oracle/sandbox/fhir/medication-request-search`. A controlled clinical snapshot (Task 041) is `GET /oracle/sandbox/fhir/clinical-snapshot`. A controlled clinical projection (Task 042) is `GET /oracle/sandbox/fhir/clinical-projection`. A vendor-neutral model boundary contract (Task 043) is `GET /oracle/sandbox/fhir/model-boundary`. The versioned machine surface (Task 044) is `GET /api/model-boundary/v1`.
+Browser login is not routed through rate-limit → bulkhead → circuit → retry. The first authenticated Patient search after a token is issued is Task 035 (`GET /oracle/sandbox/fhir/patient-search`). A controlled Patient read (Task 036) is `GET /oracle/sandbox/fhir/patient` and requires an explicit sandbox Patient ID. An authenticated Condition search by that Patient (Task 037) is `GET /oracle/sandbox/fhir/condition-search`. An authenticated Observation search (Task 038) is `GET /oracle/sandbox/fhir/observation-search`. An authenticated DiagnosticReport search (Task 039) is `GET /oracle/sandbox/fhir/diagnostic-report-search`. An authenticated MedicationRequest search (Task 040) is `GET /oracle/sandbox/fhir/medication-request-search`. A controlled clinical snapshot (Task 041) is `GET /oracle/sandbox/fhir/clinical-snapshot`. A controlled clinical projection (Task 042) is `GET /oracle/sandbox/fhir/clinical-projection`. A vendor-neutral model boundary contract (Task 043) is `GET /oracle/sandbox/fhir/model-boundary`. The versioned machine surface (Task 044) is `GET /api/model-boundary/v1`. A contract-consuming stub (Task 045) is `GET /lab/agent-stub` and `GET /api/agent-stub/v1`.
 
 Read this after [fhir-smart-real-world-readiness.md](fhir-smart-real-world-readiness.md). Oracle Health wiring: [vendors/oracle-health.md](vendors/oracle-health.md).
 
@@ -49,6 +49,8 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/oracle/sandbox/fhir/clinical-projection` | after a token and Patient ID: controlled projection of status, received/retained counts, and truncated |
 | `http://localhost:8081/oracle/sandbox/fhir/model-boundary` | after a token and Patient ID: vendor-neutral v1 model boundary of version, outcome, status, and counts |
 | `http://localhost:8081/api/model-boundary/v1` | after a token and Patient ID: JSON `ModelBoundaryContract` v1 (machine surface, not the HTML lab page) |
+| `http://localhost:8081/lab/agent-stub` | after a token and Patient ID: stub observation (counts, `modelCalled=false`) |
+| `http://localhost:8081/api/agent-stub/v1` | same observation as JSON |
 
 These are lab pages, not a product frontend. They never print access tokens, authorization codes, PKCE verifiers, or secrets.
 

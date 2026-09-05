@@ -92,6 +92,7 @@ public final class SmartLabPages {
                   <li>Then open <a href="/oracle/sandbox/fhir/clinical-projection">/oracle/sandbox/fhir/clinical-projection</a> for a controlled projection. The page shows only status, received/retained counts, and truncated. It does not show projected field values.</li>
                   <li>Then open <a href="/oracle/sandbox/fhir/model-boundary">/oracle/sandbox/fhir/model-boundary</a> for the vendor-neutral model boundary contract. The page shows only version, outcome, status, and counts. It does not show record values and does not call a model.</li>
                   <li>A machine consumer uses <code>GET /api/model-boundary/v1</code> for the exact v1 JSON contract. That is not this HTML page and not an agent.</li>
+                  <li>Then open <a href="/lab/agent-stub">/lab/agent-stub</a> for the contract-consuming stub. The page shows only observation counts and <code>modelCalled=false</code>. JSON: <code>GET /api/agent-stub/v1</code>.</li>
                 </ol>
                 """);
     }
