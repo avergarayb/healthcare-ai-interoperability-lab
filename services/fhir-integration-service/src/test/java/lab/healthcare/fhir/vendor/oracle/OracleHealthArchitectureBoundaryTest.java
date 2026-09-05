@@ -27,6 +27,8 @@ class OracleHealthArchitectureBoundaryTest {
         assertThat(contents).doesNotContain("OracleSandboxClinicalSnapshotService");
         assertThat(contents).doesNotContain("OracleSandboxClinicalProjectionService");
         assertThat(contents).doesNotContain("OracleSandboxModelBoundaryService");
+        assertThat(contents).doesNotContain("OracleSandboxModelBoundaryContractProvider");
+        assertThat(contents).doesNotContain("ModelBoundaryContractController");
         assertThat(contents).doesNotContain("lab.healthcare.fhir.patient");
         assertThat(contents).doesNotContain("lab.healthcare.fhir.snapshot");
         assertThat(contents).doesNotContain("lab.healthcare.fhir.projection");
@@ -78,6 +80,7 @@ class OracleHealthArchitectureBoundaryTest {
         assertThat(text).doesNotContain("OracleSnapshotClient");
         assertThat(text).doesNotContain("OracleProjectionClient");
         assertThat(text).doesNotContain("OracleModelBoundaryClient");
+        assertThat(text).doesNotContain("OracleContractClient");
         assertThat(text).doesNotContain("OracleModelContext");
         assertThat(text).doesNotContain("OracleClinicalClient");
         assertThat(text).doesNotContain("cerner.com");
