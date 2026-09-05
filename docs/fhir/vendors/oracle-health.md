@@ -1,6 +1,6 @@
 # Oracle Health integration profile
 
-Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts. It does **not** assume EHR launch context or claim certification.
+Task 030 prepares an Oracle Health-specific integration profile. Task 032 adds **sandbox connection readiness**: environment-variable configuration, fail-fast validation, and a vendor-neutral metadata probe. Task 033 adds **interactive SMART Authorization Code + PKCE** against a configured Oracle Health Secure Sandbox. Task 034 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 035 uses the issued token for a generic authenticated Patient `SEARCH_TYPE`. Task 036 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 037 searches `Condition` for that same configured Patient. Task 038 searches `Observation` the same way. Task 039 searches `DiagnosticReport` the same way. Task 040 searches `MedicationRequest` the same way. Task 041 assembles those operations into a controlled clinical snapshot of status and counts. Task 042 applies an application retention ceiling and an explicit allowlist as a controlled projection. It does **not** assume EHR launch context or claim certification.
 
 Read this after [epic.md](epic.md) and [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md).
 
@@ -441,6 +441,26 @@ A sequential run can take several minutes because each resource reuses the gener
 | `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) |
 
 Lab page: `GET /oracle/sandbox/fhir/clinical-snapshot` after SMART login and a configured Patient ID. HTTP 200 for complete **and** partial. The page does not show Patient ID or clinical JSON.
+
+## Controlled clinical projection (Task 042)
+
+Task 041 can receive more entries than requested (`_count=5` is a request, not a ceiling). Task 042 keeps the same sequential operations and applies an application retention ceiling of `N = 5` plus an explicit allowlist:
+
+```text
+received Bundle
+        ↓
+first N retention
+        ↓
+allowlist mapping
+        ↓
+status + receivedCount + retainedCount + truncated
+```
+
+The EHR may still return 1489 Conditions. The application retains at most five allowlisted records. First N is operational, not clinical ranking. Empty Bundles remain `SUCCESS` with `receivedCount=0`, `retainedCount=0`, `truncated=false`. There is no `OracleProjectionClient` and no AI-ready context.
+
+The laboratory page must not show projected field values.
+
+Lab page: `GET /oracle/sandbox/fhir/clinical-projection` after SMART login and a configured Patient ID. HTTP 200 for complete **and** partial. The page does not show Patient ID, projected values, or clinical JSON.
 
 ## Architecture rules
 

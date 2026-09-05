@@ -89,6 +89,7 @@ public final class SmartLabPages {
                   <li>Then open <a href="/oracle/sandbox/fhir/diagnostic-report-search">/oracle/sandbox/fhir/diagnostic-report-search</a> for a safe authenticated DiagnosticReport search. The page does not show DiagnosticReport JSON.</li>
                   <li>Then open <a href="/oracle/sandbox/fhir/medication-request-search">/oracle/sandbox/fhir/medication-request-search</a> for a safe authenticated MedicationRequest search. The page does not show MedicationRequest JSON.</li>
                   <li>Then open <a href="/oracle/sandbox/fhir/clinical-snapshot">/oracle/sandbox/fhir/clinical-snapshot</a> for a controlled clinical snapshot. The page shows only status and counts.</li>
+                  <li>Then open <a href="/oracle/sandbox/fhir/clinical-projection">/oracle/sandbox/fhir/clinical-projection</a> for a controlled projection. The page shows only status, received/retained counts, and truncated. It does not show projected field values.</li>
                 </ol>
                 """);
     }
