@@ -33,6 +33,7 @@ class OracleHealthArchitectureBoundaryTest {
         assertThat(contents).doesNotContain("lab.healthcare.fhir.snapshot");
         assertThat(contents).doesNotContain("lab.healthcare.fhir.projection");
         assertThat(contents).doesNotContain("lab.healthcare.fhir.modelboundary");
+        assertThat(contents).doesNotContain("lab.healthcare.fhir.agentstub");
         assertThat(contents).doesNotContain("ORACLE_HEALTH");
     }
 
