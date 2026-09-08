@@ -2,6 +2,8 @@ package lab.healthcare.fhir.vendor.epic;
 
 import lab.healthcare.fhir.vendor.FhirVendor;
 
+import java.net.URI;
+
 /**
  * Answers whether an Epic profile is sufficiently configured for the intended mode.
  * Does not call Epic, discover SMART, or execute FHIR.
@@ -14,6 +16,23 @@ public class EpicProfileValidator {
 
     public void validateForRuntime(EpicIntegrationProfile profile) {
         validate(profile, true);
+    }
+
+    public void validateForAuthorization(EpicIntegrationProfile profile) {
+        if (profile == null) {
+            throw new EpicProfileException("Epic integration profile is missing");
+        }
+        if (!profile.enabled()) {
+            throw new EpicProfileException("Epic sandbox profile is disabled");
+        }
+        if (profile.environment() != EpicEnvironment.SANDBOX) {
+            throw new EpicProfileException("Epic authorization is only supported for SANDBOX");
+        }
+        validate(profile, true);
+        requireHttpUri(profile.fhirBaseUrl(), "FHIR base URL");
+        requireHttpUri(profile.aud(), "aud");
+        requireHttpUri(profile.redirectUri(), "redirect URI");
+        requireHttpUri(profile.smartConfigurationUrl(), "SMART configuration URL");
     }
 
     private void validate(EpicIntegrationProfile profile, boolean requireRuntime) {
@@ -51,6 +70,28 @@ public class EpicProfileValidator {
                     "Epic client authentication "
                             + profile.clientAuthentication()
                             + " is not supported by the current runtime");
+        }
+    }
+
+    private static void requireHttpUri(String value, String field) {
+        if (isBlank(value)) {
+            throw new EpicProfileException("Epic sandbox " + field + " must be provided");
+        }
+        URI uri;
+        try {
+            uri = URI.create(value.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new EpicProfileException("Epic sandbox " + field + " is not a valid URI");
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+            throw new EpicProfileException("Epic sandbox " + field + " must be an http(s) URI");
+        }
+        if (uri.getHost() == null || uri.getHost().isBlank()) {
+            throw new EpicProfileException("Epic sandbox " + field + " is missing a host");
+        }
+        if (uri.getUserInfo() != null) {
+            throw new EpicProfileException("Epic sandbox " + field + " must not contain credentials");
         }
     }
 

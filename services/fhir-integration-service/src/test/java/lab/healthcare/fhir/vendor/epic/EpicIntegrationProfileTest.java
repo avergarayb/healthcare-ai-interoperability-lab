@@ -54,6 +54,13 @@ class EpicIntegrationProfileTest {
                         "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
     }
 
+    static EpicIntegrationProfile enabledCompletePublicPkce() {
+        return EpicIntegrationProfile.from(
+                epicServer(true, smartAuth()),
+                FhirServersProperties.VendorIntegrationSettings.of(
+                        "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
+    }
+
     static FhirServerProfile epicServer(boolean enabled, FhirAuthenticationSettings authentication) {
         return new FhirServerProfile(
                 EpicIntegrationProfile.SANDBOX_SERVER,

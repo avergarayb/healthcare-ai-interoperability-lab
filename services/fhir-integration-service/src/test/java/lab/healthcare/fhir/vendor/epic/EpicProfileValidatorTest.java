@@ -22,6 +22,16 @@ class EpicProfileValidatorTest {
                 .doesNotThrowAnyException();
         assertThatCode(() -> validator.validateForRuntime(EpicIntegrationProfileTest.completePublicPkce()))
                 .doesNotThrowAnyException();
+        assertThatCode(() -> validator.validateForAuthorization(EpicIntegrationProfileTest.enabledCompletePublicPkce()))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void authorizationRequiresEnabledSandbox() {
+        assertThatThrownBy(() -> validator.validateForAuthorization(EpicIntegrationProfileTest.completePublicPkce()))
+                .isInstanceOf(EpicProfileException.class)
+                .hasMessageContaining("disabled")
+                .hasMessageNotContaining("client_secret");
     }
 
     @Test

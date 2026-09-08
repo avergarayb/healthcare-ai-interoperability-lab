@@ -1,6 +1,6 @@
 # Epic integration profile
 
-Task 029 prepares an Epic-specific integration profile. It does **not** yet perform the real Epic sandbox authorization flow.
+Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. It does **not** read Patient, call `/metadata`, or assemble a snapshot.
 
 Read this after [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md) and [fhir-server-configuration.md](../fhir-server-configuration.md).
 
@@ -20,7 +20,7 @@ EpicCapabilities + EpicReadinessState
 EpicProfileValidator
 ```
 
-No login to [Epic on FHIR](https://fhir.epic.com/). No real client ID. No Patient read against Epic.
+Default tests do not log in to [Epic on FHIR](https://fhir.epic.com/). A local `.env` can enable `epic-sandbox` and start `GET /epic/sandbox/smart/start`. No Patient read against Epic.
 
 ## Official sandbox identifiers
 
@@ -38,7 +38,7 @@ Profile `epic-sandbox` is **disabled** by default. Local startup still uses `loc
 
 ```yaml
 epic-sandbox:
-  enabled: false
+  enabled: ${EPIC_SANDBOX_ENABLED:false}
   vendor: EPIC
   base-url: https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4/
   fhir-version: R4
@@ -83,6 +83,14 @@ There is no `CERTIFIED`, `PRODUCTION_READY`, or `EPIC_APPROVED` state.
 ## Vendor-known APIs vs CapabilityStatement
 
 Epic publishes a resource/API catalog rather than implying every FHIR R4 interaction. `EpicKnownApiSurface` is a placeholder: this lab does **not** hardcode that catalog. Runtime inspection of a server's `CapabilityStatement` is [fhir-capability-discovery.md](../fhir-capability-discovery.md). That API is vendor-neutral; Epic identity does not imply Patient is available.
+
+## Secure sandbox SMART authentication (Task 046)
+
+When `EPIC_SANDBOX_ENABLED=true` and the SMART fields are set, `GET /epic/sandbox/smart/start` discovers the configured `/.well-known/smart-configuration` and starts Authorization Code + PKCE S256. The browser returns to the generic `GET /smart/callback`.
+
+The token stays in memory. The page never prints the token, code, verifier, or client ID. Standalone `hasPatient=false` is valid. This task does not convert `fhirUser` into a Patient ID and does not call FHIR.
+
+See [fhir-smart-interactive-authorization.md](../fhir-smart-interactive-authorization.md).
 
 ## Architecture rules
 
