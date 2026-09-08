@@ -62,7 +62,7 @@ smart-lab:
     aud: http://localhost:8180/fhir
 ```
 
-A later real profile would replace those values. The SMART types stay the same. Disabled destination `epic-sandbox` still does not call a vendor; see [vendors/epic.md](vendors/epic.md). `oracle-health-sandbox` can start interactive SMART when enabled; see [vendors/oracle-health.md](vendors/oracle-health.md).
+A later real profile would replace those values. The SMART types stay the same. `epic-sandbox` and `oracle-health-sandbox` can start interactive SMART when enabled; default tests leave both disabled. See [vendors/epic.md](vendors/epic.md) and [vendors/oracle-health.md](vendors/oracle-health.md).
 
 ## Optional metadata vs incompatibility
 

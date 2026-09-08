@@ -14,7 +14,7 @@ public final class SmartLabPages {
                 ? "<p><strong>Discovery warning:</strong> token_endpoint_auth_methods_supported is "
                         + escape(String.join(", ", start.tokenEndpointAuthMethodsSupported()))
                         + " and does not include <code>none</code>. This lab still attempts public PKCE. "
-                        + "If Oracle rejects the token POST, the callback page will name the required confidential method. "
+                        + "If the token POST is rejected, the callback page will name the required confidential method. "
                         + "No client secret or JWT will be invented.</p>"
                 : "<p>Discovered token_endpoint_auth_methods_supported: "
                         + (start.tokenEndpointAuthMethodsSupported().isEmpty()
@@ -22,9 +22,9 @@ public final class SmartLabPages {
                                 : escape(String.join(", ", start.tokenEndpointAuthMethodsSupported())))
                         + "</p>";
         return page(
-                "Oracle Health SMART start",
+                "SMART start",
                 """
-                <p>Open this authorization URL in a browser, complete Oracle login, then wait for the redirect to
+                <p>Open this authorization URL in a browser, complete the sandbox login, then wait for the redirect to
                 <code>/smart/callback</code>.</p>
                 <p><a href="%s">%s</a></p>
                 <p>destination=%s expiresAt=%s</p>
@@ -93,6 +93,22 @@ public final class SmartLabPages {
                   <li>Then open <a href="/oracle/sandbox/fhir/model-boundary">/oracle/sandbox/fhir/model-boundary</a> for the vendor-neutral model boundary contract. The page shows only version, outcome, status, and counts. It does not show record values and does not call a model.</li>
                   <li>A machine consumer uses <code>GET /api/model-boundary/v1</code> for the exact v1 JSON contract. That is not this HTML page and not an agent.</li>
                   <li>Then open <a href="/lab/agent-stub">/lab/agent-stub</a> for the contract-consuming stub. The page shows only observation counts and <code>modelCalled=false</code>. JSON: <code>GET /api/agent-stub/v1</code>.</li>
+                  <li>Epic sandbox SMART (Task 046) starts at <a href="/epic/sandbox/smart/start">/epic/sandbox/smart/start</a>. It issues a token only. It does not read Patient.</li>
+                </ol>
+                """);
+    }
+
+    public static String epicInstructions() {
+        return page(
+                "Epic SMART lab",
+                """
+                <ol>
+                  <li>Configure Epic placeholders in the local <code>.env</code> (never commit real client IDs).</li>
+                  <li>Set <code>EPIC_SANDBOX_ENABLED=true</code> and restart the process.</li>
+                  <li>Open <a href="/epic/sandbox/smart/start">/epic/sandbox/smart/start</a> to discover SMART and get the authorization URL.</li>
+                  <li>Log in at the Epic sandbox in the browser.</li>
+                  <li>Epic redirects to <code>/smart/callback</code>. This process validates state and attempts token exchange.</li>
+                  <li>This task stops after a token is issued. It does not read Patient, call <code>/metadata</code>, or assemble a snapshot.</li>
                 </ol>
                 """);
     }
