@@ -35,6 +35,29 @@ public class EpicProfileValidator {
         requireHttpUri(profile.smartConfigurationUrl(), "SMART configuration URL");
     }
 
+    /**
+     * Public {@code GET /metadata} needs an enabled sandbox base URL. It does not
+     * require SMART client credentials.
+     */
+    public void validateForConnectivity(EpicIntegrationProfile profile) {
+        if (profile == null) {
+            throw new EpicProfileException("Epic integration profile is missing");
+        }
+        if (!profile.enabled()) {
+            return;
+        }
+        if (profile.vendor() != FhirVendor.EPIC) {
+            throw new EpicProfileException("Epic integration profile vendor must be EPIC");
+        }
+        if (profile.fhirVersion() == null || !"R4".equalsIgnoreCase(profile.fhirVersion())) {
+            throw new EpicProfileException("Epic integration profile FHIR version must be R4");
+        }
+        if (profile.environment() != EpicEnvironment.SANDBOX) {
+            throw new EpicProfileException("Epic capability discovery is only supported for SANDBOX");
+        }
+        requireHttpUri(profile.fhirBaseUrl(), "FHIR base URL");
+    }
+
     private void validate(EpicIntegrationProfile profile, boolean requireRuntime) {
         if (profile == null) {
             throw new EpicProfileException("Epic integration profile is missing");

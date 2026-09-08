@@ -1,6 +1,6 @@
 # Epic integration profile
 
-Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. It does **not** read Patient, call `/metadata`, or assemble a snapshot.
+Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. It does **not** read Patient or assemble a snapshot.
 
 Read this after [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md) and [fhir-server-configuration.md](../fhir-server-configuration.md).
 
@@ -20,7 +20,7 @@ EpicCapabilities + EpicReadinessState
 EpicProfileValidator
 ```
 
-Default tests do not log in to [Epic on FHIR](https://fhir.epic.com/). A local `.env` can enable `epic-sandbox` and start `GET /epic/sandbox/smart/start`. No Patient read against Epic.
+Default tests do not log in to [Epic on FHIR](https://fhir.epic.com/). A local `.env` can enable `epic-sandbox`, start `GET /epic/sandbox/smart/start`, and open `GET /epic/sandbox/fhir/capabilities`. No Patient read against Epic.
 
 ## Official sandbox identifiers
 
@@ -82,7 +82,7 @@ There is no `CERTIFIED`, `PRODUCTION_READY`, or `EPIC_APPROVED` state.
 
 ## Vendor-known APIs vs CapabilityStatement
 
-Epic publishes a resource/API catalog rather than implying every FHIR R4 interaction. `EpicKnownApiSurface` is a placeholder: this lab does **not** hardcode that catalog. Runtime inspection of a server's `CapabilityStatement` is [fhir-capability-discovery.md](../fhir-capability-discovery.md). That API is vendor-neutral; Epic identity does not imply Patient is available.
+Epic publishes a resource/API catalog rather than implying every FHIR R4 interaction. `EpicKnownApiSurface` is a placeholder: this lab does **not** hardcode that catalog. Runtime inspection of a server's `CapabilityStatement` is Task 047 and [fhir-capability-discovery.md](../fhir-capability-discovery.md). That API is vendor-neutral; Epic identity does not imply Patient is available.
 
 ## Secure sandbox SMART authentication (Task 046)
 
@@ -91,6 +91,43 @@ When `EPIC_SANDBOX_ENABLED=true` and the SMART fields are set, `GET /epic/sandbo
 The token stays in memory. The page never prints the token, code, verifier, or client ID. Standalone `hasPatient=false` is valid. This task does not convert `fhirUser` into a Patient ID and does not call FHIR.
 
 See [fhir-smart-interactive-authorization.md](../fhir-smart-interactive-authorization.md).
+
+## Real capability discovery (Task 047)
+
+Task 047 validates the existing `FhirCapabilityDiscoveryService` against the configured Epic sandbox. It does **not** add `EpicCapabilityStatement` or duplicate interpret logic.
+
+```text
+EpicIntegrationProfile
+        ↓
+enabled sandbox + configured base URL
+        ↓
+FhirServerProfile copy with authentication NONE
+        ↓
+GET /metadata   (configured base URL; no Bearer)
+        ↓
+FhirCapabilityDiscoveryService
+        ↓
+FhirServerCapabilities
+```
+
+`RoutingService.discoverCapabilities("epic-sandbox")` is the wrong entry point here: that profile is `SMART_AUTHORIZATION_CODE` and would request a synthetic SMART token.
+
+Lab page: `GET /epic/sandbox/fhir/capabilities`. It shows only discovery status, HTTP status, FHIR version, destination, and the runtime resource-type count. It does not show the token, Patient ID, or raw CapabilityStatement JSON. Public `/metadata` does not use the SMART token from Task 046.
+
+Live observation (Epic sandbox, no Authorization header):
+
+| Observation | Value |
+|---|---|
+| HTTP | `200` |
+| Auth required | No (Case A — public metadata) |
+| `fhirVersion` | `4.0.1` |
+| Resources declared | `60` types at runtime. Do not treat this as a catalog constant. |
+
+The runtime resource count comes from the live `CapabilityStatement`. Do not infer it from Epic's application API catalog or from `EpicKnownApiSurface`.
+
+Live IT: `mvn test -Pepic-live -Dtest=EpicSandboxCapabilityLiveIT` with `EPIC_SANDBOX_LIVE_IT=true`. Default `mvn test` / `-Pintegration` stay disabled and do not call Epic.
+
+Do not persist tokens for this GET. Do not add `client_secret_basic` or `private_key_jwt`. This is **not** Patient search, Patient read, snapshot, projection, model boundary, or an agent.
 
 ## Architecture rules
 

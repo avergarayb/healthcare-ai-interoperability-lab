@@ -24,6 +24,8 @@ class EpicProfileValidatorTest {
                 .doesNotThrowAnyException();
         assertThatCode(() -> validator.validateForAuthorization(EpicIntegrationProfileTest.enabledCompletePublicPkce()))
                 .doesNotThrowAnyException();
+        assertThatCode(() -> validator.validateForConnectivity(EpicIntegrationProfileTest.enabledCompletePublicPkce()))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -169,5 +171,38 @@ class EpicProfileValidatorTest {
 
         assertThat(profile.readiness()).isEqualTo(EpicReadinessState.NOT_CONFIGURED);
         assertThatCode(() -> validator.validate(profile)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void connectivityAllowsEnabledSandboxWithoutClientId() {
+        FhirAuthenticationSettings auth = new FhirAuthenticationSettings(
+                FhirAuthenticationType.SMART_AUTHORIZATION_CODE,
+                null,
+                "",
+                "",
+                null,
+                "",
+                "",
+                EpicSandboxEndpoints.FHIR_R4_BASE);
+        EpicIntegrationProfile profile = EpicIntegrationProfile.from(
+                EpicIntegrationProfileTest.epicServer(true, auth), null);
+
+        assertThatCode(() -> validator.validateForConnectivity(profile)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> validator.validateForAuthorization(profile))
+                .isInstanceOf(EpicProfileException.class)
+                .hasMessageContaining("client ID");
+    }
+
+    @Test
+    void connectivityRejectsProduction() {
+        EpicIntegrationProfile profile = EpicIntegrationProfile.from(
+                EpicIntegrationProfileTest.epicServer(true, EpicIntegrationProfileTest.smartAuth()),
+                FhirServersProperties.VendorIntegrationSettings.of(
+                        "PRODUCTION", "STANDALONE", "PATIENT", "PUBLIC_PKCE"));
+
+        assertThatThrownBy(() -> validator.validateForConnectivity(profile))
+                .isInstanceOf(EpicProfileException.class)
+                .hasMessageContaining("SANDBOX")
+                .hasMessageNotContaining("access_token");
     }
 }
