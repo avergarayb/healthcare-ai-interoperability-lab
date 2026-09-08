@@ -78,6 +78,20 @@ Live result (Oracle Health Millennium FHIR R4 Code sandbox, no Authorization hea
 
 This is **not** Patient search (Task 035), Patient read (Task 036), Condition search (Task 037), Observation search (Task 038), DiagnosticReport search (Task 039), MedicationRequest search (Task 040), the Task 041 snapshot, the Task 042 projection, the Task 043 model boundary, the Task 044 consumer surface, or the Task 045 agent stub. Tokens are not fetched or persisted for `/metadata`.
 
+## Epic sandbox live validation (Task 047)
+
+The configured Epic sandbox `GET /metadata` is attempted **without** a SMART Bearer token. Live validation uses the `epic-sandbox` `base-url` from configuration, not a hostname compiled into `vendor.epic` (except the existing public identifier in `EpicSandboxEndpoints` from Task 029).
+
+Do **not** call `RoutingService.discoverCapabilities("epic-sandbox")` for this GET. That destination is `SMART_AUTHORIZATION_CODE`; routed clients attach a Bearer via `SmartTokenProvider.authorizeSynthetically`, which is the synthetic `lab-oauth` flow and must not be sent to Epic. `EpicSandboxCapabilityDiscoveryService` copies the configured base URL onto a temporary `FhirServerProfile` with `FhirAuthenticationSettings.none()` and reuses `FhirCapabilityDiscoveryService`.
+
+Lab page: `GET /epic/sandbox/fhir/capabilities`.
+
+Live observation (no Authorization header): HTTP `200`, `fhirVersion=4.0.1`, `resourceTypes=60` at the time of validation. That count is runtime evidence, not a Java constant.
+
+Live IT: `mvn test -Pepic-live -Dtest=EpicSandboxCapabilityLiveIT` with `EPIC_SANDBOX_LIVE_IT=true`. Record only safe metadata (`status`, `httpStatus`, `fhirVersion`, runtime `resourceTypes` count). Do not record the token, Patient ID, or raw CapabilityStatement.
+
+This is **not** Patient search, Patient read, snapshot, projection, model boundary, or an agent. Tokens are not fetched or persisted for `/metadata`.
+
 ## What this is not
 
 - SMART `/.well-known/smart-configuration`

@@ -32,6 +32,10 @@ class EpicIntegrationProfileTest {
         assertThat(profile.toString()).doesNotContain("access_token");
         assertThat(profile.toString()).doesNotContain("private_key");
         assertThat(EpicKnownApiSurface.assumesEveryR4Resource()).isFalse();
+        FhirServerProfile unauthenticated = profile.toUnauthenticatedMetadataProfile();
+        assertThat(unauthenticated.baseUrl()).isEqualTo(EpicSandboxEndpoints.FHIR_R4_BASE);
+        assertThat(unauthenticated.authentication().type()).isEqualTo(FhirAuthenticationType.NONE);
+        assertThat(unauthenticated.authentication().requiresBearerToken()).isFalse();
     }
 
     @Test

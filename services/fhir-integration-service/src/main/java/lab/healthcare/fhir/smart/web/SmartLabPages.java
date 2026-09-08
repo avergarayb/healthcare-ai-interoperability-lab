@@ -94,6 +94,7 @@ public final class SmartLabPages {
                   <li>A machine consumer uses <code>GET /api/model-boundary/v1</code> for the exact v1 JSON contract. That is not this HTML page and not an agent.</li>
                   <li>Then open <a href="/lab/agent-stub">/lab/agent-stub</a> for the contract-consuming stub. The page shows only observation counts and <code>modelCalled=false</code>. JSON: <code>GET /api/agent-stub/v1</code>.</li>
                   <li>Epic sandbox SMART (Task 046) starts at <a href="/epic/sandbox/smart/start">/epic/sandbox/smart/start</a>. It issues a token only. It does not read Patient.</li>
+                  <li>Epic public capability discovery (Task 047) is <a href="/epic/sandbox/fhir/capabilities">/epic/sandbox/fhir/capabilities</a>. It does not use the SMART token and does not read Patient.</li>
                 </ol>
                 """);
     }
@@ -108,9 +109,44 @@ public final class SmartLabPages {
                   <li>Open <a href="/epic/sandbox/smart/start">/epic/sandbox/smart/start</a> to discover SMART and get the authorization URL.</li>
                   <li>Log in at the Epic sandbox in the browser.</li>
                   <li>Epic redirects to <code>/smart/callback</code>. This process validates state and attempts token exchange.</li>
-                  <li>This task stops after a token is issued. It does not read Patient, call <code>/metadata</code>, or assemble a snapshot.</li>
+                  <li>Task 046 stops after a token is issued. It does not read Patient.</li>
+                  <li>Open <a href="/epic/sandbox/fhir/capabilities">/epic/sandbox/fhir/capabilities</a> for a public
+                  <code>GET /metadata</code>. That page does not use the SMART token and does not read Patient.</li>
                 </ol>
                 """);
+    }
+
+    public static String epicCapabilities(
+            String status,
+            Integer httpStatus,
+            String destination,
+            String fhirVersion,
+            int resourceTypes,
+            String detail) {
+        String extra = detail == null || detail.isBlank() ? "" : "<p>detail=" + escape(detail) + "</p>";
+        return page(
+                "Epic sandbox capability discovery",
+                """
+                <p>Public FHIR CapabilityStatement discovery. No token and no Patient JSON are shown.</p>
+                <pre>%s</pre>
+                %s
+                """
+                        .formatted(
+                                escape("status="
+                                        + nullToEmpty(status)
+                                        + "\nhttpStatus="
+                                        + (httpStatus == null ? "" : httpStatus)
+                                        + "\ndestination="
+                                        + nullToEmpty(destination)
+                                        + "\nfhirVersion="
+                                        + nullToEmpty(fhirVersion)
+                                        + "\nresourceTypes="
+                                        + resourceTypes),
+                                extra));
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private static String page(String title, String body) {
