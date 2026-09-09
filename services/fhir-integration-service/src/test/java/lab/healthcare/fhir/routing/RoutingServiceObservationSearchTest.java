@@ -65,6 +65,7 @@ class RoutingServiceObservationSearchTest {
         when(fhirClient.search()
                         .forResource(eq(Observation.class))
                         .where(any(ICriterion.class))
+                        .and(any(ICriterion.class))
                         .count(5)
                         .returnBundle(eq(Bundle.class))
                         .execute())
