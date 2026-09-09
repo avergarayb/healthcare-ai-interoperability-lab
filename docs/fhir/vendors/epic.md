@@ -1,6 +1,6 @@
 # Epic integration profile
 
-Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. It does **not** search Patient or assemble a snapshot.
+Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 049 searches `Condition` for that configured Patient. It does **not** search Patient or assemble a snapshot.
 
 Read this after [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md) and [fhir-server-configuration.md](../fhir-server-configuration.md).
 
@@ -180,6 +180,40 @@ GET /Patient/{id}   Authorization: Bearer <token>
 Lab page: `GET /epic/sandbox/fhir/patient` after SMART login **and** a configured Patient ID. It returns only the diagnosis (no token, no Patient ID, no Patient JSON, no demographics).
 
 Maven LiveIT cannot complete browser login. With `EPIC_SANDBOX_LIVE_IT=true` it diagnoses `AUTHENTICATION_REQUIRED` or `PATIENT_CONTEXT_NOT_CONFIGURED` when the session or ID is absent. The SUCCESS evidence is the lab page after a human SMART login.
+
+## Authenticated Condition search by Patient (Task 049)
+
+Patient read is not a clinical collection. After Task 048, the laboratory runs one generic Condition `SEARCH_TYPE` for the same configured Patient.
+
+```text
+configured Patient ID
+        +
+usable SMART token (Task 046)
+        +
+capabilities.supports("Condition", SEARCH_TYPE)   (Task 047 path)
+        ↓
+RoutingService.searchConditions(destination, tokenProvider, patientId)
+        ↓
+FhirService.searchConditionsByPatientWithCount(id, 5, "problem-list-item")
+        ↓
+GET /Condition?patient={id}&_count=5&category=problem-list-item
+```
+
+`_count=5` is a request, not a retention ceiling. An empty Bundle is success with `hasEntries=false`. There is no `EMPTY` outcome and no Epic-specific category workaround.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `CONDITION_SEARCH_SUCCEEDED` | Epic returned a FHIR Bundle — JSON is not rendered |
+| `PATIENT_CONTEXT_NOT_CONFIGURED` | No sandbox Patient ID — no Condition HTTP |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) — no Condition HTTP |
+| `AUTHENTICATION_REJECTED` | HTTP 401 |
+| `AUTHORIZATION_DENIED` | HTTP 403 |
+| `CAPABILITY_UNSUPPORTED` | Runtime model lacks Condition `search-type` — no Condition HTTP |
+| `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
+
+Lab page: `GET /epic/sandbox/fhir/condition-search` after SMART login **and** a configured Patient ID. It returns only the diagnosis (no token, no Patient ID, no Condition JSON, no codes).
 
 ## Architecture rules
 

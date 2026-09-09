@@ -19,6 +19,7 @@ class FhirServiceDoesNotImportEpicTest {
         assertThat(contents).doesNotContain("EpicIntegrationProfile");
         assertThat(contents).doesNotContain("EpicSandboxAuthenticationService");
         assertThat(contents).doesNotContain("EpicSandboxPatientContextService");
+        assertThat(contents).doesNotContain("EpicSandboxConditionSearchService");
         assertThat(contents).doesNotContain("Hyperspace");
         assertThat(contents).doesNotContain("fhir.epic.com");
     }
