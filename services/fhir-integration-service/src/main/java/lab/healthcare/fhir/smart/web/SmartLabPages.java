@@ -2,6 +2,8 @@ package lab.healthcare.fhir.smart.web;
 
 import lab.healthcare.fhir.routing.FhirConditionSearchOutcome;
 import lab.healthcare.fhir.routing.FhirConditionSearchResult;
+import lab.healthcare.fhir.routing.FhirObservationSearchOutcome;
+import lab.healthcare.fhir.routing.FhirObservationSearchResult;
 import lab.healthcare.fhir.routing.FhirPatientReadOutcome;
 import lab.healthcare.fhir.routing.FhirPatientReadResult;
 import lab.healthcare.fhir.smart.SmartAuthorizationStart;
@@ -104,6 +106,8 @@ public final class SmartLabPages {
                   The page does not show the token, Patient ID, or Patient JSON.</li>
                   <li>Then open <a href="/epic/sandbox/fhir/condition-search">/epic/sandbox/fhir/condition-search</a>
                   for a safe authenticated Condition search. The page does not show Condition JSON.</li>
+                  <li>Then open <a href="/epic/sandbox/fhir/observation-search">/epic/sandbox/fhir/observation-search</a>
+                  for a safe authenticated Observation search. The page does not show Observation JSON.</li>
                 </ol>
                 """);
     }
@@ -126,6 +130,8 @@ public final class SmartLabPages {
                   The page does not show the token, Patient ID, or Patient JSON.</li>
                   <li>Then open <a href="/epic/sandbox/fhir/condition-search">/epic/sandbox/fhir/condition-search</a>
                   for a safe authenticated Condition search. The page does not show Condition JSON.</li>
+                  <li>Then open <a href="/epic/sandbox/fhir/observation-search">/epic/sandbox/fhir/observation-search</a>
+                  for a safe authenticated Observation search. The page does not show Observation JSON.</li>
                 </ol>
                 """);
     }
@@ -207,6 +213,38 @@ public final class SmartLabPages {
                                         + "\ndestination="
                                         + nullToEmpty(result.destination())
                                         + "\nconditionSearch="
+                                        + (succeeded ? "SUCCEEDED" : result.outcome().name())
+                                        + "\nresourceType="
+                                        + nullToEmpty(result.resourceType())
+                                        + "\ncontextSource="
+                                        + (result.contextSource() == null ? "" : result.contextSource().name())
+                                        + "\nhasPatientContext="
+                                        + result.hasPatientContext()
+                                        + "\nhasEntries="
+                                        + result.hasEntries()),
+                                extra));
+    }
+
+    public static String epicObservation(FhirObservationSearchResult result) {
+        boolean succeeded = result.outcome() == FhirObservationSearchOutcome.OBSERVATION_SEARCH_SUCCEEDED;
+        String extra = result.detail() == null || result.detail().isBlank()
+                ? ""
+                : "<p>detail=" + escape(result.detail()) + "</p>";
+        return page(
+                "Epic sandbox authenticated Observation search",
+                """
+                <p>Authenticated Observation search by the configured Patient. No token, Patient ID, or Observation JSON are shown.</p>
+                <pre>%s</pre>
+                %s
+                """
+                        .formatted(
+                                escape("status="
+                                        + (succeeded ? "SUCCESS" : "FAILED")
+                                        + "\nhttpStatus="
+                                        + (result.httpStatus() == null ? "" : result.httpStatus())
+                                        + "\ndestination="
+                                        + nullToEmpty(result.destination())
+                                        + "\nobservationSearch="
                                         + (succeeded ? "SUCCEEDED" : result.outcome().name())
                                         + "\nresourceType="
                                         + nullToEmpty(result.resourceType())

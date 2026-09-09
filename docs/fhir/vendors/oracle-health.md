@@ -316,7 +316,7 @@ RoutingService.searchObservations(destination, tokenProvider, patientId)
         ↓
 FhirService.searchObservationsByPatientWithCount(id, 5)
         ↓
-GET /Observation?patient={id}&_count=5
+GET /Observation?patient={id}&category=vital-signs&_count=5
 Authorization: Bearer <token>
 ```
 

@@ -33,6 +33,8 @@ class EpicArchitectureBoundaryTest {
         assertThat(circuit).doesNotContain("FhirVendor.EPIC");
         assertThat(factory).doesNotContain("FhirVendor.EPIC");
         assertThat(routing).doesNotContain("lab.healthcare.fhir.vendor.epic");
+        assertThat(routing).contains("searchObservationsByPatientWithCount(logicalId, 5, \"vital-signs\")");
+        assertThat(factory).contains("SOCKET_TIMEOUT_MS = 60_000");
     }
 
     @Test
@@ -68,9 +70,12 @@ class EpicArchitectureBoundaryTest {
         assertThat(text).doesNotContain("EpicConditionClient");
         assertThat(text).doesNotContain("EpicFhirService");
         assertThat(text).doesNotContain("class EpicConditionSearch");
+        assertThat(text).doesNotContain("EpicObservationClient");
+        assertThat(text).doesNotContain("class EpicObservationSearch");
         assertThat(text).doesNotContain("org.hl7.fhir.r4.model.CapabilityStatement");
         assertThat(text).doesNotContain("org.hl7.fhir.r4.model.Patient");
         assertThat(text).doesNotContain("org.hl7.fhir.r4.model.Condition");
+        assertThat(text).doesNotContain("org.hl7.fhir.r4.model.Observation");
         assertThat(text).doesNotContain("searchPatients");
     }
 }

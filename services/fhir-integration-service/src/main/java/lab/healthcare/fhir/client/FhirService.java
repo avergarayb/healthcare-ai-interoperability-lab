@@ -127,18 +127,35 @@ public class FhirService {
     }
 
     public Bundle searchObservationsByPatientWithCount(String patientLogicalId, int pageSize) {
+        return searchObservationsByPatientWithCount(patientLogicalId, pageSize, null);
+    }
+
+    public Bundle searchObservationsByPatientWithCount(
+            String patientLogicalId, int pageSize, String category) {
         requireText(patientLogicalId, "Patient logical ID must be provided");
         if (pageSize < 1) {
             throw new IllegalArgumentException("Observation _count must be at least 1");
+        }
+        String categoryCode = category == null ? "" : category.trim();
+        if (categoryCode.isEmpty()) {
+            return execute(
+                    () -> fhirClient.search()
+                            .forResource(Observation.class)
+                            .where(Observation.PATIENT.hasId(patientLogicalId))
+                            .count(pageSize)
+                            .returnBundle(Bundle.class)
+                            .execute(),
+                    "searching Observation by patient with _count=" + pageSize);
         }
         return execute(
                 () -> fhirClient.search()
                         .forResource(Observation.class)
                         .where(Observation.PATIENT.hasId(patientLogicalId))
+                        .and(Observation.CATEGORY.exactly().code(categoryCode))
                         .count(pageSize)
                         .returnBundle(Bundle.class)
                         .execute(),
-                "searching Observation by patient with _count=" + pageSize);
+                "searching Observation by patient, category, and _count=" + pageSize);
     }
 
     public Bundle searchDiagnosticReportsByPatientWithCount(String patientLogicalId, int pageSize) {

@@ -52,7 +52,7 @@ RoutingRequest.readPatient("local-hapi", "patient-001")
 | `readPatient(destination, AccessTokenProvider, id)` | same read using a caller-supplied token (no synthetic SMART authorize) |
 | `searchPatients(destination, AccessTokenProvider, name)` | qualified Patient `SEARCH_TYPE` with a caller-supplied token |
 | `searchConditions(destination, AccessTokenProvider, patientId)` | qualified Condition `SEARCH_TYPE` by Patient, `category=problem-list-item`, `_count=5`, and a caller-supplied token |
-| `searchObservations(destination, AccessTokenProvider, patientId)` | qualified Observation `SEARCH_TYPE` by Patient with `_count=5` and a caller-supplied token |
+| `searchObservations(destination, AccessTokenProvider, patientId)` | qualified Observation `SEARCH_TYPE` by Patient, `category=vital-signs`, `_count=5`, and a caller-supplied token |
 | `searchDiagnosticReports(destination, AccessTokenProvider, patientId)` | qualified DiagnosticReport `SEARCH_TYPE` by Patient with `_count=5` and a caller-supplied token |
 | `searchMedicationRequests(destination, AccessTokenProvider, patientId)` | qualified MedicationRequest `SEARCH_TYPE` by Patient with `_count=5` and a caller-supplied token |
 | `discoverCapabilities` | `GET /metadata` → `FhirServerCapabilities` through the same resilience pipeline |

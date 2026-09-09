@@ -225,7 +225,8 @@ public class RoutingService {
                 tokenProvider,
                 observationSearchContext(dest, correlationId),
                 System.nanoTime(),
-                fhirClient -> new FhirService(fhirClient).searchObservationsByPatientWithCount(logicalId, 5));
+                fhirClient -> new FhirService(fhirClient)
+                        .searchObservationsByPatientWithCount(logicalId, 5, "vital-signs"));
     }
 
     public Bundle searchDiagnosticReports(String destination, AccessTokenProvider tokenProvider, String patientId) {

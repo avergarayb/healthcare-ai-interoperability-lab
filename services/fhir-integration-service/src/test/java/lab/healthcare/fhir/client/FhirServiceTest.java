@@ -279,6 +279,45 @@ class FhirServiceTest {
     }
 
     @Test
+    void searchObservationsByPatientWithCountAndBlankCategoryUsesQueryWithoutCategory() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .count(5)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientWithCount("patient-001", 5, "  ");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractObservations(actual))
+                .extracting(observation -> observation.getIdElement().getIdPart())
+                .containsExactly("obs-001");
+    }
+
+    @Test
+    void searchObservationsByPatientWithCountAndCategoryReturnsBundle() {
+        Bundle expected = searchBundle(syntheticObservation("obs-001", "Patient/patient-001"));
+        when(fhirClient.search()
+                .forResource(eq(Observation.class))
+                .where(any(ICriterion.class))
+                .and(any(ICriterion.class))
+                .count(5)
+                .returnBundle(eq(Bundle.class))
+                .execute())
+                .thenReturn(expected);
+
+        Bundle actual = fhirService.searchObservationsByPatientWithCount("patient-001", 5, "vital-signs");
+
+        assertThat(actual.getType()).isEqualTo(Bundle.BundleType.SEARCHSET);
+        assertThat(fhirService.extractObservations(actual))
+                .extracting(observation -> observation.getIdElement().getIdPart())
+                .containsExactly("obs-001");
+    }
+
+    @Test
     void searchDiagnosticReportsByPatientWithCountReturnsBundle() {
         Bundle expected = searchBundle(syntheticDiagnosticReport("dr-001", "Patient/patient-001"));
         when(fhirClient.search()
