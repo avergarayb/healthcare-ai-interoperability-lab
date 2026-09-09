@@ -1,6 +1,6 @@
 # Epic integration profile
 
-Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. It does **not** read Patient or assemble a snapshot.
+Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. It does **not** search Patient or assemble a snapshot.
 
 Read this after [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md) and [fhir-server-configuration.md](../fhir-server-configuration.md).
 
@@ -54,6 +54,7 @@ epic-sandbox:
     launch-mode: STANDALONE
     user-context: PATIENT
     client-authentication: PUBLIC_PKCE
+    patient-id: ${EPIC_SANDBOX_PATIENT_ID:}
 ```
 
 Discovery is **not** concatenated from `fhir.epic.com` in Java. If Epic's well-known URL differs from an assumed pattern, `smart-configuration-url` wins. Do not commit `EPIC_SANDBOX_CLIENT_SECRET` or private keys.
@@ -88,7 +89,7 @@ Epic publishes a resource/API catalog rather than implying every FHIR R4 interac
 
 When `EPIC_SANDBOX_ENABLED=true` and the SMART fields are set, `GET /epic/sandbox/smart/start` discovers the configured `/.well-known/smart-configuration` and starts Authorization Code + PKCE S256. The browser returns to the generic `GET /smart/callback`.
 
-The token stays in memory. The page never prints the token, code, verifier, or client ID. Standalone `hasPatient=false` is valid. This task does not convert `fhirUser` into a Patient ID and does not call FHIR.
+The token stays in memory. The page never prints the token, code, verifier, or client ID. Standalone `hasPatient=false` is valid. This task does not convert `fhirUser` into a Patient ID. Clinical Patient access starts at Task 048.
 
 See [fhir-smart-interactive-authorization.md](../fhir-smart-interactive-authorization.md).
 
@@ -128,6 +129,57 @@ The runtime resource count comes from the live `CapabilityStatement`. Do not inf
 Live IT: `mvn test -Pepic-live -Dtest=EpicSandboxCapabilityLiveIT` with `EPIC_SANDBOX_LIVE_IT=true`. Default `mvn test` / `-Pintegration` stay disabled and do not call Epic.
 
 Do not persist tokens for this GET. Do not add `client_secret_basic` or `private_key_jwt`. This is **not** Patient search, Patient read, snapshot, projection, model boundary, or an agent.
+
+## Controlled Patient context and read (Task 048)
+
+Patient search is not Patient context. Standalone SMART (Task 046) ended with `hasPatient=false`. `fhirUser` is the authenticated user, not the clinical subject.
+
+```text
+OAuth identity        ≠  clinical Patient
+fhirUser              ≠  Patient ID
+hasPatient=false      ≠  no Patient exists
+```
+
+The laboratory therefore requires an explicit opt-in identifier:
+
+```dotenv
+EPIC_SANDBOX_PATIENT_ID=
+```
+
+Empty by default. Absent configuration sends **no** Patient HTTP and does not enumerate or guess identifiers.
+
+```text
+configured Patient ID
+        +
+usable SMART token (Task 046)
+        +
+capabilities.supports("Patient", READ)   (Task 047 path)
+        ↓
+RoutingService.readPatient(destination, tokenProvider, patientId)
+        ↓
+FhirService.readPatient(logicalId)
+        ↓
+GET /Patient/{id}   Authorization: Bearer <token>
+```
+
+`FhirService` does not import Epic. There is no `EpicPatientClient`. EHR launch is out of scope. Do not change Task 046 to obtain `hasPatient=true`.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `PATIENT_READ_SUCCEEDED` | Epic returned a FHIR Patient — JSON is not rendered |
+| `PATIENT_CONTEXT_NOT_CONFIGURED` | No sandbox Patient ID — no Patient HTTP |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) — no Patient HTTP |
+| `AUTHENTICATION_REJECTED` | HTTP 401 |
+| `AUTHORIZATION_DENIED` | HTTP 403 |
+| `CAPABILITY_UNSUPPORTED` | Runtime model lacks Patient `read` — no Patient HTTP |
+| `PATIENT_NOT_FOUND` | HTTP 404 — no fallback search |
+| `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
+
+Lab page: `GET /epic/sandbox/fhir/patient` after SMART login **and** a configured Patient ID. It returns only the diagnosis (no token, no Patient ID, no Patient JSON, no demographics).
+
+Maven LiveIT cannot complete browser login. With `EPIC_SANDBOX_LIVE_IT=true` it diagnoses `AUTHENTICATION_REQUIRED` or `PATIENT_CONTEXT_NOT_CONFIGURED` when the session or ID is absent. The SUCCESS evidence is the lab page after a human SMART login.
 
 ## Architecture rules
 

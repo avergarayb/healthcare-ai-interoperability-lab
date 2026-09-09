@@ -26,7 +26,8 @@ public record EpicIntegrationProfile(
         EpicUserContext userContext,
         EpicClientAuthentication clientAuthentication,
         EpicCapabilities capabilities,
-        EpicReadinessState readiness) {
+        EpicReadinessState readiness,
+        String configuredPatientId) {
 
     public static final String SANDBOX_SERVER = "epic-sandbox";
 
@@ -59,6 +60,7 @@ public record EpicIntegrationProfile(
         if (readiness == null) {
             readiness = EpicReadinessState.NOT_CONFIGURED;
         }
+        configuredPatientId = trimToEmpty(configuredPatientId);
     }
 
     public static EpicIntegrationProfile from(
@@ -102,7 +104,8 @@ public record EpicIntegrationProfile(
                         authentication,
                         environment,
                         clientAuthentication,
-                        capabilities));
+                        capabilities),
+                extras == null ? "" : nullToEmpty(extras.patientId()));
     }
 
     public FhirVendor vendor() {
@@ -115,6 +118,10 @@ public record EpicIntegrationProfile(
 
     public boolean hasRequestedScopes() {
         return !requestedScopes.isBlank();
+    }
+
+    public boolean hasConfiguredPatientId() {
+        return !configuredPatientId.isBlank();
     }
 
     public FhirAuthenticationSettings toAuthenticationSettings() {
@@ -173,6 +180,8 @@ public record EpicIntegrationProfile(
                 + hasRequestedScopes()
                 + ", hasAud="
                 + !aud.isBlank()
+                + ", hasConfiguredPatientId="
+                + hasConfiguredPatientId()
                 + "]";
     }
 

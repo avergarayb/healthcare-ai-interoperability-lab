@@ -66,6 +66,7 @@ class EpicSandboxSmartInteractiveControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/smart/start")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("does not read Patient")))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/capabilities")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/capabilities")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/patient")));
     }
 }

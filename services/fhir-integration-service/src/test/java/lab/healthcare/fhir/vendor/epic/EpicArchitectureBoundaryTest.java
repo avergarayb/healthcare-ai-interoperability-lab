@@ -61,12 +61,12 @@ class EpicArchitectureBoundaryTest {
         assertThat(text).doesNotContain("EpicOAuthClient");
         assertThat(text).doesNotContain("EpicPkce");
         assertThat(text).doesNotContain("EpicTokenProvider");
-        assertThat(text).doesNotContain("RoutingService");
         assertThat(text).doesNotContain("discoverCapabilities(\"epic-sandbox\")");
         assertThat(text).doesNotContain("EpicCapabilityStatement");
+        assertThat(text).doesNotContain("EpicPatientClient");
+        assertThat(text).doesNotContain("EpicPatientContext");
         assertThat(text).doesNotContain("org.hl7.fhir.r4.model.CapabilityStatement");
         assertThat(text).doesNotContain("org.hl7.fhir.r4.model.Patient");
-        assertThat(text).doesNotContain("readPatient");
         assertThat(text).doesNotContain("searchPatients");
     }
 }

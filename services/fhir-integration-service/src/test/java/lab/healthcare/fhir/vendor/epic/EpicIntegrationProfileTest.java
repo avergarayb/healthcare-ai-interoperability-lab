@@ -31,6 +31,7 @@ class EpicIntegrationProfileTest {
         assertThat(profile.toString()).doesNotContain("client_secret");
         assertThat(profile.toString()).doesNotContain("access_token");
         assertThat(profile.toString()).doesNotContain("private_key");
+        assertThat(profile.hasConfiguredPatientId()).isFalse();
         assertThat(EpicKnownApiSurface.assumesEveryR4Resource()).isFalse();
         FhirServerProfile unauthenticated = profile.toUnauthenticatedMetadataProfile();
         assertThat(unauthenticated.baseUrl()).isEqualTo(EpicSandboxEndpoints.FHIR_R4_BASE);
@@ -49,6 +50,19 @@ class EpicIntegrationProfileTest {
         assertThat(profile.clientAuthentication().runtimeSupported()).isFalse();
         assertThat(profile.capabilities().runtimeSupportsClientAuthentication()).isFalse();
         assertThat(profile.readiness()).isEqualTo(EpicReadinessState.CONFIGURED);
+    }
+
+    @Test
+    void configuredPatientIdIsBoundWithoutAppearingInToString() {
+        EpicIntegrationProfile profile = EpicIntegrationProfile.from(
+                epicServer(true, smartAuth()),
+                new FhirServersProperties.VendorIntegrationSettings(
+                        "SANDBOX", "STANDALONE", "PATIENT", "PUBLIC_PKCE", "lab-configured-patient"));
+
+        assertThat(profile.hasConfiguredPatientId()).isTrue();
+        assertThat(profile.configuredPatientId()).isEqualTo("lab-configured-patient");
+        assertThat(profile.toString()).doesNotContain("lab-configured-patient");
+        assertThat(profile.toString()).contains("hasConfiguredPatientId=true");
     }
 
     static EpicIntegrationProfile completePublicPkce() {

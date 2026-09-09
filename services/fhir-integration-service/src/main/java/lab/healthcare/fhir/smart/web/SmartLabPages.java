@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.smart.web;
 
+import lab.healthcare.fhir.routing.FhirPatientReadOutcome;
+import lab.healthcare.fhir.routing.FhirPatientReadResult;
 import lab.healthcare.fhir.smart.SmartAuthorizationStart;
 import lab.healthcare.fhir.smart.SmartTokenExchangeDiagnosis;
 import lab.healthcare.fhir.smart.SmartTokenExchangeResult;
@@ -95,6 +97,9 @@ public final class SmartLabPages {
                   <li>Then open <a href="/lab/agent-stub">/lab/agent-stub</a> for the contract-consuming stub. The page shows only observation counts and <code>modelCalled=false</code>. JSON: <code>GET /api/agent-stub/v1</code>.</li>
                   <li>Epic sandbox SMART (Task 046) starts at <a href="/epic/sandbox/smart/start">/epic/sandbox/smart/start</a>. It issues a token only. It does not read Patient.</li>
                   <li>Epic public capability discovery (Task 047) is <a href="/epic/sandbox/fhir/capabilities">/epic/sandbox/fhir/capabilities</a>. It does not use the SMART token and does not read Patient.</li>
+                  <li>With a SMART token and <code>EPIC_SANDBOX_PATIENT_ID</code> set, open
+                  <a href="/epic/sandbox/fhir/patient">/epic/sandbox/fhir/patient</a> for a controlled Patient read.
+                  The page does not show the token, Patient ID, or Patient JSON.</li>
                 </ol>
                 """);
     }
@@ -112,6 +117,9 @@ public final class SmartLabPages {
                   <li>Task 046 stops after a token is issued. It does not read Patient.</li>
                   <li>Open <a href="/epic/sandbox/fhir/capabilities">/epic/sandbox/fhir/capabilities</a> for a public
                   <code>GET /metadata</code>. That page does not use the SMART token and does not read Patient.</li>
+                  <li>With a SMART token and <code>EPIC_SANDBOX_PATIENT_ID</code> set, open
+                  <a href="/epic/sandbox/fhir/patient">/epic/sandbox/fhir/patient</a> for a controlled Patient read.
+                  The page does not show the token, Patient ID, or Patient JSON.</li>
                 </ol>
                 """);
     }
@@ -142,6 +150,34 @@ public final class SmartLabPages {
                                         + nullToEmpty(fhirVersion)
                                         + "\nresourceTypes="
                                         + resourceTypes),
+                                extra));
+    }
+
+    public static String epicPatient(FhirPatientReadResult result) {
+        boolean succeeded = result.outcome() == FhirPatientReadOutcome.PATIENT_READ_SUCCEEDED;
+        String extra = result.detail() == null || result.detail().isBlank()
+                ? ""
+                : "<p>detail=" + escape(result.detail()) + "</p>";
+        return page(
+                "Epic sandbox controlled Patient read",
+                """
+                <p>Controlled authenticated Patient read. No token, Patient ID, or Patient JSON are shown.</p>
+                <pre>%s</pre>
+                %s
+                """
+                        .formatted(
+                                escape("status="
+                                        + (succeeded ? "SUCCESS" : "FAILED")
+                                        + "\nhttpStatus="
+                                        + (result.httpStatus() == null ? "" : result.httpStatus())
+                                        + "\ndestination="
+                                        + nullToEmpty(result.destination())
+                                        + "\npatientRead="
+                                        + (succeeded ? "SUCCEEDED" : result.outcome().name())
+                                        + "\ncontextSource="
+                                        + (result.contextSource() == null ? "" : result.contextSource().name())
+                                        + "\nhasPatientContext="
+                                        + result.hasPatientContext()),
                                 extra));
     }
 

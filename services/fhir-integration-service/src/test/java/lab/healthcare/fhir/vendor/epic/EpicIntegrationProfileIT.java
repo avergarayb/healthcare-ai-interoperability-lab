@@ -43,6 +43,7 @@ class EpicIntegrationProfileIT {
         assertThat(epicSandboxProfile.clientId()).isEmpty();
         assertThat(epicSandboxProfile.smartConfigurationUrl()).isEmpty();
         assertThat(epicSandboxProfile.readiness()).isEqualTo(EpicReadinessState.NOT_CONFIGURED);
+        assertThat(epicSandboxProfile.hasConfiguredPatientId()).isFalse();
         assertThat(epicSandboxProfile.clientAuthentication()).isEqualTo(EpicClientAuthentication.PUBLIC_PKCE);
         assertThatCode(() -> epicProfileValidator.validate(epicSandboxProfile)).doesNotThrowAnyException();
         assertThat(fhirService).isNotNull();

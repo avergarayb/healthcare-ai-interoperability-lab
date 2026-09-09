@@ -79,6 +79,7 @@ fhir:
         launch-mode: STANDALONE
         user-context: PATIENT
         client-authentication: PUBLIC_PKCE
+        patient-id: ${EPIC_SANDBOX_PATIENT_ID:}
     oracle-health-sandbox:
       enabled: ${ORACLE_HEALTH_SANDBOX_ENABLED:false}
       vendor: ORACLE_HEALTH
