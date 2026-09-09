@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.smart.web;
 
+import lab.healthcare.fhir.routing.FhirConditionSearchOutcome;
+import lab.healthcare.fhir.routing.FhirConditionSearchResult;
 import lab.healthcare.fhir.routing.FhirPatientReadOutcome;
 import lab.healthcare.fhir.routing.FhirPatientReadResult;
 import lab.healthcare.fhir.smart.SmartAuthorizationStart;
@@ -100,6 +102,8 @@ public final class SmartLabPages {
                   <li>With a SMART token and <code>EPIC_SANDBOX_PATIENT_ID</code> set, open
                   <a href="/epic/sandbox/fhir/patient">/epic/sandbox/fhir/patient</a> for a controlled Patient read.
                   The page does not show the token, Patient ID, or Patient JSON.</li>
+                  <li>Then open <a href="/epic/sandbox/fhir/condition-search">/epic/sandbox/fhir/condition-search</a>
+                  for a safe authenticated Condition search. The page does not show Condition JSON.</li>
                 </ol>
                 """);
     }
@@ -120,6 +124,8 @@ public final class SmartLabPages {
                   <li>With a SMART token and <code>EPIC_SANDBOX_PATIENT_ID</code> set, open
                   <a href="/epic/sandbox/fhir/patient">/epic/sandbox/fhir/patient</a> for a controlled Patient read.
                   The page does not show the token, Patient ID, or Patient JSON.</li>
+                  <li>Then open <a href="/epic/sandbox/fhir/condition-search">/epic/sandbox/fhir/condition-search</a>
+                  for a safe authenticated Condition search. The page does not show Condition JSON.</li>
                 </ol>
                 """);
     }
@@ -178,6 +184,38 @@ public final class SmartLabPages {
                                         + (result.contextSource() == null ? "" : result.contextSource().name())
                                         + "\nhasPatientContext="
                                         + result.hasPatientContext()),
+                                extra));
+    }
+
+    public static String epicCondition(FhirConditionSearchResult result) {
+        boolean succeeded = result.outcome() == FhirConditionSearchOutcome.CONDITION_SEARCH_SUCCEEDED;
+        String extra = result.detail() == null || result.detail().isBlank()
+                ? ""
+                : "<p>detail=" + escape(result.detail()) + "</p>";
+        return page(
+                "Epic sandbox authenticated Condition search",
+                """
+                <p>Authenticated Condition search by the configured Patient. No token, Patient ID, or Condition JSON are shown.</p>
+                <pre>%s</pre>
+                %s
+                """
+                        .formatted(
+                                escape("status="
+                                        + (succeeded ? "SUCCESS" : "FAILED")
+                                        + "\nhttpStatus="
+                                        + (result.httpStatus() == null ? "" : result.httpStatus())
+                                        + "\ndestination="
+                                        + nullToEmpty(result.destination())
+                                        + "\nconditionSearch="
+                                        + (succeeded ? "SUCCEEDED" : result.outcome().name())
+                                        + "\nresourceType="
+                                        + nullToEmpty(result.resourceType())
+                                        + "\ncontextSource="
+                                        + (result.contextSource() == null ? "" : result.contextSource().name())
+                                        + "\nhasPatientContext="
+                                        + result.hasPatientContext()
+                                        + "\nhasEntries="
+                                        + result.hasEntries()),
                                 extra));
     }
 
