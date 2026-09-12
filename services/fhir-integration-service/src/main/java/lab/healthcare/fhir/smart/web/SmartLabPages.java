@@ -379,9 +379,7 @@ public final class SmartLabPages {
         boolean contractOk = ModelBoundaryContractVersion.V1.equals(contract.contractVersion());
         String modelBoundary = succeeded && contractOk ? pipeline : result.outcome().name();
         String agentStub = succeeded && stub.consumed() && !stub.modelCalled() ? pipeline : result.outcome().name();
-        boolean hasClinicalData = retainedPositive(result.conditions())
-                || retainedPositive(result.observations())
-                || retainedPositive(result.diagnosticReports());
+        boolean hasClinicalData = stub.hasClinicalData();
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -430,10 +428,6 @@ public final class SmartLabPages {
                                         + "\n"
                                         + collectionLine("diagnosticReports", result.diagnosticReports())),
                                 extra));
-    }
-
-    private static boolean retainedPositive(ProjectedCollection<?> collection) {
-        return collection != null && collection.retainedCount() != null && collection.retainedCount() > 0;
     }
 
     private static String collectionStatus(ProjectedCollection<?> collection) {

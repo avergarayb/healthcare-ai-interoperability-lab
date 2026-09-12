@@ -46,6 +46,7 @@ class AgentStubControllerTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.contractVersion").value("v1"))
                 .andExpect(jsonPath("$.consumed").value(true))
+                .andExpect(jsonPath("$.hasClinicalData").value(true))
                 .andExpect(jsonPath("$.modelCalled").value(false))
                 .andExpect(jsonPath("$.conditions.receivedCount").value(1489))
                 .andExpect(jsonPath("$.conditions.records").doesNotExist())
@@ -61,6 +62,7 @@ class AgentStubControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("modelCalled=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("hasClinicalData=true")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("conditionsReceivedCount=1489")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("active"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(PATIENT_ID))));
@@ -106,8 +108,8 @@ class AgentStubControllerTest {
                                 new BoundaryCondition("Condition", "active"),
                                 new BoundaryCondition("Condition", "active"),
                                 new BoundaryCondition("Condition", "active"))),
-                null,
-                null,
+                new BoundaryCollection<>(ClinicalSnapshotResourceStatus.SUCCESS, 0, 0, false, List.of()),
+                new BoundaryCollection<>(ClinicalSnapshotResourceStatus.SUCCESS, 0, 0, false, List.of()),
                 null);
     }
 }

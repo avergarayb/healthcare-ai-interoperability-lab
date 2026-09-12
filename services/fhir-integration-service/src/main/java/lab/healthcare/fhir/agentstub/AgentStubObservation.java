@@ -18,6 +18,7 @@ public record AgentStubObservation(
         ObservedCollection observations,
         ObservedCollection diagnosticReports,
         ObservedCollection medicationRequests,
+        boolean hasClinicalData,
         boolean consumed,
         boolean modelCalled) {
 
@@ -52,6 +53,8 @@ public record AgentStubObservation(
                 + collectionLine(diagnosticReports)
                 + ", medicationRequests="
                 + collectionLine(medicationRequests)
+                + ", hasClinicalData="
+                + hasClinicalData
                 + ", consumed="
                 + consumed
                 + ", modelCalled="
