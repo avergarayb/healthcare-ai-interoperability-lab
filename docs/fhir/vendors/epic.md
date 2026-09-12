@@ -377,6 +377,8 @@ Task 066 evaluates a deny-by-default consent and purpose boundary (`aiConsumerCo
 
 Task 067 evaluates a deny-by-default clinical data-scope and minimization boundary (`aiConsumerClinicalDataScope=NOT_READY_FOR_CLINICAL_DATA_ACCESS`). See [ai-consumer-data-scope-boundary.md](../ai-consumer-data-scope-boundary.md). New lab surfaces: `GET /lab/ai-consumer-data-scope` and `GET /api/ai-consumer-data-scope/v1`.
 
+Task 068 evaluates a deny-by-default clinical data-access request boundary (`aiConsumerClinicalDataAccess=NOT_GRANTED_FOR_CLINICAL_DATA_ACCESS`). See [ai-consumer-clinical-data-access-boundary.md](../ai-consumer-clinical-data-access-boundary.md). New lab surfaces: `GET /lab/ai-consumer-clinical-data-access` and `GET /api/ai-consumer-clinical-data-access/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.

@@ -134,3 +134,5 @@ The 066 line `aiConsumerDataScope=DATA_SCOPE_NOT_VERIFIED` stays. It is the cons
 - Model execution
 
 A later task may add a real scope provider. That work is not Task 067.
+
+Task 068 adds a deny-by-default clinical data-access request boundary over this result. See [ai-consumer-clinical-data-access-boundary.md](ai-consumer-clinical-data-access-boundary.md). Scope remains not ready for clinical data access.

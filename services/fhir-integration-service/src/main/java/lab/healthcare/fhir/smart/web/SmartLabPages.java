@@ -17,6 +17,8 @@ import lab.healthcare.fhir.aiconsumerauthorization.AiConsumerAuthorizationBounda
 import lab.healthcare.fhir.aiconsumerauthorization.AiConsumerAuthorizationResult;
 import lab.healthcare.fhir.aiconsumerconsent.AiConsumerConsentBoundary;
 import lab.healthcare.fhir.aiconsumerconsent.AiConsumerConsentResult;
+import lab.healthcare.fhir.aiconsumeraccess.AiConsumerClinicalDataAccessBoundary;
+import lab.healthcare.fhir.aiconsumeraccess.AiConsumerClinicalDataAccessResult;
 import lab.healthcare.fhir.aiconsumerscope.AiConsumerDataScopeBoundary;
 import lab.healthcare.fhir.aiconsumerscope.AiConsumerDataScopeResult;
 import lab.healthcare.fhir.aihandoffauthorization.AiHandoffAuthorizationBoundary;
@@ -432,6 +434,8 @@ public final class SmartLabPages {
                 AiConsumerAuthorizationBoundary.evaluate(handoffAuthorization);
         AiConsumerConsentResult consumerConsent = AiConsumerConsentBoundary.evaluate(consumerAuthorization);
         AiConsumerDataScopeResult consumerDataScope = AiConsumerDataScopeBoundary.evaluate(consumerConsent);
+        AiConsumerClinicalDataAccessResult consumerClinicalDataAccess =
+                AiConsumerClinicalDataAccessBoundary.evaluate(consumerDataScope);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -502,7 +506,9 @@ public final class SmartLabPages {
                                         + "\n"
                                         + aiConsumerConsentLines(consumerConsent)
                                         + "\n"
-                                        + aiConsumerDataScopeLines(consumerDataScope)),
+                                        + aiConsumerDataScopeLines(consumerDataScope)
+                                        + "\n"
+                                        + aiConsumerClinicalDataAccessLines(consumerClinicalDataAccess)),
                                 extra));
     }
 
@@ -616,6 +622,16 @@ public final class SmartLabPages {
                         .formatted(escape(aiConsumerDataScopeLines(result))));
     }
 
+    public static String aiConsumerClinicalDataAccess(AiConsumerClinicalDataAccessResult result) {
+        return page(
+                "AI consumer clinical data access",
+                """
+                <p>AI consumer clinical data-access request boundary. A declared request is not a grant and a grant is not a FHIR read. No token, Patient ID, projected values, FHIR JSON, or model output are shown.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(aiConsumerClinicalDataAccessLines(result))));
+    }
+
     private static String aiBoundaryLines(AiBoundaryResult result) {
         return "aiBoundary=PREPARED"
                 + "\nclinicalDataAvailable="
@@ -703,6 +719,29 @@ public final class SmartLabPages {
                 + result.clinicalDataAccessGranted()
                 + "\naiClinicalDataAccessAllowed="
                 + result.clinicalDataAccessAllowed();
+    }
+
+    private static String aiConsumerClinicalDataAccessLines(AiConsumerClinicalDataAccessResult result) {
+        return "aiConsumerClinicalDataAccess="
+                + result.status().name()
+                + "\naiConsumerAccessRequestDeclared="
+                + result.accessRequestDeclared()
+                + "\naiConsumerAccessRequestEvaluated="
+                + result.accessRequestEvaluated()
+                + "\naiConsumerScopeReferencePresent="
+                + result.scopeReferencePresent()
+                + "\naiConsumerRealAuthorizationRequired="
+                + result.realAuthorizationRequired()
+                + "\naiClinicalDataAccessRequested="
+                + result.clinicalDataAccessRequested()
+                + "\naiClinicalDataAccessGranted="
+                + result.clinicalDataAccessGranted()
+                + "\naiClinicalDataAccessAllowed="
+                + result.clinicalDataAccessAllowed()
+                + "\naiClinicalDataAccessGrantAvailable="
+                + result.clinicalDataAccessGrantAvailable()
+                + "\naiClinicalDataAccessEnforced="
+                + result.clinicalDataAccessEnforced();
     }
 
     private static String agentLines(DeterministicAgentResult result) {
