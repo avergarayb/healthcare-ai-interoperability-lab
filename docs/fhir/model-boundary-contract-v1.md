@@ -41,6 +41,8 @@ Task 059 consumes that boundary in an isolated first AI component. It does not a
 
 Task 060 evaluates the first AI result with an execution gate. Eligibility is not model authorization and does not add clinical fields.
 
+Task 061 copies that gate verdict onto an internal AI Consumer Contract v1. It does not add clinical fields, dispatch the contract, or change `modelCallAuthorized=false`. See [ai-consumer-contract-v1.md](ai-consumer-contract-v1.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.
