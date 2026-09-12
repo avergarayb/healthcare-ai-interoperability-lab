@@ -143,3 +143,5 @@ There is no real enforcement provider. There is no FHIR read.
 - No model execution
 
 A later task may add a real enforcement provider. That work is not Task 069.
+
+Task 070 adds a deny-by-default clinical data-access enforcement-execution boundary over this result. See [ai-consumer-clinical-data-enforcement-execution-boundary.md](ai-consumer-clinical-data-enforcement-execution-boundary.md). Enforcement remains not applied.
