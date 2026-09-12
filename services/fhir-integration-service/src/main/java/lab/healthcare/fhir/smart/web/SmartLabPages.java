@@ -6,6 +6,8 @@ import lab.healthcare.fhir.agent.DeterministicAgentResult;
 import lab.healthcare.fhir.aiboundary.AiBoundaryInput;
 import lab.healthcare.fhir.aiboundary.AiBoundaryResult;
 import lab.healthcare.fhir.aiboundary.AiBoundaryService;
+import lab.healthcare.fhir.aigateway.AiExecutionDecision;
+import lab.healthcare.fhir.aigateway.AiExecutionGate;
 import lab.healthcare.fhir.firstai.FirstAiComponent;
 import lab.healthcare.fhir.firstai.FirstAiResult;
 import lab.healthcare.fhir.agentstub.AgentStub;
@@ -404,6 +406,7 @@ public final class SmartLabPages {
         AiBoundaryResult aiBoundary =
                 AiBoundaryService.prepare(AiBoundaryInput.of(contract, diagnosis, agent));
         FirstAiResult firstAi = FirstAiComponent.process(aiBoundary);
+        AiExecutionDecision executionGate = AiExecutionGate.evaluate(firstAi);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -458,7 +461,9 @@ public final class SmartLabPages {
                                         + "\n"
                                         + aiBoundaryLines(aiBoundary)
                                         + "\n"
-                                        + firstAiLines(firstAi)),
+                                        + firstAiLines(firstAi)
+                                        + "\n"
+                                        + aiExecutionGateLines(executionGate)),
                                 extra));
     }
 
@@ -492,6 +497,16 @@ public final class SmartLabPages {
                         .formatted(escape(firstAiLines(result))));
     }
 
+    public static String aiExecutionGate(AiExecutionDecision result) {
+        return page(
+                "AI execution gate",
+                """
+                <p>AI execution gate. Eligibility is not model authorization. No token, Patient ID, projected values, FHIR JSON, or model output are shown.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(aiExecutionGateLines(result))));
+    }
+
     private static String aiBoundaryLines(AiBoundaryResult result) {
         return "aiBoundary=PREPARED"
                 + "\nclinicalDataAvailable="
@@ -509,6 +524,10 @@ public final class SmartLabPages {
                 + result.componentStatus().name()
                 + "\naiProcessingStatus="
                 + result.processingStatus().name();
+    }
+
+    private static String aiExecutionGateLines(AiExecutionDecision result) {
+        return "aiExecutionGate=" + result.executionDecision().name();
     }
 
     private static String agentLines(DeterministicAgentResult result) {

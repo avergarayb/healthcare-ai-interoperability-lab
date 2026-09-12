@@ -39,6 +39,8 @@ Task 058 copies the authorized contract metadata and the 057 verdict onto an AI 
 
 Task 059 consumes that boundary in an isolated first AI component. It does not add clinical fields, call a model, or change `modelCallAuthorized=false`.
 
+Task 060 evaluates the first AI result with an execution gate. Eligibility is not model authorization and does not add clinical fields.
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.
