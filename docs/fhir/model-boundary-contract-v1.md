@@ -37,6 +37,8 @@ Task 057 consumes this contract as-is. The deterministic agent does not add clin
 
 Task 058 copies the authorized contract metadata and the 057 verdict onto an AI boundary payload. It does not add clinical fields, call a model, or treat `READY` as model authorization.
 
+Task 059 consumes that boundary in an isolated first AI component. It does not add clinical fields, call a model, or change `modelCallAuthorized=false`.
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.

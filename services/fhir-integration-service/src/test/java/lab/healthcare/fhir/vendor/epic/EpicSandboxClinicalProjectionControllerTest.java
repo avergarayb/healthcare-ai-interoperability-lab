@@ -89,6 +89,8 @@ class EpicSandboxClinicalProjectionControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("modelCallAuthorized=false")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("clinicalDataAvailable=true")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("medicationRequestsStatus=NOT_REQUESTED")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("firstAiComponent=PREPARED")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("aiProcessingStatus=NOT_EXECUTED")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("access_token"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"resourceType\""))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("active"))))

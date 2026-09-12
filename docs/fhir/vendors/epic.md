@@ -359,6 +359,8 @@ Task 057 evaluates that same contract with a deterministic agent (`READY` / `BLO
 
 Task 058 copies that verdict onto an AI boundary (`aiBoundary=PREPARED`, `modelCallAuthorized=false`, `clinicalDataAvailable`). `READY` does not authorize a model call. New lab surfaces: `GET /lab/ai-boundary` and `GET /api/ai-boundary/v1`. There is no `ai-service` and no OpenAI client.
 
+Task 059 consumes that boundary in an isolated first AI component (`firstAiComponent=PREPARED`, `aiProcessingStatus=NOT_EXECUTED`). The component copies `AiBoundaryResult` only. It does not call a model, invent clinical output, or treat `READY` as authorization. New lab surfaces: `GET /lab/first-ai-component` and `GET /api/first-ai-component/v1`. Epic confirmation remains `GET /epic/sandbox/fhir/clinical-projection`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.
