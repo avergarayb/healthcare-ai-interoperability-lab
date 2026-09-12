@@ -55,6 +55,8 @@ Task 066 adds a deny-by-default consent and purpose boundary. It does not add cl
 
 Task 067 adds a deny-by-default clinical data-scope and minimization boundary. It does not add clinical fields or grant clinical access. See [ai-consumer-data-scope-boundary.md](ai-consumer-data-scope-boundary.md).
 
+Task 068 adds a deny-by-default clinical data-access request boundary. It does not add clinical fields or grant clinical access. See [ai-consumer-clinical-data-access-boundary.md](ai-consumer-clinical-data-access-boundary.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.
