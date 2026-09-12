@@ -58,9 +58,10 @@ class EpicSandboxClinicalSnapshotControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("clinicalSnapshot=SUCCEEDED")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("destination=epic-sandbox")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("hasClinicalData=true")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("pipelineStatus=SUCCESS")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("medicationRequestsPipeline=NOT_REQUESTED")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("access_token"))))
-                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"resourceType\""))))
-                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("medicationRequest"))));
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"resourceType\""))));
     }
 
     @Test

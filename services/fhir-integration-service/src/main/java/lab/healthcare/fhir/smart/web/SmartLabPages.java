@@ -2,6 +2,9 @@ package lab.healthcare.fhir.smart.web;
 
 import lab.healthcare.fhir.agentstub.AgentStub;
 import lab.healthcare.fhir.agentstub.AgentStubObservation;
+import lab.healthcare.fhir.pipeline.PipelineDiagnoses;
+import lab.healthcare.fhir.pipeline.PipelineDiagnosis;
+import lab.healthcare.fhir.pipeline.PipelineStageDiagnosis;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContract;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContractVersion;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryMapper;
@@ -326,6 +329,7 @@ public final class SmartLabPages {
         boolean hasClinicalData = positive(result.conditionCount())
                 || positive(result.observationCount())
                 || positive(result.diagnosticReportCount());
+        PipelineDiagnosis pipeline = PipelineDiagnoses.fromSnapshot(result);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -362,7 +366,9 @@ public final class SmartLabPages {
                                         + "\nobservationCount="
                                         + nullToEmptyCount(result.observationCount())
                                         + "\ndiagnosticReportCount="
-                                        + nullToEmptyCount(result.diagnosticReportCount())),
+                                        + nullToEmptyCount(result.diagnosticReportCount())
+                                        + "\n"
+                                        + pipelineLines(pipeline)),
                                 extra));
     }
 
@@ -380,6 +386,7 @@ public final class SmartLabPages {
         String modelBoundary = succeeded && contractOk ? pipeline : result.outcome().name();
         String agentStub = succeeded && stub.consumed() && !stub.modelCalled() ? pipeline : result.outcome().name();
         boolean hasClinicalData = stub.hasClinicalData();
+        PipelineDiagnosis diagnosis = PipelineDiagnoses.fromProjection(result);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -426,8 +433,24 @@ public final class SmartLabPages {
                                         + "\n"
                                         + collectionLine("observations", result.observations())
                                         + "\n"
-                                        + collectionLine("diagnosticReports", result.diagnosticReports())),
+                                        + collectionLine("diagnosticReports", result.diagnosticReports())
+                                        + "\n"
+                                        + pipelineLines(diagnosis)),
                                 extra));
+    }
+
+    private static String pipelineLines(PipelineDiagnosis diagnosis) {
+        StringBuilder lines = new StringBuilder();
+        lines.append("pipelineStatus=").append(diagnosis.overall().name());
+        lines.append("\ncontractValid=").append(diagnosis.contractValid());
+        lines.append("\nusable=").append(diagnosis.usable());
+        for (PipelineStageDiagnosis stage : diagnosis.stages()) {
+            lines.append('\n').append(stage.stage()).append("Pipeline=").append(stage.status().name());
+            if (stage.error() != null) {
+                lines.append('\n').append(stage.stage()).append("Error=").append(stage.error().code());
+            }
+        }
+        return lines.toString();
     }
 
     private static String collectionStatus(ProjectedCollection<?> collection) {

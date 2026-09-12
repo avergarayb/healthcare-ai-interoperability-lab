@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.vendor.oracle;
 
+import lab.healthcare.fhir.pipeline.PipelineDiagnoses;
+import lab.healthcare.fhir.pipeline.SafePipelineLog;
 import lab.healthcare.fhir.projection.ClinicalProjectionResult;
 import lab.healthcare.fhir.projection.ProjectedCollection;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
@@ -43,6 +45,7 @@ public class OracleSandboxClinicalProjectionController {
                 collectionLog(result.observations()),
                 collectionLog(result.diagnosticReports()),
                 collectionLog(result.medicationRequests()));
+        log.info(SafePipelineLog.line(PipelineDiagnoses.fromProjection(result), result.destination()));
         return ResponseEntity.status(httpStatus(result.outcome())).body(page(result));
     }
 

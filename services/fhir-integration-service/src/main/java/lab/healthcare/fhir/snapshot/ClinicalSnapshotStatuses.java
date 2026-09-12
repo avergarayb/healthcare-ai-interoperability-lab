@@ -18,6 +18,9 @@ public final class ClinicalSnapshotStatuses {
 
     public static ClinicalSnapshotResourceStatus fromFailure(RuntimeException ex) {
         FhirErrorDetails details = detailsOf(ex);
+        if (details.category() == FhirErrorCategory.TIMEOUT) {
+            return ClinicalSnapshotResourceStatus.TIMEOUT;
+        }
         if (details.category() == FhirErrorCategory.AUTHORIZATION_ERROR
                 || Integer.valueOf(403).equals(details.status())) {
             return ClinicalSnapshotResourceStatus.UNAUTHORIZED;

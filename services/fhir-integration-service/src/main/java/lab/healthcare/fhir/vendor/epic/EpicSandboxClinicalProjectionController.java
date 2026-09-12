@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.vendor.epic;
 
+import lab.healthcare.fhir.pipeline.PipelineDiagnoses;
+import lab.healthcare.fhir.pipeline.SafePipelineLog;
 import lab.healthcare.fhir.projection.ClinicalProjectionResult;
 import lab.healthcare.fhir.projection.ProjectedCollection;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
@@ -41,6 +43,7 @@ public class EpicSandboxClinicalProjectionController {
                 collectionLog(result.conditions()),
                 collectionLog(result.observations()),
                 collectionLog(result.diagnosticReports()));
+        log.info(SafePipelineLog.line(PipelineDiagnoses.fromProjection(result), result.destination()));
         return ResponseEntity.status(httpStatus(result.outcome())).body(SmartLabPages.epicClinicalProjection(result));
     }
 

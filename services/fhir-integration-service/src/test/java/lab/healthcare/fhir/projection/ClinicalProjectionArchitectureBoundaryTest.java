@@ -35,6 +35,7 @@ class ClinicalProjectionArchitectureBoundaryTest {
         assertThat(text).doesNotContain("EpicControlledProjection");
         assertThat(text).doesNotContain("if Epic");
         assertThat(text).doesNotContain("if Oracle");
+        assertThat(text).doesNotContain("lab.healthcare.fhir.pipeline");
     }
 
     @Test

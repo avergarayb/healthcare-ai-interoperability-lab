@@ -24,6 +24,6 @@ class ClinicalSnapshotStatusesTest {
         assertThat(ClinicalSnapshotStatuses.fromFailure(
                         FhirClientException.from(new FhirClientConnectionException(
                                 "timed out", new SocketTimeoutException("Read timed out")))))
-                .isEqualTo(ClinicalSnapshotResourceStatus.FAILED);
+                .isEqualTo(ClinicalSnapshotResourceStatus.TIMEOUT);
     }
 }

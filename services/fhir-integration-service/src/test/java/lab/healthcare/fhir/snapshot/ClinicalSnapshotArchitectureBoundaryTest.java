@@ -32,6 +32,7 @@ class ClinicalSnapshotArchitectureBoundaryTest {
         assertThat(text).doesNotContain("https://");
         assertThat(text).doesNotContain("cerner.com");
         assertThat(text).doesNotContain("lab.healthcare.fhir.projection");
+        assertThat(text).doesNotContain("lab.healthcare.fhir.pipeline");
     }
 
     @Test
@@ -43,6 +44,7 @@ class ClinicalSnapshotArchitectureBoundaryTest {
         assertThat(contents).doesNotContain("lab.healthcare.fhir.projection");
         assertThat(contents).doesNotContain("lab.healthcare.fhir.modelboundary");
         assertThat(contents).doesNotContain("lab.healthcare.fhir.agentstub");
+        assertThat(contents).doesNotContain("lab.healthcare.fhir.pipeline");
         assertThat(contents).doesNotContain("searchEverything");
     }
 }

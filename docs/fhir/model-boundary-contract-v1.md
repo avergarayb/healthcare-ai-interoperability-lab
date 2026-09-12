@@ -31,6 +31,8 @@ The allowlist is exactly Task 042. Do not add fields so that Oracle and Epic “
 
 Absence is not an empty collection. The stub accepts both `null` and a present MedicationRequest collection without `if Epic` or `if Oracle`.
 
+Task 056 may persist `TIMEOUT` on an existing collection `status`. That is an operational refinement of a failed search or read, not a new v1 clinical field and not an allowlist change.
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.
