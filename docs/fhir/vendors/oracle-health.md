@@ -476,7 +476,7 @@ vendor-neutral model boundary
 STOP
 ```
 
-The contract shape does not change for `oracle-health-sandbox`, `epic-sandbox`, or another FHIR destination. There is no `OracleModelBoundaryClient`, no Epic connection, and no LLM call. Empty and partial upstream states are preserved. Task 055 compares Oracle and Epic against the same v1 invariants; Oracle may include MedicationRequest while Epic omits it. See [model-boundary-contract-v1.md](../model-boundary-contract-v1.md).
+The contract shape does not change for `oracle-health-sandbox`, `epic-sandbox`, or another FHIR destination. There is no `OracleModelBoundaryClient`, no Epic connection, and no LLM call. Empty and partial upstream states are preserved. Task 055 compares Oracle and Epic against the same v1 invariants; Oracle may include MedicationRequest while Epic omits it. See [model-boundary-contract-v1.md](../model-boundary-contract-v1.md). Task 056 diagnoses those results with the same vendor-neutral pipeline statuses; a present Oracle MedicationRequest is `SUCCESS` or another collection status, never rewritten as Epic absence.
 
 The laboratory page must not show record values.
 

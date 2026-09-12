@@ -41,6 +41,7 @@ class AgentStubArchitectureBoundaryTest {
         assertThat(text).doesNotContain("OracleAgentService");
         assertThat(text).doesNotContain("if Epic");
         assertThat(text).doesNotContain("if Oracle");
+        assertThat(text).doesNotContain("lab.healthcare.fhir.pipeline");
         String stub = Files.readString(Path.of("src/main/java/lab/healthcare/fhir/agentstub/AgentStub.java"));
         assertThat(stub).doesNotContain("lab.healthcare.fhir.smart");
         assertThat(stub).doesNotContain("FhirService");

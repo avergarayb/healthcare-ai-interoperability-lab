@@ -126,7 +126,7 @@ class ClinicalProjectionAssemblerTest {
 
         assertThat(result.outcome()).isEqualTo(ClinicalSnapshotOutcome.SNAPSHOT_PARTIAL);
         assertThat(result.conditions().status()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
-        assertThat(result.observations().status()).isEqualTo(ClinicalSnapshotResourceStatus.FAILED);
+        assertThat(result.observations().status()).isEqualTo(ClinicalSnapshotResourceStatus.TIMEOUT);
         assertThat(result.observations().receivedCount()).isNull();
         assertThat(result.observations().items()).isEmpty();
         assertThat(result.diagnosticReports().status()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);

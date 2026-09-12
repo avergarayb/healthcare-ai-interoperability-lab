@@ -39,6 +39,7 @@ class ModelBoundaryArchitectureBoundaryTest {
         assertThat(text).doesNotContain("OracleModelContext");
         assertThat(text).doesNotContain("EpicModelContext");
         assertThat(text).doesNotContain("OracleSandboxModelBoundaryService");
+        assertThat(text).doesNotContain("lab.healthcare.fhir.pipeline");
     }
 
     @Test

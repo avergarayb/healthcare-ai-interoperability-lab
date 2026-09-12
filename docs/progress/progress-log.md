@@ -97,3 +97,29 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Allowlist 042 was not expanded; MedicationRequest was not added to Epic
 - No LLM or real agent was added
 - `.env` was not modified
+
+## Task 056 — Safe pipeline error handling
+
+- Status: COMPLETED
+- `mvn test`: 686/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `hasClinicalData=true`
+  - `pipelineStatus=SUCCESS`
+  - `contractValid=true`
+  - `usable=true`
+  - `medicationRequestsPipeline=NOT_REQUESTED`
+- Package `lab.healthcare.fhir.pipeline` aggregates vendor-neutral stage statuses
+- Critical stages: patient, snapshot/projection, contract, agentStub
+- Non-critical collections: Condition, Observation, DiagnosticReport, MedicationRequest
+- Expected absence (`MedicationRequest=null` on Epic) is `NOT_REQUESTED`, not a failure
+- Non-critical timeout or unavailable stays `PARTIAL` and usable
+- Invalid contract is `REJECTED`; critical patient failure is `FAILED`
+- `ClinicalSnapshotResourceStatus.TIMEOUT` is a persisted operational status, not a new v1 field
+- Epic pages add `pipelineStatus`, `contractValid`, `usable`, and per-stage pipeline lines without replacing existing blind fields
+- Controllers log `SafePipelineLog` lines only (no tokens, Patient IDs, or FHIR JSON)
+- `GET /api/model-boundary/v1` and `GET /lab/agent-stub` stay Oracle-backed
+- Allowlist 042 was not expanded; no LLM or real agent was added
+- `.env` was not modified

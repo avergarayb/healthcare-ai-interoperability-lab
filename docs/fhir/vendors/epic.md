@@ -353,6 +353,8 @@ Task 053 maps the Epic projection onto the v1 model boundary and the generic `Ag
 
 Task 055 compares that Epic contract with Oracle using the same v1 invariants. The only allowed content gap is omitted MedicationRequest. See [model-boundary-contract-v1.md](../model-boundary-contract-v1.md).
 
+Task 056 adds a vendor-neutral pipeline diagnosis on the snapshot and projection pages (`pipelineStatus`, `contractValid`, `usable`, and per-stage statuses). Omitted MedicationRequest is `NOT_REQUESTED`, not a provider error. Timeout on a non-critical collection is `PARTIAL` and remains usable. Logs use `SafePipelineLog` and never include tokens, Patient IDs, or FHIR JSON.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.

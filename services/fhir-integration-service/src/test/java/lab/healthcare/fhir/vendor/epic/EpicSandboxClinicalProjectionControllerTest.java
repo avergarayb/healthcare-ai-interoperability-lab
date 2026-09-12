@@ -78,11 +78,14 @@ class EpicSandboxClinicalProjectionControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("sensitiveFieldsExposed=false")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("rawFhirExposed=false")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("hasClinicalData=true")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("pipelineStatus=SUCCESS")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("contractValid=true")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("usable=true")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("medicationRequestsPipeline=NOT_REQUESTED")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("access_token"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"resourceType\""))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("active"))))
-                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("final"))))
-                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("medicationRequest"))));
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("final"))));
     }
 
     @Test

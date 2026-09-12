@@ -46,7 +46,7 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/epic/sandbox/fhir/observation-search` | after a token and Patient ID: safe authenticated Observation search by Patient |
 | `http://localhost:8081/epic/sandbox/fhir/diagnostic-report-search` | after a token and Patient ID: safe authenticated DiagnosticReport search by Patient |
 | `http://localhost:8081/epic/sandbox/fhir/clinical-snapshot` | after a token and Patient ID: controlled snapshot of status and counts |
-| `http://localhost:8081/epic/sandbox/fhir/clinical-projection` | after a token and Patient ID: controlled projection of status, received/retained counts, truncated, and contract/stub confirmation |
+| `http://localhost:8081/epic/sandbox/fhir/clinical-projection` | after a token and Patient ID: controlled projection of status, received/retained counts, truncated, contract/stub confirmation, and pipeline diagnosis |
 | `http://localhost:8081/smart/callback` | registered redirect; validates callback and attempts token exchange |
 | `http://localhost:8081/oracle/sandbox/fhir/patient-search` | after a token is issued: safe authenticated Patient search diagnosis |
 | `http://localhost:8081/oracle/sandbox/fhir/patient` | after a token and `ORACLE_HEALTH_SANDBOX_PATIENT_ID`: controlled Patient read diagnosis |

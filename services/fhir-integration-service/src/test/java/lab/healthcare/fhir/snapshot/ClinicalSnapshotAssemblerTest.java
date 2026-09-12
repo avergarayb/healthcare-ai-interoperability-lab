@@ -83,7 +83,7 @@ class ClinicalSnapshotAssemblerTest {
 
         assertThat(result.outcome()).isEqualTo(ClinicalSnapshotOutcome.SNAPSHOT_PARTIAL);
         assertThat(result.conditionStatus()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
-        assertThat(result.observationStatus()).isEqualTo(ClinicalSnapshotResourceStatus.FAILED);
+        assertThat(result.observationStatus()).isEqualTo(ClinicalSnapshotResourceStatus.TIMEOUT);
         assertThat(result.observationCount()).isNull();
         assertThat(result.diagnosticReportStatus()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
         assertThat(result.toString()).doesNotContain("Read timed out");
