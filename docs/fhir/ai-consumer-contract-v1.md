@@ -77,3 +77,5 @@ A later `ai-service` must not accept this contract only because it can reach an 
 12. Rate limiting if the surface is ever exposed outside the lab
 
 Task 061 documents that list. It does not implement it, and it does not send the contract anywhere.
+
+Task 062 adds a synthetic consumer policy over this contract. See [ai-consumer-policy.md](ai-consumer-policy.md). Allowed future consumption is still not dispatch and not model authorization.

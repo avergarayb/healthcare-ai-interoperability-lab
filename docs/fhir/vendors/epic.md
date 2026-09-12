@@ -365,6 +365,8 @@ Task 060 evaluates that first AI result with a local execution gate (`aiExecutio
 
 Task 061 copies that gate verdict onto an internal AI Consumer Contract v1 (`aiConsumerContract=v1`, `aiConsumerStatus=READY`, `aiDispatchStatus=NOT_DISPATCHED`). Ready is not dispatch. See [ai-consumer-contract-v1.md](../ai-consumer-contract-v1.md). New lab surfaces: `GET /lab/ai-consumer-contract` and `GET /api/ai-consumer-contract/v1`.
 
+Task 062 evaluates a synthetic laboratory consumer against that contract (`aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`). Allowed future consumption is not dispatch and not model authorization. See [ai-consumer-policy.md](../ai-consumer-policy.md). New lab surfaces: `GET /lab/ai-consumer-policy` and `GET /api/ai-consumer-policy/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.
