@@ -217,6 +217,40 @@ class ClinicalProjectionAssemblerTest {
         verify(routingService, never()).searchMedicationRequests(any(), any(), any());
     }
 
+    @Test
+    void sameRetentionCeilingAppliesForEpicOmissionAndOracleInclusion() {
+        String epic = "epic-sandbox";
+        when(routingService.readPatient(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(patient());
+        when(routingService.readPatient(eq(epic), any(), eq(PATIENT_ID))).thenReturn(patient());
+        when(routingService.searchConditions(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(conditions(1489));
+        when(routingService.searchConditions(eq(epic), any(), eq(PATIENT_ID))).thenReturn(conditions(1489));
+        when(routingService.searchObservations(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(observations(6));
+        when(routingService.searchObservations(eq(epic), any(), eq(PATIENT_ID))).thenReturn(observations(6));
+        when(routingService.searchDiagnosticReports(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(reports(5));
+        when(routingService.searchDiagnosticReports(eq(epic), any(), eq(PATIENT_ID))).thenReturn(reports(5));
+        when(routingService.searchMedicationRequests(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(medications(8));
+
+        ClinicalProjectionResult oracle = assembler().assemble(DEST, token(), PATIENT_ID, allSupported());
+        ClinicalProjectionResult epicResult = assembler()
+                .assemble(
+                        epic,
+                        token(),
+                        PATIENT_ID,
+                        allSupported(),
+                        ClinicalSnapshotContents.withoutMedicationRequests());
+
+        assertThat(oracle.conditions().receivedCount()).isEqualTo(epicResult.conditions().receivedCount()).isEqualTo(1489);
+        assertThat(oracle.conditions().retainedCount()).isEqualTo(epicResult.conditions().retainedCount()).isEqualTo(5);
+        assertThat(oracle.conditions().truncated()).isEqualTo(epicResult.conditions().truncated()).isTrue();
+        assertThat(oracle.observations().retainedCount()).isEqualTo(epicResult.observations().retainedCount()).isEqualTo(5);
+        assertThat(oracle.medicationRequests()).isNotNull();
+        assertThat(oracle.medicationRequests().receivedCount()).isEqualTo(8);
+        assertThat(oracle.medicationRequests().retainedCount()).isEqualTo(5);
+        assertThat(oracle.medicationRequests().truncated()).isTrue();
+        assertThat(epicResult.medicationRequests()).isNull();
+        verify(routingService, never()).searchMedicationRequests(eq(epic), any(), any());
+    }
+
     private ClinicalProjectionAssembler assembler() {
         return new ClinicalProjectionAssembler(routingService, new RetentionCeiling(), CLOCK);
     }
