@@ -123,3 +123,29 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - `GET /api/model-boundary/v1` and `GET /lab/agent-stub` stay Oracle-backed
 - Allowlist 042 was not expanded; no LLM or real agent was added
 - `.env` was not modified
+
+## Task 057 — Deterministic agent
+
+- Status: COMPLETED
+- `mvn test`: 699/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `hasClinicalData=true`
+  - `pipelineStatus=SUCCESS`
+  - `deterministicAgent=READY`
+  - `agentReason=READY_FOR_BOUNDARY`
+  - `requiresHumanReview=true`
+  - `agentModelCalled=false`
+  - `warnings=not-requested:medicationRequests`
+- Package `lab.healthcare.fhir.agent` evaluates Model Boundary Contract v1 plus `PipelineDiagnosis`
+- Decisions: `READY`, `BLOCKED`, `REQUIRES_HUMAN_REVIEW`
+- Invalid contract or unusable pipeline is `BLOCKED`; empty clinical data or `PARTIAL` is `REQUIRES_HUMAN_REVIEW`
+- `requiresHumanReview=true` and `modelCalled=false` on every verdict
+- Warnings are operational codes only (`truncated:conditions`, `not-requested:medicationRequests`)
+- Lab surfaces: `GET /lab/deterministic-agent`, `GET /api/deterministic-agent/v1` (Oracle-backed provider)
+- Epic confirmation remains `GET /epic/sandbox/fhir/clinical-projection`
+- AgentStub is reused for contract validation; no LLM, RAG, or vendor client
+- Allowlist 042 was not expanded
+- `.env` was not modified

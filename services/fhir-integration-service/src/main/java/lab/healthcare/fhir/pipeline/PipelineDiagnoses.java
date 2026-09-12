@@ -66,12 +66,18 @@ public final class PipelineDiagnoses {
         if (contract == null) {
             return rejected("contract", PipelineErrorCodes.MODEL_BOUNDARY_REJECTED, "Model boundary contract is missing");
         }
-        stages.add(PipelineStageDiagnosis.of("patient", PipelineStatuses.ofResource(
-                contract.patient() == null ? null : contract.patient().status()), true));
+        stages.add(patient(contract.outcome(), contract.patient() == null ? null : contract.patient().status()));
         stages.add(boundaryCollection("conditions", contract.conditions()));
         stages.add(boundaryCollection("observations", contract.observations()));
         stages.add(boundaryCollection("diagnosticReports", contract.diagnosticReports()));
         stages.add(boundaryCollection("medicationRequests", contract.medicationRequests()));
+        if (contract.outcome() == ClinicalSnapshotOutcome.SNAPSHOT_UNAVAILABLE
+                || contract.outcome() == ClinicalSnapshotOutcome.AUTHENTICATION_REQUIRED
+                || contract.outcome() == ClinicalSnapshotOutcome.PATIENT_CONTEXT_NOT_CONFIGURED) {
+            stages.add(PipelineStageDiagnosis.of("contract", PipelineStatuses.ofOutcome(contract.outcome()), true));
+            PipelineStageStatus overall = PipelineAggregator.overall(stages);
+            return new PipelineDiagnosis(overall, false, false, stages);
+        }
         return withContract(stages, contract);
     }
 

@@ -33,6 +33,8 @@ Absence is not an empty collection. The stub accepts both `null` and a present M
 
 Task 056 may persist `TIMEOUT` on an existing collection `status`. That is an operational refinement of a failed search or read, not a new v1 clinical field and not an allowlist change.
 
+Task 057 consumes this contract as-is. The deterministic agent does not add clinical fields or call a model.
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.

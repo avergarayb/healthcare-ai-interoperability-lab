@@ -35,6 +35,8 @@ class PipelineArchitectureBoundaryTest {
         assertThat(text).doesNotContain("ORACLE_AUTH");
         assertThat(text).doesNotContain("https://");
         assertThat(text).doesNotContain("openai");
+        assertThat(text).doesNotContain("lab.healthcare.fhir.agent.");
+        assertThat(text).doesNotContain("DeterministicAgent");
     }
 
     @Test

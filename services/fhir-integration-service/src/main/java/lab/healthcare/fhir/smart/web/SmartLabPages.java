@@ -1,5 +1,8 @@
 package lab.healthcare.fhir.smart.web;
 
+import lab.healthcare.fhir.agent.DeterministicAgent;
+import lab.healthcare.fhir.agent.DeterministicAgentInput;
+import lab.healthcare.fhir.agent.DeterministicAgentResult;
 import lab.healthcare.fhir.agentstub.AgentStub;
 import lab.healthcare.fhir.agentstub.AgentStubObservation;
 import lab.healthcare.fhir.pipeline.PipelineDiagnoses;
@@ -114,6 +117,7 @@ public final class SmartLabPages {
                   <li>Then open <a href="/oracle/sandbox/fhir/model-boundary">/oracle/sandbox/fhir/model-boundary</a> for the vendor-neutral model boundary contract. The page shows only version, outcome, status, and counts. It does not show record values and does not call a model.</li>
                   <li>A machine consumer uses <code>GET /api/model-boundary/v1</code> for the exact v1 JSON contract. That is not this HTML page and not an agent.</li>
                   <li>Then open <a href="/lab/agent-stub">/lab/agent-stub</a> for the contract-consuming stub. The page shows only observation counts and <code>modelCalled=false</code>. JSON: <code>GET /api/agent-stub/v1</code>.</li>
+                  <li>Then open <a href="/lab/deterministic-agent">/lab/deterministic-agent</a> for the deterministic boundary agent. The page shows only the verdict, reason, pipeline status, and warning codes. JSON: <code>GET /api/deterministic-agent/v1</code>.</li>
                   <li>Epic sandbox SMART (Task 046) starts at <a href="/epic/sandbox/smart/start">/epic/sandbox/smart/start</a>. It issues a token only. It does not read Patient.</li>
                   <li>Epic public capability discovery (Task 047) is <a href="/epic/sandbox/fhir/capabilities">/epic/sandbox/fhir/capabilities</a>. It does not use the SMART token and does not read Patient.</li>
                   <li>With a SMART token and <code>EPIC_SANDBOX_PATIENT_ID</code> set, open
@@ -128,8 +132,9 @@ public final class SmartLabPages {
                   <li>Then open <a href="/epic/sandbox/fhir/clinical-snapshot">/epic/sandbox/fhir/clinical-snapshot</a>
                   for a controlled clinical snapshot. The page shows only status and counts.</li>
                   <li>Then open <a href="/epic/sandbox/fhir/clinical-projection">/epic/sandbox/fhir/clinical-projection</a>
-                  for a controlled projection. The page shows only status, received/retained counts, truncated, and
-                  contract/stub confirmation. It does not show projected field values.</li>
+                  for a controlled projection. The page shows only status, received/retained counts, truncated,
+                  contract/stub confirmation, and the deterministic agent verdict. It does not show projected field
+                  values.</li>
                 </ol>
                 """);
     }
@@ -159,8 +164,9 @@ public final class SmartLabPages {
                   <li>Then open <a href="/epic/sandbox/fhir/clinical-snapshot">/epic/sandbox/fhir/clinical-snapshot</a>
                   for a controlled clinical snapshot. The page shows only status and counts.</li>
                   <li>Then open <a href="/epic/sandbox/fhir/clinical-projection">/epic/sandbox/fhir/clinical-projection</a>
-                  for a controlled projection. The page shows only status, received/retained counts, truncated, and
-                  contract/stub confirmation. It does not show projected field values.</li>
+                  for a controlled projection. The page shows only status, received/retained counts, truncated,
+                  contract/stub confirmation, and the deterministic agent verdict. It does not show projected field
+                  values.</li>
                 </ol>
                 """);
     }
@@ -387,6 +393,8 @@ public final class SmartLabPages {
         String agentStub = succeeded && stub.consumed() && !stub.modelCalled() ? pipeline : result.outcome().name();
         boolean hasClinicalData = stub.hasClinicalData();
         PipelineDiagnosis diagnosis = PipelineDiagnoses.fromProjection(result);
+        DeterministicAgentResult agent =
+                DeterministicAgent.evaluate(DeterministicAgentInput.of(contract, diagnosis));
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -435,8 +443,39 @@ public final class SmartLabPages {
                                         + "\n"
                                         + collectionLine("diagnosticReports", result.diagnosticReports())
                                         + "\n"
-                                        + pipelineLines(diagnosis)),
+                                        + pipelineLines(diagnosis)
+                                        + "\n"
+                                        + agentLines(agent)),
                                 extra));
+    }
+
+    public static String deterministicAgent(DeterministicAgentResult result) {
+        return page(
+                "Deterministic agent",
+                """
+                <p>Deterministic boundary agent. No token, Patient ID, projected values, FHIR JSON, or model output are shown.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(agentLines(result))));
+    }
+
+    private static String agentLines(DeterministicAgentResult result) {
+        return "deterministicAgent="
+                + result.decision().name()
+                + "\nagentReason="
+                + result.reasonCode()
+                + "\nrequiresHumanReview="
+                + result.requiresHumanReview()
+                + "\nagentModelCalled="
+                + result.modelCalled()
+                + "\npipelineStatus="
+                + result.pipelineStatus().name()
+                + "\ncontractValid="
+                + result.contractValid()
+                + "\nusable="
+                + result.usable()
+                + "\nwarnings="
+                + String.join(",", result.warnings());
     }
 
     private static String pipelineLines(PipelineDiagnosis diagnosis) {
