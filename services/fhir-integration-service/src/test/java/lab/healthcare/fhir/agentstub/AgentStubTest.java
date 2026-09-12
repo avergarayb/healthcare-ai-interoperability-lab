@@ -42,7 +42,7 @@ class AgentStubTest {
                                 new BoundaryCondition("Condition", "active"),
                                 new BoundaryCondition("Condition", "resolved"))),
                 new BoundaryCollection<>(ClinicalSnapshotResourceStatus.SUCCESS, 0, 0, false, List.of()),
-                null,
+                new BoundaryCollection<>(ClinicalSnapshotResourceStatus.SUCCESS, 0, 0, false, List.of()),
                 null);
 
         AgentStubObservation observation = AgentStub.observe(contract);
@@ -50,6 +50,7 @@ class AgentStubTest {
         assertThat(observation.consumed()).isTrue();
         assertThat(observation.modelCalled()).isFalse();
         assertThat(observation.contractVersion()).isEqualTo("v1");
+        assertThat(observation.hasClinicalData()).isTrue();
         assertThat(observation.outcome()).isEqualTo(ClinicalSnapshotOutcome.SNAPSHOT_COMPLETE);
         assertThat(observation.patientStatus()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
         assertThat(observation.conditions().receivedCount()).isEqualTo(1489);
@@ -57,11 +58,14 @@ class AgentStubTest {
         assertThat(observation.conditions().truncated()).isTrue();
         assertThat(observation.observations().receivedCount()).isZero();
         assertThat(observation.observations().truncated()).isFalse();
+        assertThat(observation.diagnosticReports().retainedCount()).isZero();
+        assertThat(observation.medicationRequests()).isNull();
         assertThat(componentNames(AgentStubObservation.class))
                 .doesNotContain("records", "clinicalStatusCode", "intent");
         assertThat(observation.toString()).doesNotContain("active");
         assertThat(observation.toString()).doesNotContain("resolved");
         assertThat(observation.toString()).contains("modelCalled=false");
+        assertThat(observation.toString()).contains("hasClinicalData=true");
     }
 
     @Test
@@ -80,6 +84,7 @@ class AgentStubTest {
 
         assertThat(observation.consumed()).isTrue();
         assertThat(observation.modelCalled()).isFalse();
+        assertThat(observation.hasClinicalData()).isFalse();
         assertThat(observation.patientStatus()).isNull();
         assertThat(observation.conditions()).isNull();
         assertThat(observation.toString()).doesNotContain("access_token");
@@ -100,8 +105,8 @@ class AgentStubTest {
                         5,
                         true,
                         List.of(new BoundaryCondition("Condition", "active"))),
-                null,
-                null,
+                new BoundaryCollection<>(ClinicalSnapshotResourceStatus.SUCCESS, 0, 0, false, List.of()),
+                new BoundaryCollection<>(ClinicalSnapshotResourceStatus.SUCCESS, 0, 0, false, List.of()),
                 null);
 
         assertThatThrownBy(() -> AgentStub.observe(contract)).isInstanceOf(IllegalStateException.class);

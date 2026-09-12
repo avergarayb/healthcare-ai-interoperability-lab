@@ -62,3 +62,25 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
   - `hasClinicalData=true`
 - No resource-specific FHIR client was added. There is no `EpicProjectionClient` or `EpicControlledProjection`
 - Reused existing generic abstractions: `ClinicalProjectionAssembler`, `ClinicalProjectionMapper`, `RetentionCeiling`, `ModelBoundaryMapper`, and `AgentStub`
+
+## Task 054 — Agent stub consumes Model Boundary Contract v1
+
+- Status: COMPLETED
+- Destination: vendor-neutral `AgentStub` over Epic (`epic-sandbox`) and Oracle (`oracle-health-sandbox`) contracts
+- The stub now rejects non-`v1` versions and complete/partial contracts missing Patient or included collections
+- `hasClinicalData` is derived from retained counts; record values are not republished
+- Epic `MedicationRequest` remains `null`; Oracle may include MedicationRequest
+- `GET /api/model-boundary/v1` and `GET /lab/agent-stub` stay Oracle-backed
+- Epic laboratory confirmation remains `GET /epic/sandbox/fhir/clinical-projection`
+- Epic sandbox live result:
+  - HTTP 200
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `modelBoundary=SUCCEEDED`
+  - `agentStub=SUCCEEDED`
+  - `sensitiveFieldsExposed=false`
+  - `rawFhirExposed=false`
+  - `hasClinicalData=true`
+- No `EpicAgentStub`, `OracleAgentStub`, LLM, or real agent was added
+- Allowlist 042 was not expanded
+- `.env` was not modified

@@ -72,6 +72,7 @@ public class AgentStubController {
                         + " " + collectionLine("observations", observation.observations())
                         + " " + collectionLine("diagnosticReports", observation.diagnosticReports())
                         + " " + collectionLine("medicationRequests", observation.medicationRequests())
+                        + " hasClinicalData=" + observation.hasClinicalData()
                         + " consumed=" + observation.consumed()
                         + " modelCalled=" + observation.modelCalled());
     }

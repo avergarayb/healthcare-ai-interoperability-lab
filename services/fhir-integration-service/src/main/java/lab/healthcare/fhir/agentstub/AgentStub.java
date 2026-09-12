@@ -2,6 +2,8 @@ package lab.healthcare.fhir.agentstub;
 
 import lab.healthcare.fhir.modelboundary.BoundaryCollection;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContract;
+import lab.healthcare.fhir.modelboundary.ModelBoundaryContractVersion;
+import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotResourceStatus;
 
 /**
@@ -17,18 +19,56 @@ public final class AgentStub {
         if (contract == null) {
             throw new IllegalArgumentException("Model boundary contract must be provided");
         }
+        if (!ModelBoundaryContractVersion.V1.equals(contract.contractVersion())) {
+            throw new IllegalArgumentException("Agent stub accepts only model boundary contract v1");
+        }
+        requireExpectedSections(contract);
+        ObservedCollection conditions = collection(contract.conditions());
+        ObservedCollection observations = collection(contract.observations());
+        ObservedCollection diagnosticReports = collection(contract.diagnosticReports());
+        ObservedCollection medicationRequests = collection(contract.medicationRequests());
         return new AgentStubObservation(
                 contract.contractVersion(),
                 contract.destination(),
                 contract.contextSource(),
                 contract.outcome(),
                 contract.patient() == null ? null : contract.patient().status(),
-                collection(contract.conditions()),
-                collection(contract.observations()),
-                collection(contract.diagnosticReports()),
-                collection(contract.medicationRequests()),
+                conditions,
+                observations,
+                diagnosticReports,
+                medicationRequests,
+                hasClinicalData(conditions, observations, diagnosticReports, medicationRequests),
                 true,
                 false);
+    }
+
+    private static void requireExpectedSections(ModelBoundaryContract contract) {
+        ClinicalSnapshotOutcome outcome = contract.outcome();
+        if (outcome != ClinicalSnapshotOutcome.SNAPSHOT_COMPLETE
+                && outcome != ClinicalSnapshotOutcome.SNAPSHOT_PARTIAL) {
+            return;
+        }
+        if (contract.patient() == null
+                || contract.conditions() == null
+                || contract.observations() == null
+                || contract.diagnosticReports() == null) {
+            throw new IllegalArgumentException("Complete or partial v1 contracts require patient and included collections");
+        }
+    }
+
+    private static boolean hasClinicalData(
+            ObservedCollection conditions,
+            ObservedCollection observations,
+            ObservedCollection diagnosticReports,
+            ObservedCollection medicationRequests) {
+        return retainedPositive(conditions)
+                || retainedPositive(observations)
+                || retainedPositive(diagnosticReports)
+                || retainedPositive(medicationRequests);
+    }
+
+    private static boolean retainedPositive(ObservedCollection collection) {
+        return collection != null && collection.retainedCount() != null && collection.retainedCount() > 0;
     }
 
     private static ObservedCollection collection(BoundaryCollection<?> source) {

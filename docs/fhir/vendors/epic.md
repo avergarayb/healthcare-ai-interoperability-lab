@@ -340,6 +340,17 @@ The laboratory page must not show projected field values.
 
 Lab page: `GET /epic/sandbox/fhir/clinical-projection` after SMART login **and** a configured Patient ID. HTTP 200 for complete **and** partial. The page does not show Patient ID, projected values, or clinical JSON.
 
+## Agent stub contract validation (Task 054)
+
+Task 053 maps the Epic projection onto the v1 model boundary and the generic `AgentStub`. Task 054 validates that the same stub consumes Epic and Oracle contracts without vendor branches:
+
+- Contract version must be `v1`.
+- Complete or partial contracts require Patient plus Condition, Observation, and DiagnosticReport collections.
+- Epic may omit MedicationRequest (`null`). Oracle may include it.
+- The stub reports counts, truncation, and `hasClinicalData`. It does not fetch FHIR or call a model.
+
+`GET /api/model-boundary/v1` and `GET /lab/agent-stub` remain the Oracle-backed machine surfaces. Epic confirmation stays on the Task 053 projection page.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.
