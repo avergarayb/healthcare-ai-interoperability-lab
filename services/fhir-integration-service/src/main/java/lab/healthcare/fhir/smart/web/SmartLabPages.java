@@ -17,6 +17,8 @@ import lab.healthcare.fhir.aiconsumerauthorization.AiConsumerAuthorizationBounda
 import lab.healthcare.fhir.aiconsumerauthorization.AiConsumerAuthorizationResult;
 import lab.healthcare.fhir.aiconsumerconsent.AiConsumerConsentBoundary;
 import lab.healthcare.fhir.aiconsumerconsent.AiConsumerConsentResult;
+import lab.healthcare.fhir.aiconsumerscope.AiConsumerDataScopeBoundary;
+import lab.healthcare.fhir.aiconsumerscope.AiConsumerDataScopeResult;
 import lab.healthcare.fhir.aihandoffauthorization.AiHandoffAuthorizationBoundary;
 import lab.healthcare.fhir.aihandoffauthorization.AiHandoffAuthorizationResult;
 import lab.healthcare.fhir.aigateway.AiExecutionDecision;
@@ -429,6 +431,7 @@ public final class SmartLabPages {
         AiConsumerAuthorizationResult consumerAuthorization =
                 AiConsumerAuthorizationBoundary.evaluate(handoffAuthorization);
         AiConsumerConsentResult consumerConsent = AiConsumerConsentBoundary.evaluate(consumerAuthorization);
+        AiConsumerDataScopeResult consumerDataScope = AiConsumerDataScopeBoundary.evaluate(consumerConsent);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -497,7 +500,9 @@ public final class SmartLabPages {
                                         + "\n"
                                         + aiConsumerAuthorizationLines(consumerAuthorization)
                                         + "\n"
-                                        + aiConsumerConsentLines(consumerConsent)),
+                                        + aiConsumerConsentLines(consumerConsent)
+                                        + "\n"
+                                        + aiConsumerDataScopeLines(consumerDataScope)),
                                 extra));
     }
 
@@ -601,6 +606,16 @@ public final class SmartLabPages {
                         .formatted(escape(aiConsumerConsentLines(result))));
     }
 
+    public static String aiConsumerDataScope(AiConsumerDataScopeResult result) {
+        return page(
+                "AI consumer data scope",
+                """
+                <p>AI consumer clinical data-scope and minimization boundary. A declared scope is not approval and is not clinical access. No token, Patient ID, projected values, FHIR JSON, or model output are shown.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(aiConsumerDataScopeLines(result))));
+    }
+
     private static String aiBoundaryLines(AiBoundaryResult result) {
         return "aiBoundary=PREPARED"
                 + "\nclinicalDataAvailable="
@@ -663,6 +678,29 @@ public final class SmartLabPages {
                 + result.dataScopeDisplay()
                 + "\naiConsumerConsentAvailable="
                 + result.consentAvailable()
+                + "\naiClinicalDataAccessAllowed="
+                + result.clinicalDataAccessAllowed();
+    }
+
+    private static String aiConsumerDataScopeLines(AiConsumerDataScopeResult result) {
+        return "aiConsumerClinicalDataScope="
+                + result.status().name()
+                + "\naiConsumerScopeDeclared="
+                + result.scopeDeclared()
+                + "\naiConsumerScopeEvaluated="
+                + result.scopeEvaluated()
+                + "\naiConsumerMinimizationEvaluated="
+                + result.minimizationEvaluated()
+                + "\naiConsumerPurposeScopeAlignmentEvaluated="
+                + result.purposeScopeAlignmentEvaluated()
+                + "\naiClinicalDataScopeProviderConfigured="
+                + result.clinicalDataScopeProviderConfigured()
+                + "\naiClinicalDataScopeApprovalAvailable="
+                + result.clinicalDataScopeApprovalAvailable()
+                + "\naiClinicalDataAccessRequested="
+                + result.clinicalDataAccessRequested()
+                + "\naiClinicalDataAccessGranted="
+                + result.clinicalDataAccessGranted()
                 + "\naiClinicalDataAccessAllowed="
                 + result.clinicalDataAccessAllowed();
     }

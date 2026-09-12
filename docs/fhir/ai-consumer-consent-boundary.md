@@ -150,4 +150,6 @@ aiClinicalDataAccessAllowed=false
 
 ## Next steps outside this task
 
+Task 067 adds a deny-by-default clinical data-scope and minimization boundary over this result. See [ai-consumer-data-scope-boundary.md](ai-consumer-data-scope-boundary.md). Consent remains unimplemented.
+
 A later task may add a real consent provider or a later use-decision. That work is not Task 066. `CONSENT_NOT_IMPLEMENTED` must stay the default until those controls exist.

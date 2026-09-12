@@ -446,6 +446,58 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Allowlist 042 was not expanded
 - `.env` was not modified
 
+## Task 067 — AI consumer data scope boundary
+
+- Status: COMPLETED
+- `mvn test`: 863/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+  - `aiConsumerContract=v1`
+  - `aiConsumerStatus=READY`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+  - `aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`
+  - `aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`
+  - `aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`
+  - `aiConsumerAuthentication=NOT_AUTHENTICATED`
+  - `aiConsumerAuthorization=AUTHORIZATION_NOT_IMPLEMENTED`
+  - `aiConsumerAuthorizationAvailable=false`
+  - `aiConsumerConsent=CONSENT_NOT_IMPLEMENTED`
+  - `aiConsumerPurpose=PURPOSE_NOT_VERIFIED`
+  - `aiConsumerDataScope=DATA_SCOPE_NOT_VERIFIED`
+  - `aiConsumerConsentAvailable=false`
+  - `aiClinicalDataAccessAllowed=false`
+  - `aiConsumerClinicalDataScope=NOT_READY_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerScopeDeclared=false`
+  - `aiConsumerScopeEvaluated=false`
+  - `aiConsumerMinimizationEvaluated=false`
+  - `aiConsumerPurposeScopeAlignmentEvaluated=false`
+  - `aiClinicalDataScopeProviderConfigured=false`
+  - `aiClinicalDataScopeApprovalAvailable=false`
+  - `aiClinicalDataAccessRequested=false`
+  - `aiClinicalDataAccessGranted=false`
+- Package `lab.healthcare.fhir.aiconsumerscope` consumes only `AiConsumerConsentResult` plus a synthetic `ConsumerDataScopeContext`
+- Deny-by-default: a valid 066 result still yields `NOT_READY_FOR_CLINICAL_DATA_ACCESS`
+- Declared synthetic categories are `DATA_SCOPE_DECLARED_NOT_EVALUATED`; they are never approved
+- Query parameters and headers cannot activate clinical access
+- `scopeEvaluated=false`, `minimizationEvaluated=false`, `purposeScopeAlignmentEvaluated=false`, `clinicalDataScopeProviderConfigured=false`, `clinicalDataScopeApprovalAvailable=false`, `clinicalDataAccessRequested=false`, `clinicalDataAccessGranted=false`, `clinicalDataAccessAllowed=false`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiConsumerClinicalDataScope=NOT_READY_FOR_CLINICAL_DATA_ACCESS` and the related deny flags
+- New lab surfaces: `GET /lab/ai-consumer-data-scope`, `GET /api/ai-consumer-data-scope/v1` (Oracle-backed provider)
+- Scope rules are documented in `docs/fhir/ai-consumer-data-scope-boundary.md`
+- No Python `ai-service`, real consent provider, OAuth, JWT, SMART, LLM, RAG, HTTP dispatch, handoff, FHIR read, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
+
 
 
 
