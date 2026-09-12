@@ -149,3 +149,28 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - AgentStub is reused for contract validation; no LLM, RAG, or vendor client
 - Allowlist 042 was not expanded
 - `.env` was not modified
+
+## Task 058 — AI boundary preparation
+
+- Status: COMPLETED
+- `mvn test`: 711/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+- Package `lab.healthcare.fhir.aiboundary` copies Model Boundary Contract v1 metadata plus `DeterministicAgentResult`
+- `AiBoundaryMapper` does not call `DeterministicAgent.evaluate` or `AgentStub.observe`
+- Separated judgments: pipeline status, clinical data availability, agent decision
+- `READY` does not authorize a model: `modelCallAuthorized=false`, `modelCalled=false`, `requiresHumanReview=true`
+- MedicationRequest absence stays `NOT_REQUESTED`
+- New lab surfaces: `GET /lab/ai-boundary`, `GET /api/ai-boundary/v1` (Oracle-backed provider)
+- Epic confirmation remains `GET /epic/sandbox/fhir/clinical-projection` and now also shows `aiBoundary=PREPARED`
+- No Python `ai-service`, LLM, RAG, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified

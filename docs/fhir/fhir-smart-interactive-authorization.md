@@ -49,6 +49,8 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/epic/sandbox/fhir/clinical-projection` | after a token and Patient ID: controlled projection of status, received/retained counts, truncated, contract/stub confirmation, pipeline diagnosis, and deterministic agent verdict |
 | `http://localhost:8081/lab/deterministic-agent` | after a token and Patient ID: deterministic agent verdict (`modelCalled=false`) |
 | `http://localhost:8081/api/deterministic-agent/v1` | same verdict as JSON |
+| `http://localhost:8081/lab/ai-boundary` | after a token and Patient ID: AI boundary payload (`modelCallAuthorized=false`) |
+| `http://localhost:8081/api/ai-boundary/v1` | same payload as JSON |
 | `http://localhost:8081/smart/callback` | registered redirect; validates callback and attempts token exchange |
 | `http://localhost:8081/oracle/sandbox/fhir/patient-search` | after a token is issued: safe authenticated Patient search diagnosis |
 | `http://localhost:8081/oracle/sandbox/fhir/patient` | after a token and `ORACLE_HEALTH_SANDBOX_PATIENT_ID`: controlled Patient read diagnosis |

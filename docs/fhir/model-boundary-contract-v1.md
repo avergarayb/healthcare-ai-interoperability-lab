@@ -35,6 +35,8 @@ Task 056 may persist `TIMEOUT` on an existing collection `status`. That is an op
 
 Task 057 consumes this contract as-is. The deterministic agent does not add clinical fields or call a model.
 
+Task 058 copies the authorized contract metadata and the 057 verdict onto an AI boundary payload. It does not add clinical fields, call a model, or treat `READY` as model authorization.
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.
