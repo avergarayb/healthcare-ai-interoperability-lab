@@ -357,6 +357,8 @@ Task 056 adds a vendor-neutral pipeline diagnosis on the snapshot and projection
 
 Task 057 evaluates that same contract with a deterministic agent (`READY` / `BLOCKED` / `REQUIRES_HUMAN_REVIEW`). The projection page adds `deterministicAgent`, `agentReason`, `requiresHumanReview`, and `agentModelCalled=false`. Human review remains required. There is no LLM and no `EpicAgent`. `GET /lab/deterministic-agent` reuses the Oracle-backed contract provider.
 
+Task 058 copies that verdict onto an AI boundary (`aiBoundary=PREPARED`, `modelCallAuthorized=false`, `clinicalDataAvailable`). `READY` does not authorize a model call. New lab surfaces: `GET /lab/ai-boundary` and `GET /api/ai-boundary/v1`. There is no `ai-service` and no OpenAI client.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.

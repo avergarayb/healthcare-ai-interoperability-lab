@@ -3,6 +3,9 @@ package lab.healthcare.fhir.smart.web;
 import lab.healthcare.fhir.agent.DeterministicAgent;
 import lab.healthcare.fhir.agent.DeterministicAgentInput;
 import lab.healthcare.fhir.agent.DeterministicAgentResult;
+import lab.healthcare.fhir.aiboundary.AiBoundaryInput;
+import lab.healthcare.fhir.aiboundary.AiBoundaryResult;
+import lab.healthcare.fhir.aiboundary.AiBoundaryService;
 import lab.healthcare.fhir.agentstub.AgentStub;
 import lab.healthcare.fhir.agentstub.AgentStubObservation;
 import lab.healthcare.fhir.pipeline.PipelineDiagnoses;
@@ -118,6 +121,7 @@ public final class SmartLabPages {
                   <li>A machine consumer uses <code>GET /api/model-boundary/v1</code> for the exact v1 JSON contract. That is not this HTML page and not an agent.</li>
                   <li>Then open <a href="/lab/agent-stub">/lab/agent-stub</a> for the contract-consuming stub. The page shows only observation counts and <code>modelCalled=false</code>. JSON: <code>GET /api/agent-stub/v1</code>.</li>
                   <li>Then open <a href="/lab/deterministic-agent">/lab/deterministic-agent</a> for the deterministic boundary agent. The page shows only the verdict, reason, pipeline status, and warning codes. JSON: <code>GET /api/deterministic-agent/v1</code>.</li>
+                  <li>Then open <a href="/lab/ai-boundary">/lab/ai-boundary</a> for the AI boundary payload. The page shows only pipeline, agent decision, clinical availability, and <code>modelCallAuthorized=false</code>. JSON: <code>GET /api/ai-boundary/v1</code>.</li>
                   <li>Epic sandbox SMART (Task 046) starts at <a href="/epic/sandbox/smart/start">/epic/sandbox/smart/start</a>. It issues a token only. It does not read Patient.</li>
                   <li>Epic public capability discovery (Task 047) is <a href="/epic/sandbox/fhir/capabilities">/epic/sandbox/fhir/capabilities</a>. It does not use the SMART token and does not read Patient.</li>
                   <li>With a SMART token and <code>EPIC_SANDBOX_PATIENT_ID</code> set, open
@@ -395,6 +399,8 @@ public final class SmartLabPages {
         PipelineDiagnosis diagnosis = PipelineDiagnoses.fromProjection(result);
         DeterministicAgentResult agent =
                 DeterministicAgent.evaluate(DeterministicAgentInput.of(contract, diagnosis));
+        AiBoundaryResult aiBoundary =
+                AiBoundaryService.prepare(AiBoundaryInput.of(contract, diagnosis, agent));
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -445,7 +451,9 @@ public final class SmartLabPages {
                                         + "\n"
                                         + pipelineLines(diagnosis)
                                         + "\n"
-                                        + agentLines(agent)),
+                                        + agentLines(agent)
+                                        + "\n"
+                                        + aiBoundaryLines(aiBoundary)),
                                 extra));
     }
 
@@ -457,6 +465,28 @@ public final class SmartLabPages {
                 <pre>%s</pre>
                 """
                         .formatted(escape(agentLines(result))));
+    }
+
+    public static String aiBoundary(AiBoundaryResult result) {
+        return page(
+                "AI boundary",
+                """
+                <p>Controlled AI boundary payload. No token, Patient ID, projected values, FHIR JSON, or model output are shown. READY does not authorize a model call.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(aiBoundaryLines(result))));
+    }
+
+    private static String aiBoundaryLines(AiBoundaryResult result) {
+        return "aiBoundary=PREPARED"
+                + "\nclinicalDataAvailable="
+                + result.decision().clinicalDataAvailable()
+                + "\nmodelCallAuthorized="
+                + result.decision().modelCallAuthorized()
+                + "\naiModelCalled="
+                + result.decision().modelCalled()
+                + "\nmedicationRequestsStatus="
+                + result.medicationRequestsStatus();
     }
 
     private static String agentLines(DeterministicAgentResult result) {
