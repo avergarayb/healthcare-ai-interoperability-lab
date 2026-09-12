@@ -84,3 +84,16 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - No `EpicAgentStub`, `OracleAgentStub`, LLM, or real agent was added
 - Allowlist 042 was not expanded
 - `.env` was not modified
+
+## Task 055 — Oracle/Epic contract compatibility
+
+- Status: IMPLEMENTED (pending live)
+- Shared v1 invariants are documented in `docs/fhir/model-boundary-contract-v1.md`
+- Allowed difference: Epic `MedicationRequest=null`; Oracle may include MedicationRequest
+- Same `AgentStub` consumes both destinations; no `if Epic` / `if Oracle` in mapper or stub
+- Shared tests: `OracleEpicContractCompatibilityTest` and assembler retention for both contents
+- `GET /api/model-boundary/v1` and `GET /lab/agent-stub` stay Oracle-backed
+- Epic laboratory confirmation remains `GET /epic/sandbox/fhir/clinical-projection`
+- Allowlist 042 was not expanded; MedicationRequest was not added to Epic
+- No LLM or real agent was added
+- `.env` was not modified

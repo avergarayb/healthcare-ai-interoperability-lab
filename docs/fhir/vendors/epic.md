@@ -351,6 +351,8 @@ Task 053 maps the Epic projection onto the v1 model boundary and the generic `Ag
 
 `GET /api/model-boundary/v1` and `GET /lab/agent-stub` remain the Oracle-backed machine surfaces. Epic confirmation stays on the Task 053 projection page.
 
+Task 055 compares that Epic contract with Oracle using the same v1 invariants. The only allowed content gap is omitted MedicationRequest. See [model-boundary-contract-v1.md](../model-boundary-contract-v1.md).
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.
