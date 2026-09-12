@@ -5,6 +5,7 @@ import lab.healthcare.fhir.capability.FhirInteraction;
 import lab.healthcare.fhir.capability.FhirServerCapabilities;
 import lab.healthcare.fhir.patient.PatientContextSource;
 import lab.healthcare.fhir.routing.RoutingService;
+import lab.healthcare.fhir.snapshot.ClinicalSnapshotContents;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotResourceStatus;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotStatuses;
@@ -23,8 +24,9 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * Sequential fetch plus application retention and allowlist mapping. Does not
- * keep unused Bundle entries or invent Oracle-specific models.
+ * Sequential fetch plus application retention and allowlist mapping. Vendor
+ * adapters choose {@link ClinicalSnapshotContents}; this assembler does not
+ * switch on vendor. Does not keep unused Bundle entries.
  */
 @Component
 public class ClinicalProjectionAssembler {
@@ -52,6 +54,16 @@ public class ClinicalProjectionAssembler {
             AccessTokenProvider tokenProvider,
             String patientId,
             FhirServerCapabilities capabilities) {
+        return assemble(
+                destination, tokenProvider, patientId, capabilities, ClinicalSnapshotContents.allCollections());
+    }
+
+    public ClinicalProjectionResult assemble(
+            String destination,
+            AccessTokenProvider tokenProvider,
+            String patientId,
+            FhirServerCapabilities capabilities,
+            ClinicalSnapshotContents contents) {
         if (destination == null || destination.isBlank()) {
             throw new IllegalArgumentException("Destination must be provided");
         }
@@ -63,6 +75,9 @@ public class ClinicalProjectionAssembler {
         }
         if (capabilities == null) {
             throw new IllegalArgumentException("Runtime capabilities must be provided");
+        }
+        if (contents == null) {
+            throw new IllegalArgumentException("Clinical snapshot contents must be provided");
         }
         String dest = destination.trim();
         Instant generatedAt = Instant.now(clock);
@@ -86,15 +101,19 @@ public class ClinicalProjectionAssembler {
                 "DiagnosticReport",
                 () -> routingService.searchDiagnosticReports(dest, tokenProvider, patientId),
                 ClinicalProjectionMapper::diagnosticReport);
-        ProjectedCollection<RetainedMedicationRequest> medicationRequests = project(
-                capabilities,
-                "MedicationRequest",
-                () -> routingService.searchMedicationRequests(dest, tokenProvider, patientId),
-                ClinicalProjectionMapper::medicationRequest);
-        boolean complete = conditions.status() == ClinicalSnapshotResourceStatus.SUCCESS
+        ProjectedCollection<RetainedMedicationRequest> medicationRequests = contents.includeMedicationRequests()
+                ? project(
+                        capabilities,
+                        "MedicationRequest",
+                        () -> routingService.searchMedicationRequests(dest, tokenProvider, patientId),
+                        ClinicalProjectionMapper::medicationRequest)
+                : null;
+        boolean collectionsOk = conditions.status() == ClinicalSnapshotResourceStatus.SUCCESS
                 && observations.status() == ClinicalSnapshotResourceStatus.SUCCESS
-                && diagnosticReports.status() == ClinicalSnapshotResourceStatus.SUCCESS
-                && medicationRequests.status() == ClinicalSnapshotResourceStatus.SUCCESS;
+                && diagnosticReports.status() == ClinicalSnapshotResourceStatus.SUCCESS;
+        boolean complete = collectionsOk
+                && (!contents.includeMedicationRequests()
+                        || medicationRequests.status() == ClinicalSnapshotResourceStatus.SUCCESS);
         return new ClinicalProjectionResult(
                 complete
                         ? ClinicalSnapshotOutcome.SNAPSHOT_COMPLETE

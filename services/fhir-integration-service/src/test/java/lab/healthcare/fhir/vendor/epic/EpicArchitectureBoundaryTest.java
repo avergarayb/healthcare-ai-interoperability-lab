@@ -78,6 +78,10 @@ class EpicArchitectureBoundaryTest {
         assertThat(text).doesNotContain("class EpicDiagnosticReportSearch");
         assertThat(text).doesNotContain("EpicSnapshotClient");
         assertThat(text).doesNotContain("class EpicClinicalSnapshot");
+        assertThat(text).doesNotContain("EpicProjectionClient");
+        assertThat(text).doesNotContain("EpicControlledProjection");
+        assertThat(text).doesNotContain("EpicModelBoundaryService");
+        assertThat(text).doesNotContain("EpicModelBoundaryClient");
         assertThat(text).doesNotContain("org.hl7.fhir.r4.model.CapabilityStatement");
         assertThat(text).doesNotContain("org.hl7.fhir.r4.model.Patient");
         assertThat(text).doesNotContain("org.hl7.fhir.r4.model.Condition");

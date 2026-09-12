@@ -7,6 +7,7 @@ import lab.healthcare.fhir.capability.FhirServerCapabilities;
 import lab.healthcare.fhir.exception.FhirClientException;
 import lab.healthcare.fhir.patient.PatientContextSource;
 import lab.healthcare.fhir.routing.RoutingService;
+import lab.healthcare.fhir.snapshot.ClinicalSnapshotContents;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotResourceStatus;
 
@@ -188,6 +189,32 @@ class ClinicalProjectionAssemblerTest {
         assertThat(result.patientStatus()).isEqualTo(ClinicalSnapshotResourceStatus.UNAVAILABLE);
         verify(routingService, never()).readPatient(any(), any(), any());
         verify(routingService, never()).searchConditions(any(), any(), any());
+    }
+
+    @Test
+    void withoutMedicationRequestsIsCompleteAndDoesNotSearchThatCollection() {
+        when(routingService.readPatient(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(patient());
+        when(routingService.searchConditions(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(conditions(2));
+        when(routingService.searchObservations(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(new Bundle());
+        when(routingService.searchDiagnosticReports(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(reports(1));
+
+        ClinicalProjectionResult result = assembler()
+                .assemble(
+                        DEST,
+                        token(),
+                        PATIENT_ID,
+                        allSupported(),
+                        ClinicalSnapshotContents.withoutMedicationRequests());
+
+        assertThat(result.outcome()).isEqualTo(ClinicalSnapshotOutcome.SNAPSHOT_COMPLETE);
+        assertThat(result.patientStatus()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
+        assertThat(result.conditions().status()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
+        assertThat(result.observations().status()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
+        assertThat(result.diagnosticReports().status()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
+        assertThat(result.medicationRequests()).isNull();
+        assertThat(result.toString()).doesNotContain(PATIENT_ID);
+        assertThat(result.toString()).doesNotContain(SECRET);
+        verify(routingService, never()).searchMedicationRequests(any(), any(), any());
     }
 
     private ClinicalProjectionAssembler assembler() {
