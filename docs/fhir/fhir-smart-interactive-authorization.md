@@ -67,6 +67,8 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/api/ai-consumer-authorization/v1` | same consumer-authorization verdict as JSON |
 | `http://localhost:8081/lab/ai-consumer-consent` | after a token and Patient ID: AI consumer consent (`CONSENT_NOT_IMPLEMENTED`) |
 | `http://localhost:8081/api/ai-consumer-consent/v1` | same consent verdict as JSON |
+| `http://localhost:8081/lab/ai-consumer-data-scope` | after a token and Patient ID: AI consumer data scope (`NOT_READY_FOR_CLINICAL_DATA_ACCESS`) |
+| `http://localhost:8081/api/ai-consumer-data-scope/v1` | same data-scope verdict as JSON |
 | `http://localhost:8081/smart/callback` | registered redirect; validates callback and attempts token exchange |
 | `http://localhost:8081/oracle/sandbox/fhir/patient-search` | after a token is issued: safe authenticated Patient search diagnosis |
 | `http://localhost:8081/oracle/sandbox/fhir/patient` | after a token and `ORACLE_HEALTH_SANDBOX_PATIENT_ID`: controlled Patient read diagnosis |

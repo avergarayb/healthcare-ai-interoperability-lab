@@ -106,6 +106,19 @@ class EpicSandboxClinicalProjectionControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("aiConsumerDataScope=DATA_SCOPE_NOT_VERIFIED")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("aiConsumerConsentAvailable=false")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("aiClinicalDataAccessAllowed=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiConsumerClinicalDataScope=NOT_READY_FOR_CLINICAL_DATA_ACCESS")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("aiConsumerScopeDeclared=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("aiConsumerScopeEvaluated=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("aiConsumerMinimizationEvaluated=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiConsumerPurposeScopeAlignmentEvaluated=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiClinicalDataScopeProviderConfigured=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiClinicalDataScopeApprovalAvailable=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("aiClinicalDataAccessRequested=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("aiClinicalDataAccessGranted=false")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("access_token"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"resourceType\""))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("active"))))
