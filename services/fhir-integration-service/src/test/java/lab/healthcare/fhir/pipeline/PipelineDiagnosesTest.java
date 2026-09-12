@@ -167,6 +167,25 @@ class PipelineDiagnosesTest {
     }
 
     @Test
+    void authenticationRequiredContractIsAuthenticationFailed() {
+        PipelineDiagnosis diagnosis = PipelineDiagnoses.fromContract(new ModelBoundaryContract(
+                "v1",
+                "epic-sandbox",
+                null,
+                null,
+                ClinicalSnapshotOutcome.AUTHENTICATION_REQUIRED,
+                null,
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(diagnosis.overall()).isEqualTo(PipelineStageStatus.AUTHENTICATION_FAILED);
+        assertThat(diagnosis.usable()).isFalse();
+        assertThat(diagnosis.contractValid()).isFalse();
+    }
+
+    @Test
     void authenticationRequiredIsAuthenticationFailed() {
         PipelineDiagnosis diagnosis =
                 PipelineDiagnoses.fromProjection(ClinicalProjectionResult.authenticationRequired(

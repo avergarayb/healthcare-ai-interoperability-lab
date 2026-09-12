@@ -355,6 +355,8 @@ Task 055 compares that Epic contract with Oracle using the same v1 invariants. T
 
 Task 056 adds a vendor-neutral pipeline diagnosis on the snapshot and projection pages (`pipelineStatus`, `contractValid`, `usable`, and per-stage statuses). Omitted MedicationRequest is `NOT_REQUESTED`, not a provider error. Timeout on a non-critical collection is `PARTIAL` and remains usable. Logs use `SafePipelineLog` and never include tokens, Patient IDs, or FHIR JSON.
 
+Task 057 evaluates that same contract with a deterministic agent (`READY` / `BLOCKED` / `REQUIRES_HUMAN_REVIEW`). The projection page adds `deterministicAgent`, `agentReason`, `requiresHumanReview`, and `agentModelCalled=false`. Human review remains required. There is no LLM and no `EpicAgent`. `GET /lab/deterministic-agent` reuses the Oracle-backed contract provider.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.
