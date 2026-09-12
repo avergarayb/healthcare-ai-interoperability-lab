@@ -330,3 +330,39 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Allowlist 042 was not expanded
 - `.env` was not modified
 
+## Task 064 — AI handoff authorization boundary
+
+- Status: COMPLETED
+- `mvn test`: 812/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+  - `aiConsumerContract=v1`
+  - `aiConsumerStatus=READY`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+  - `aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`
+  - `aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`
+  - `aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`
+- Package `lab.healthcare.fhir.aihandoffauthorization` consumes only `AiConsumerReadinessResult`
+- Deny-by-default: `READY_FOR_FUTURE_HANDOFF` still yields `HANDOFF_NOT_AUTHORIZED` / `REAL_AUTHORIZATION_NOT_IMPLEMENTED`
+- Query parameters and headers cannot activate authorization
+- Inconsistent execution flags are detected and blocked; they are not silently corrected
+- `externalAuthorizationAvailable=false`, `handoffAuthorized=false`, `dispatchPerformed=false`, `modelCallAuthorized=false`, `modelCalled=false`, `processingStatus=NOT_EXECUTED`, `dispatchStatus=NOT_DISPATCHED`, `requiresHumanReview=true`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`
+- New lab surfaces: `GET /lab/ai-handoff-authorization`, `GET /api/ai-handoff-authorization/v1` (Oracle-backed provider)
+- Authorization rules are documented in `docs/fhir/ai-handoff-authorization-boundary.md`
+- No Python `ai-service`, real OAuth, JWT, LLM, RAG, HTTP dispatch, handoff, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
+
+
