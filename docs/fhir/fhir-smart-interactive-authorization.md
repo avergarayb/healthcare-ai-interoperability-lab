@@ -46,13 +46,15 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/epic/sandbox/fhir/observation-search` | after a token and Patient ID: safe authenticated Observation search by Patient |
 | `http://localhost:8081/epic/sandbox/fhir/diagnostic-report-search` | after a token and Patient ID: safe authenticated DiagnosticReport search by Patient |
 | `http://localhost:8081/epic/sandbox/fhir/clinical-snapshot` | after a token and Patient ID: controlled snapshot of status and counts |
-| `http://localhost:8081/epic/sandbox/fhir/clinical-projection` | after a token and Patient ID: controlled projection of status, received/retained counts, truncated, contract/stub confirmation, pipeline diagnosis, deterministic agent verdict, AI boundary, and first AI component |
+| `http://localhost:8081/epic/sandbox/fhir/clinical-projection` | after a token and Patient ID: controlled projection of status, received/retained counts, truncated, contract/stub confirmation, pipeline diagnosis, deterministic agent verdict, AI boundary, first AI component, and execution gate |
 | `http://localhost:8081/lab/deterministic-agent` | after a token and Patient ID: deterministic agent verdict (`modelCalled=false`) |
 | `http://localhost:8081/api/deterministic-agent/v1` | same verdict as JSON |
 | `http://localhost:8081/lab/ai-boundary` | after a token and Patient ID: AI boundary payload (`modelCallAuthorized=false`) |
 | `http://localhost:8081/api/ai-boundary/v1` | same payload as JSON |
 | `http://localhost:8081/lab/first-ai-component` | after a token and Patient ID: first isolated AI component (`processingStatus=NOT_EXECUTED`) |
 | `http://localhost:8081/api/first-ai-component/v1` | same result as JSON |
+| `http://localhost:8081/lab/ai-execution-gate` | after a token and Patient ID: AI execution gate (`ELIGIBLE_BUT_NOT_AUTHORIZED`) |
+| `http://localhost:8081/api/ai-execution-gate/v1` | same decision as JSON |
 | `http://localhost:8081/smart/callback` | registered redirect; validates callback and attempts token exchange |
 | `http://localhost:8081/oracle/sandbox/fhir/patient-search` | after a token is issued: safe authenticated Patient search diagnosis |
 | `http://localhost:8081/oracle/sandbox/fhir/patient` | after a token and `ORACLE_HEALTH_SANDBOX_PATIENT_ID`: controlled Patient read diagnosis |

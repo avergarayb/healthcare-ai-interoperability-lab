@@ -361,6 +361,8 @@ Task 058 copies that verdict onto an AI boundary (`aiBoundary=PREPARED`, `modelC
 
 Task 059 consumes that boundary in an isolated first AI component (`firstAiComponent=PREPARED`, `aiProcessingStatus=NOT_EXECUTED`). The component copies `AiBoundaryResult` only. It does not call a model, invent clinical output, or treat `READY` as authorization. New lab surfaces: `GET /lab/first-ai-component` and `GET /api/first-ai-component/v1`. Epic confirmation remains `GET /epic/sandbox/fhir/clinical-projection`.
 
+Task 060 evaluates that first AI result with a local execution gate (`aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`). Eligibility is not model authorization. Premature `modelCallAuthorized=true` is rejected, not normalized. New lab surfaces: `GET /lab/ai-execution-gate` and `GET /api/ai-execution-gate/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.

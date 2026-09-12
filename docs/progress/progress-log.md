@@ -200,3 +200,32 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - No Python `ai-service`, LLM, RAG, LangGraph, or vendor client was added
 - Allowlist 042 was not expanded
 - `.env` was not modified
+
+## Task 060 — AI execution gate
+
+- Status: COMPLETED
+- `mvn test`: 740/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+- Package `lab.healthcare.fhir.aigateway` consumes only `FirstAiResult`
+- `AiExecutionMapper` / `AiExecutionGate` do not call `DeterministicAgent.evaluate` or `AgentStub.observe`
+- `READY` + `PREPARED` + clinical data is `ELIGIBLE_BUT_NOT_AUTHORIZED`; that is not model permission
+- Premature `modelCallAuthorized=true` is rejected with `PREMATURE_MODEL_AUTHORIZATION`, not normalized to `false`
+- `modelCalled=false`, `modelCallAuthorized=false`, `processingStatus=NOT_EXECUTED`, `requiresHumanReview=true`
+- MedicationRequest absence stays `NOT_REQUESTED`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+- New lab surfaces were required because `/lab/first-ai-component` exposes the first AI result, not the gate: `GET /lab/ai-execution-gate`, `GET /api/ai-execution-gate/v1` (Oracle-backed provider)
+- No Python `ai-service`, LLM, RAG, LangGraph, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
