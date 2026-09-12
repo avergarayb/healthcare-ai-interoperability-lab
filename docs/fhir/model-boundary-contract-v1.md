@@ -43,6 +43,8 @@ Task 060 evaluates the first AI result with an execution gate. Eligibility is no
 
 Task 061 copies that gate verdict onto an internal AI Consumer Contract v1. It does not add clinical fields, dispatch the contract, or change `modelCallAuthorized=false`. See [ai-consumer-contract-v1.md](ai-consumer-contract-v1.md).
 
+Task 062 adds a synthetic consumer policy over that contract. It does not add clinical fields, dispatch, or authorize a model. See [ai-consumer-policy.md](ai-consumer-policy.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.

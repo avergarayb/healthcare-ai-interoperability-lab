@@ -95,6 +95,7 @@ class EpicSandboxClinicalProjectionControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("aiConsumerContract=v1")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("aiConsumerStatus=READY")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("aiDispatchStatus=NOT_DISPATCHED")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("access_token"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"resourceType\""))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("active"))))

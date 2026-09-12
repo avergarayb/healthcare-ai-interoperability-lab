@@ -262,3 +262,37 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - No Python `ai-service`, LLM, RAG, LangGraph, HTTP dispatch, or vendor client was added
 - Allowlist 042 was not expanded
 - `.env` was not modified
+
+## Task 062 — AI consumer policy
+
+- Status: COMPLETED
+- `mvn test`: 774/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+  - `aiConsumerContract=v1`
+  - `aiConsumerStatus=READY`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+  - `aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`
+- Package `lab.healthcare.fhir.aiconsumerpolicy` consumes only `AiConsumerContract` plus synthetic consumer metadata
+- Obligatory human review that blocks consumption is `contractStatus=REQUIRES_HUMAN_REVIEW`; the boolean `requiresHumanReview=true` stays copied and does not by itself block `ALLOWED_FOR_FUTURE_CONSUMPTION`
+- Allowed future consumption is not dispatch and not model authorization
+- Premature `modelCallAuthorized=true` remains rejected at the 061 contract constructor
+- `DISPATCH_TO_AI_SERVICE` is `DISPATCH_NOT_SUPPORTED`; other non-read operations are `OPERATION_NOT_ALLOWED`
+- `modelCalled=false`, `modelCallAuthorized=false`, `processingStatus=NOT_EXECUTED`, `dispatchStatus=NOT_DISPATCHED`, `requiresHumanReview=true`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`
+- New lab surfaces: `GET /lab/ai-consumer-policy`, `GET /api/ai-consumer-policy/v1` (Oracle-backed provider, synthetic `lab-consumer`)
+- Policy rules are documented in `docs/fhir/ai-consumer-policy.md`
+- No Python `ai-service`, real OAuth, LLM, RAG, HTTP dispatch, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
