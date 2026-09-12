@@ -1,6 +1,6 @@
 # Epic integration profile
 
-Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 049 searches `Condition` for that configured Patient. Task 050 searches `Observation` the same way. Task 051 searches `DiagnosticReport` the same way. It does **not** search Patient or assemble a snapshot.
+Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 049 searches `Condition` for that configured Patient. Task 050 searches `Observation` the same way. Task 051 searches `DiagnosticReport` the same way. Task 052 assembles those operations into a controlled clinical snapshot of status and counts. It does **not** search Patient as a replacement for configured context, and it does **not** include MedicationRequest.
 
 Read this after [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md) and [fhir-server-configuration.md](../fhir-server-configuration.md).
 
@@ -282,6 +282,39 @@ GET /DiagnosticReport?patient={id}&_count=5
 | `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
 
 Lab page: `GET /epic/sandbox/fhir/diagnostic-report-search` after SMART login **and** a configured Patient ID. It returns only the diagnosis (no token, no Patient ID, no DiagnosticReport JSON, no codes or results).
+
+## Controlled clinical snapshot (Task 052)
+
+After Task 051, the laboratory sequences the already-demonstrated Epic operations through the generic `ClinicalSnapshotAssembler`. MedicationRequest is omitted from this snapshot.
+
+```text
+configured Patient ID
+        +
+usable SMART token (Task 046)
+        +
+one Task 047 CapabilityStatement
+        ↓
+ClinicalSnapshotAssembler
+        (Patient READ, Condition / Observation / DiagnosticReport SEARCH_TYPE)
+        ↓
+status + counts only
+```
+
+The assembler stays vendor-neutral. Epic selects `ClinicalSnapshotContents.withoutMedicationRequests()`; Oracle continues to include MedicationRequest. There is no `if Epic` in `FhirService` or the assembler. Capability discovery uses the existing Task 047 path, not `RoutingService.discoverCapabilities("epic-sandbox")`.
+
+Execution is sequential. A Patient failure is `SNAPSHOT_UNAVAILABLE` and skips collections. Collection failures stay isolated (`SNAPSHOT_PARTIAL`). Empty Bundles are `SUCCESS` with `count=0`. `_count=5` remains a request, not a retention ceiling.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `SNAPSHOT_COMPLETE` | Patient, Condition, Observation, and DiagnosticReport are `SUCCESS` |
+| `SNAPSHOT_PARTIAL` | Patient is `SUCCESS` and at least one included collection is not |
+| `SNAPSHOT_UNAVAILABLE` | Patient could not be established — no collection HTTP |
+| `PATIENT_CONTEXT_NOT_CONFIGURED` | No sandbox Patient ID — zero clinical HTTP |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) |
+
+Lab page: `GET /epic/sandbox/fhir/clinical-snapshot` after SMART login **and** a configured Patient ID. HTTP 200 for complete **and** partial. The page does not show Patient ID, token, or clinical JSON.
 
 ## Architecture rules
 

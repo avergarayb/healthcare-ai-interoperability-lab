@@ -8,6 +8,9 @@ import lab.healthcare.fhir.routing.FhirObservationSearchOutcome;
 import lab.healthcare.fhir.routing.FhirObservationSearchResult;
 import lab.healthcare.fhir.routing.FhirPatientReadOutcome;
 import lab.healthcare.fhir.routing.FhirPatientReadResult;
+import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
+import lab.healthcare.fhir.snapshot.ClinicalSnapshotResourceStatus;
+import lab.healthcare.fhir.snapshot.ClinicalSnapshotResult;
 import lab.healthcare.fhir.smart.SmartAuthorizationStart;
 import lab.healthcare.fhir.smart.SmartTokenExchangeDiagnosis;
 import lab.healthcare.fhir.smart.SmartTokenExchangeResult;
@@ -112,6 +115,8 @@ public final class SmartLabPages {
                   for a safe authenticated Observation search. The page does not show Observation JSON.</li>
                   <li>Then open <a href="/epic/sandbox/fhir/diagnostic-report-search">/epic/sandbox/fhir/diagnostic-report-search</a>
                   for a safe authenticated DiagnosticReport search. The page does not show DiagnosticReport JSON.</li>
+                  <li>Then open <a href="/epic/sandbox/fhir/clinical-snapshot">/epic/sandbox/fhir/clinical-snapshot</a>
+                  for a controlled clinical snapshot. The page shows only status and counts.</li>
                 </ol>
                 """);
     }
@@ -138,6 +143,8 @@ public final class SmartLabPages {
                   for a safe authenticated Observation search. The page does not show Observation JSON.</li>
                   <li>Then open <a href="/epic/sandbox/fhir/diagnostic-report-search">/epic/sandbox/fhir/diagnostic-report-search</a>
                   for a safe authenticated DiagnosticReport search. The page does not show DiagnosticReport JSON.</li>
+                  <li>Then open <a href="/epic/sandbox/fhir/clinical-snapshot">/epic/sandbox/fhir/clinical-snapshot</a>
+                  for a controlled clinical snapshot. The page shows only status and counts.</li>
                 </ol>
                 """);
     }
@@ -293,6 +300,72 @@ public final class SmartLabPages {
                                         + "\nhasEntries="
                                         + result.hasEntries()),
                                 extra));
+    }
+
+    public static String epicClinicalSnapshot(ClinicalSnapshotResult result) {
+        boolean succeeded = result.outcome() == ClinicalSnapshotOutcome.SNAPSHOT_COMPLETE
+                || result.outcome() == ClinicalSnapshotOutcome.SNAPSHOT_PARTIAL;
+        String snapshot = switch (result.outcome()) {
+            case SNAPSHOT_COMPLETE -> "SUCCEEDED";
+            case SNAPSHOT_PARTIAL -> "PARTIAL";
+            default -> result.outcome().name();
+        };
+        boolean hasClinicalData = positive(result.conditionCount())
+                || positive(result.observationCount())
+                || positive(result.diagnosticReportCount());
+        String extra = result.detail() == null || result.detail().isBlank()
+                ? ""
+                : "<p>detail=" + escape(result.detail()) + "</p>";
+        return page(
+                "Epic sandbox controlled clinical snapshot",
+                """
+                <p>Controlled clinical snapshot by the configured Patient. No token, Patient ID, or FHIR JSON are shown.</p>
+                <pre>%s</pre>
+                %s
+                """
+                        .formatted(
+                                escape("status="
+                                        + (succeeded ? "SUCCESS" : "FAILED")
+                                        + "\nhttpStatus="
+                                        + (succeeded ? "200" : "")
+                                        + "\ndestination="
+                                        + nullToEmpty(result.destination())
+                                        + "\nclinicalSnapshot="
+                                        + snapshot
+                                        + "\npatientRead="
+                                        + statusName(result.patientStatus())
+                                        + "\nconditionSearch="
+                                        + statusName(result.conditionStatus())
+                                        + "\nobservationSearch="
+                                        + statusName(result.observationStatus())
+                                        + "\ndiagnosticReportSearch="
+                                        + statusName(result.diagnosticReportStatus())
+                                        + "\nhasClinicalData="
+                                        + hasClinicalData
+                                        + "\ncontextSource="
+                                        + (result.contextSource() == null ? "" : result.contextSource().name())
+                                        + "\nconditionCount="
+                                        + nullToEmptyCount(result.conditionCount())
+                                        + "\nobservationCount="
+                                        + nullToEmptyCount(result.observationCount())
+                                        + "\ndiagnosticReportCount="
+                                        + nullToEmptyCount(result.diagnosticReportCount())),
+                                extra));
+    }
+
+    private static boolean positive(Integer count) {
+        return count != null && count > 0;
+    }
+
+    private static String statusName(ClinicalSnapshotResourceStatus status) {
+        if (status == null) {
+            return "";
+        }
+        return status == ClinicalSnapshotResourceStatus.SUCCESS ? "SUCCEEDED" : status.name();
+    }
+
+    private static String nullToEmptyCount(Integer count) {
+        return count == null ? "" : count.toString();
     }
 
     private static String nullToEmpty(String value) {
