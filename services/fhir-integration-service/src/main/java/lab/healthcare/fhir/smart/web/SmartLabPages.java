@@ -1,5 +1,12 @@
 package lab.healthcare.fhir.smart.web;
 
+import lab.healthcare.fhir.agentstub.AgentStub;
+import lab.healthcare.fhir.agentstub.AgentStubObservation;
+import lab.healthcare.fhir.modelboundary.ModelBoundaryContract;
+import lab.healthcare.fhir.modelboundary.ModelBoundaryContractVersion;
+import lab.healthcare.fhir.modelboundary.ModelBoundaryMapper;
+import lab.healthcare.fhir.projection.ClinicalProjectionResult;
+import lab.healthcare.fhir.projection.ProjectedCollection;
 import lab.healthcare.fhir.routing.FhirConditionSearchOutcome;
 import lab.healthcare.fhir.routing.FhirConditionSearchResult;
 import lab.healthcare.fhir.routing.FhirDiagnosticReportSearchOutcome;
@@ -117,6 +124,9 @@ public final class SmartLabPages {
                   for a safe authenticated DiagnosticReport search. The page does not show DiagnosticReport JSON.</li>
                   <li>Then open <a href="/epic/sandbox/fhir/clinical-snapshot">/epic/sandbox/fhir/clinical-snapshot</a>
                   for a controlled clinical snapshot. The page shows only status and counts.</li>
+                  <li>Then open <a href="/epic/sandbox/fhir/clinical-projection">/epic/sandbox/fhir/clinical-projection</a>
+                  for a controlled projection. The page shows only status, received/retained counts, truncated, and
+                  contract/stub confirmation. It does not show projected field values.</li>
                 </ol>
                 """);
     }
@@ -145,6 +155,9 @@ public final class SmartLabPages {
                   for a safe authenticated DiagnosticReport search. The page does not show DiagnosticReport JSON.</li>
                   <li>Then open <a href="/epic/sandbox/fhir/clinical-snapshot">/epic/sandbox/fhir/clinical-snapshot</a>
                   for a controlled clinical snapshot. The page shows only status and counts.</li>
+                  <li>Then open <a href="/epic/sandbox/fhir/clinical-projection">/epic/sandbox/fhir/clinical-projection</a>
+                  for a controlled projection. The page shows only status, received/retained counts, truncated, and
+                  contract/stub confirmation. It does not show projected field values.</li>
                 </ol>
                 """);
     }
@@ -351,6 +364,100 @@ public final class SmartLabPages {
                                         + "\ndiagnosticReportCount="
                                         + nullToEmptyCount(result.diagnosticReportCount())),
                                 extra));
+    }
+
+    public static String epicClinicalProjection(ClinicalProjectionResult result) {
+        ModelBoundaryContract contract = ModelBoundaryMapper.from(result);
+        AgentStubObservation stub = AgentStub.observe(contract);
+        boolean succeeded = result.outcome() == ClinicalSnapshotOutcome.SNAPSHOT_COMPLETE
+                || result.outcome() == ClinicalSnapshotOutcome.SNAPSHOT_PARTIAL;
+        String pipeline = switch (result.outcome()) {
+            case SNAPSHOT_COMPLETE -> "SUCCEEDED";
+            case SNAPSHOT_PARTIAL -> "PARTIAL";
+            default -> result.outcome().name();
+        };
+        boolean contractOk = ModelBoundaryContractVersion.V1.equals(contract.contractVersion());
+        String modelBoundary = succeeded && contractOk ? pipeline : result.outcome().name();
+        String agentStub = succeeded && stub.consumed() && !stub.modelCalled() ? pipeline : result.outcome().name();
+        boolean hasClinicalData = retainedPositive(result.conditions())
+                || retainedPositive(result.observations())
+                || retainedPositive(result.diagnosticReports());
+        String extra = result.detail() == null || result.detail().isBlank()
+                ? ""
+                : "<p>detail=" + escape(result.detail()) + "</p>";
+        return page(
+                "Epic sandbox controlled clinical projection",
+                """
+                <p>Controlled clinical projection by the configured Patient. No token, Patient ID, projected values, or FHIR JSON are shown.</p>
+                <pre>%s</pre>
+                %s
+                """
+                        .formatted(
+                                escape("status="
+                                        + (succeeded ? "SUCCESS" : "FAILED")
+                                        + "\nhttpStatus="
+                                        + (succeeded ? "200" : "")
+                                        + "\ndestination="
+                                        + nullToEmpty(result.destination())
+                                        + "\nclinicalSnapshot="
+                                        + pipeline
+                                        + "\ncontrolledProjection="
+                                        + pipeline
+                                        + "\nmodelBoundaryContract="
+                                        + contract.contractVersion()
+                                        + "\nmodelBoundary="
+                                        + modelBoundary
+                                        + "\nagentStub="
+                                        + agentStub
+                                        + "\nsensitiveFieldsExposed=false"
+                                        + "\nrawFhirExposed=false"
+                                        + "\npatientRead="
+                                        + statusName(result.patientStatus())
+                                        + "\nconditionSearch="
+                                        + collectionStatus(result.conditions())
+                                        + "\nobservationSearch="
+                                        + collectionStatus(result.observations())
+                                        + "\ndiagnosticReportSearch="
+                                        + collectionStatus(result.diagnosticReports())
+                                        + "\nhasClinicalData="
+                                        + hasClinicalData
+                                        + "\ncontextSource="
+                                        + (result.contextSource() == null ? "" : result.contextSource().name())
+                                        + "\n"
+                                        + collectionLine("conditions", result.conditions())
+                                        + "\n"
+                                        + collectionLine("observations", result.observations())
+                                        + "\n"
+                                        + collectionLine("diagnosticReports", result.diagnosticReports())),
+                                extra));
+    }
+
+    private static boolean retainedPositive(ProjectedCollection<?> collection) {
+        return collection != null && collection.retainedCount() != null && collection.retainedCount() > 0;
+    }
+
+    private static String collectionStatus(ProjectedCollection<?> collection) {
+        if (collection == null) {
+            return "";
+        }
+        return statusName(collection.status());
+    }
+
+    private static String collectionLine(String name, ProjectedCollection<?> collection) {
+        if (collection == null || collection.status() == null) {
+            return name + "ReceivedCount=\n" + name + "RetainedCount=\n" + name + "Truncated=";
+        }
+        return name
+                + "ReceivedCount="
+                + nullToEmptyCount(collection.receivedCount())
+                + "\n"
+                + name
+                + "RetainedCount="
+                + nullToEmptyCount(collection.retainedCount())
+                + "\n"
+                + name
+                + "Truncated="
+                + (collection.truncated() == null ? "" : collection.truncated().toString());
     }
 
     private static boolean positive(Integer count) {

@@ -148,6 +148,23 @@ class ModelBoundaryMapperTest {
         assertThat(contract.toString()).doesNotContain("access_token");
     }
 
+    @Test
+    void omittedMedicationRequestsRemainAbsentOnTheContract() {
+        ModelBoundaryContract contract = ModelBoundaryMapper.from(complete(
+                "epic-sandbox",
+                ProjectedCollection.retained(1, 1, false, List.of(new RetainedCondition("Condition", "active"))),
+                ProjectedCollection.retained(0, 0, false, List.of()),
+                ProjectedCollection.retained(1, 1, false, List.of(new RetainedDiagnosticReport("DiagnosticReport", "final"))),
+                null));
+
+        assertThat(contract.contractVersion()).isEqualTo(ModelBoundaryContractVersion.V1);
+        assertThat(contract.destination()).isEqualTo("epic-sandbox");
+        assertThat(contract.medicationRequests()).isNull();
+        assertThat(contract.conditions().retainedCount()).isEqualTo(1);
+        assertThat(contract.toString()).doesNotContain("active");
+        assertThat(contract.toString()).doesNotContain("final");
+    }
+
     private static ClinicalProjectionResult complete(
             String destination,
             ProjectedCollection<RetainedCondition> conditions,

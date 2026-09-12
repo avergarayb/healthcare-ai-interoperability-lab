@@ -38,3 +38,27 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - No resource-specific FHIR client was added. There is no `EpicSnapshotClient`.
 - Reused existing generic abstractions: `ClinicalSnapshotAssembler`, `RoutingService`, and `FhirService`
 - Capability discovery uses the existing Task 047 path, not `RoutingService.discoverCapabilities("epic-sandbox")`
+
+## Task 053 — Controlled projection for Epic Sandbox
+
+- Status: COMPLETED
+- Destination: `epic-sandbox`
+- Authentication: existing SMART Authorization Code + PKCE
+- Operation: generic `ClinicalProjectionAssembler` over Patient read, Condition search, Observation search (`vital-signs`), and DiagnosticReport search
+- Allowlist: exact Task 042 fields (`Patient.resourceType`, `Condition.clinicalStatusCode`, `Observation.status`, `DiagnosticReport.status`)
+- MedicationRequest is omitted (`ClinicalSnapshotContents.withoutMedicationRequests()`); absence is not rewritten as an empty collection
+- Lab page: `GET /epic/sandbox/fhir/clinical-projection`
+- The page maps the projection through `ModelBoundaryMapper` and `AgentStub.observe` without an `EpicModelBoundaryService`
+- `GET /api/model-boundary/v1` remains the Oracle-backed machine surface until Task 054
+- Epic sandbox live result:
+  - HTTP 200
+  - `clinicalSnapshot=SUCCEEDED`
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `modelBoundary=SUCCEEDED`
+  - `agentStub=SUCCEEDED`
+  - `sensitiveFieldsExposed=false`
+  - `rawFhirExposed=false`
+  - `hasClinicalData=true`
+- No resource-specific FHIR client was added. There is no `EpicProjectionClient` or `EpicControlledProjection`
+- Reused existing generic abstractions: `ClinicalProjectionAssembler`, `ClinicalProjectionMapper`, `RetentionCeiling`, `ModelBoundaryMapper`, and `AgentStub`

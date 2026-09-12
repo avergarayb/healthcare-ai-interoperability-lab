@@ -71,6 +71,7 @@ class EpicSandboxSmartInteractiveControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/condition-search")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/observation-search")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/diagnostic-report-search")))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/clinical-snapshot")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/clinical-snapshot")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/epic/sandbox/fhir/clinical-projection")));
     }
 }

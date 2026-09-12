@@ -25,11 +25,16 @@ class ClinicalProjectionArchitectureBoundaryTest {
         }
         String text = sources.toString();
         assertThat(text).doesNotContain("lab.healthcare.fhir.vendor.oracle");
+        assertThat(text).doesNotContain("lab.healthcare.fhir.vendor.epic");
         assertThat(text).doesNotContain("ORACLE_HEALTH");
         assertThat(text).doesNotContain("IGenericClient");
         assertThat(text).doesNotContain("https://");
         assertThat(text).doesNotContain("cerner.com");
         assertThat(text).doesNotContain("OracleProjectionClient");
+        assertThat(text).doesNotContain("EpicProjectionClient");
+        assertThat(text).doesNotContain("EpicControlledProjection");
+        assertThat(text).doesNotContain("if Epic");
+        assertThat(text).doesNotContain("if Oracle");
     }
 
     @Test

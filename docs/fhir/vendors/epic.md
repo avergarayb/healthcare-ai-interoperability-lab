@@ -1,6 +1,6 @@
 # Epic integration profile
 
-Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 049 searches `Condition` for that configured Patient. Task 050 searches `Observation` the same way. Task 051 searches `DiagnosticReport` the same way. Task 052 assembles those operations into a controlled clinical snapshot of status and counts. It does **not** search Patient as a replacement for configured context, and it does **not** include MedicationRequest.
+Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 049 searches `Condition` for that configured Patient. Task 050 searches `Observation` the same way. Task 051 searches `DiagnosticReport` the same way. Task 052 assembles those operations into a controlled clinical snapshot of status and counts. Task 053 applies the Task 042 retention ceiling and allowlist as a controlled projection of that same Epic sequence. It does **not** search Patient as a replacement for configured context, and it does **not** include MedicationRequest.
 
 Read this after [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md) and [fhir-server-configuration.md](../fhir-server-configuration.md).
 
@@ -315,6 +315,30 @@ Execution is sequential. A Patient failure is `SNAPSHOT_UNAVAILABLE` and skips c
 | `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) |
 
 Lab page: `GET /epic/sandbox/fhir/clinical-snapshot` after SMART login **and** a configured Patient ID. HTTP 200 for complete **and** partial. The page does not show Patient ID, token, or clinical JSON.
+
+## Controlled clinical projection (Task 053)
+
+Task 052 can receive more entries than requested (`_count=5` is a request, not a ceiling). Task 053 keeps the same sequential Epic operations and applies the existing Task 042 application retention ceiling of `N = 5` plus the same allowlist:
+
+```text
+received Bundle
+        ↓
+first N retention
+        ↓
+allowlist mapping
+        ↓
+status + receivedCount + retainedCount + truncated
+        ↓
+Model Boundary Contract v1
+        ↓
+agent stub observation
+```
+
+The EHR may still return more than five Conditions. The application retains at most five allowlisted records. First N is operational, not clinical ranking. Empty Bundles remain `SUCCESS` with `receivedCount=0`, `retainedCount=0`, `truncated=false`. MedicationRequest is omitted (`ClinicalSnapshotContents.withoutMedicationRequests()`). Absence is not rewritten as an empty collection. Oracle continues to include MedicationRequest. There is no `EpicProjectionClient`, no `EpicControlledProjection`, and no `EpicModelBoundaryService`.
+
+The laboratory page must not show projected field values.
+
+Lab page: `GET /epic/sandbox/fhir/clinical-projection` after SMART login **and** a configured Patient ID. HTTP 200 for complete **and** partial. The page does not show Patient ID, projected values, or clinical JSON.
 
 ## Architecture rules
 
