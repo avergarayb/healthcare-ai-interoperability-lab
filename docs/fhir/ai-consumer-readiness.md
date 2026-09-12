@@ -104,4 +104,6 @@ Task 064 adds a deny-by-default handoff authorization boundary over this readine
 
 Task 065 adds a deny-by-default consumer authentication and authorization boundary. See [ai-consumer-authorization-boundary.md](ai-consumer-authorization-boundary.md).
 
+Task 066 adds a deny-by-default consent and purpose boundary. See [ai-consumer-consent-boundary.md](ai-consumer-consent-boundary.md).
+
 A later task may add real consumer authentication, authorized handoff, or dispatch. That work is not Task 063. `READY_FOR_FUTURE_HANDOFF` must not be treated as permission to do any of those things.

@@ -403,5 +403,49 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Allowlist 042 was not expanded
 - `.env` was not modified
 
+## Task 066 — AI consumer consent boundary
+
+- Status: COMPLETED
+- `mvn test`: 846/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+  - `aiConsumerContract=v1`
+  - `aiConsumerStatus=READY`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+  - `aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`
+  - `aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`
+  - `aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`
+  - `aiConsumerAuthentication=NOT_AUTHENTICATED`
+  - `aiConsumerAuthorization=AUTHORIZATION_NOT_IMPLEMENTED`
+  - `aiConsumerAuthorizationAvailable=false`
+  - `aiConsumerConsent=CONSENT_NOT_IMPLEMENTED`
+  - `aiConsumerPurpose=PURPOSE_NOT_VERIFIED`
+  - `aiConsumerDataScope=DATA_SCOPE_NOT_VERIFIED`
+  - `aiConsumerConsentAvailable=false`
+  - `aiClinicalDataAccessAllowed=false`
+- Package `lab.healthcare.fhir.aiconsumerconsent` consumes only `AiConsumerAuthorizationResult` plus a synthetic `ConsumerConsentContext`
+- Deny-by-default: a valid 065 result still yields `CONSENT_NOT_IMPLEMENTED`
+- Untrusted `consentVerified` / `purposeApproved` / `dataScopeApproved` assertions are `BLOCKED`
+- Query parameters and headers cannot activate consent, purpose approval, or clinical access
+- `consentVerified=false`, `purposeApproved=false`, `dataScopeApproved=false`, `consentProviderConfigured=false`, `consentAvailable=false`, `clinicalDataAccessAllowed=false`, `authenticationVerified=false`, `authorizationGranted=false`, `realSecurityProviderConfigured=false`, `consumerAuthorizationAvailable=false`, `handoffAuthorized=false`, `dispatchPerformed=false`, `externalAuthorizationAvailable=false`, `modelCallAuthorized=false`, `modelCalled=false`, `processingStatus=NOT_EXECUTED`, `dispatchStatus=NOT_DISPATCHED`, `requiresHumanReview=true`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiConsumerConsent=CONSENT_NOT_IMPLEMENTED`, `aiConsumerPurpose=PURPOSE_NOT_VERIFIED`, `aiConsumerDataScope=DATA_SCOPE_NOT_VERIFIED`, `aiConsumerConsentAvailable=false`, `aiClinicalDataAccessAllowed=false`
+- New lab surfaces: `GET /lab/ai-consumer-consent`, `GET /api/ai-consumer-consent/v1` (Oracle-backed provider)
+- Consent rules are documented in `docs/fhir/ai-consumer-consent-boundary.md`
+- No Python `ai-service`, real consent provider, OAuth, JWT, SMART, LLM, RAG, HTTP dispatch, handoff, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
+
+
 
 
