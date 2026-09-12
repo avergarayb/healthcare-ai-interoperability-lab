@@ -381,6 +381,8 @@ Task 068 evaluates a deny-by-default clinical data-access request boundary (`aiC
 
 Task 069 evaluates a deny-by-default clinical data-access enforcement boundary (`aiConsumerClinicalDataEnforcement=NOT_ENFORCED_FOR_CLINICAL_DATA_ACCESS`). See [ai-consumer-clinical-data-enforcement-boundary.md](../ai-consumer-clinical-data-enforcement-boundary.md). New lab surfaces: `GET /lab/ai-consumer-clinical-data-enforcement` and `GET /api/ai-consumer-clinical-data-enforcement/v1`.
 
+Task 070 evaluates a deny-by-default clinical data-access enforcement-execution boundary (`aiConsumerClinicalDataEnforcementExecution=NOT_EXECUTED_FOR_CLINICAL_DATA_ACCESS`). See [ai-consumer-clinical-data-enforcement-execution-boundary.md](../ai-consumer-clinical-data-enforcement-execution-boundary.md). New lab surfaces: `GET /lab/ai-consumer-clinical-data-enforcement-execution` and `GET /api/ai-consumer-clinical-data-enforcement-execution/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.

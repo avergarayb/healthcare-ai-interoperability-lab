@@ -59,6 +59,8 @@ Task 068 adds a deny-by-default clinical data-access request boundary. It does n
 
 Task 069 adds a deny-by-default clinical data-access enforcement boundary. It does not add clinical fields or enforce clinical access. See [ai-consumer-clinical-data-enforcement-boundary.md](ai-consumer-clinical-data-enforcement-boundary.md).
 
+Task 070 adds a deny-by-default clinical data-access enforcement-execution boundary. It does not add clinical fields or execute enforcement. See [ai-consumer-clinical-data-enforcement-execution-boundary.md](ai-consumer-clinical-data-enforcement-execution-boundary.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.
