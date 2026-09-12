@@ -6,6 +6,8 @@ import lab.healthcare.fhir.agent.DeterministicAgentResult;
 import lab.healthcare.fhir.aiboundary.AiBoundaryInput;
 import lab.healthcare.fhir.aiboundary.AiBoundaryResult;
 import lab.healthcare.fhir.aiboundary.AiBoundaryService;
+import lab.healthcare.fhir.firstai.FirstAiComponent;
+import lab.healthcare.fhir.firstai.FirstAiResult;
 import lab.healthcare.fhir.agentstub.AgentStub;
 import lab.healthcare.fhir.agentstub.AgentStubObservation;
 import lab.healthcare.fhir.pipeline.PipelineDiagnoses;
@@ -401,6 +403,7 @@ public final class SmartLabPages {
                 DeterministicAgent.evaluate(DeterministicAgentInput.of(contract, diagnosis));
         AiBoundaryResult aiBoundary =
                 AiBoundaryService.prepare(AiBoundaryInput.of(contract, diagnosis, agent));
+        FirstAiResult firstAi = FirstAiComponent.process(aiBoundary);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -453,7 +456,9 @@ public final class SmartLabPages {
                                         + "\n"
                                         + agentLines(agent)
                                         + "\n"
-                                        + aiBoundaryLines(aiBoundary)),
+                                        + aiBoundaryLines(aiBoundary)
+                                        + "\n"
+                                        + firstAiLines(firstAi)),
                                 extra));
     }
 
@@ -477,6 +482,16 @@ public final class SmartLabPages {
                         .formatted(escape(aiBoundaryLines(result))));
     }
 
+    public static String firstAiComponent(FirstAiResult result) {
+        return page(
+                "First AI component",
+                """
+                <p>Isolated first AI component. No token, Patient ID, projected values, FHIR JSON, or model output are shown. READY does not authorize a model call. Processing is not executed.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(firstAiLines(result))));
+    }
+
     private static String aiBoundaryLines(AiBoundaryResult result) {
         return "aiBoundary=PREPARED"
                 + "\nclinicalDataAvailable="
@@ -487,6 +502,13 @@ public final class SmartLabPages {
                 + result.decision().modelCalled()
                 + "\nmedicationRequestsStatus="
                 + result.medicationRequestsStatus();
+    }
+
+    private static String firstAiLines(FirstAiResult result) {
+        return "firstAiComponent="
+                + result.componentStatus().name()
+                + "\naiProcessingStatus="
+                + result.processingStatus().name();
     }
 
     private static String agentLines(DeterministicAgentResult result) {

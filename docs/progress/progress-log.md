@@ -174,3 +174,29 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - No Python `ai-service`, LLM, RAG, or vendor client was added
 - Allowlist 042 was not expanded
 - `.env` was not modified
+
+## Task 059 — First isolated AI component
+
+- Status: COMPLETED
+- `mvn test`: 725/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+- Isolation option: package `lab.healthcare.fhir.firstai` inside `fhir-integration-service` because the repository has no separate AI module yet and a Python `ai-service` is out of scope
+- The component consumes only `AiBoundaryResult`. `FirstAiMapper` / `FirstAiComponent` do not call `DeterministicAgent.evaluate` or `AgentStub.observe`
+- `READY` stays distinct from model authorization: `componentStatus=PREPARED`, `processingStatus=NOT_EXECUTED`, `modelCallAuthorized=false`, `modelCalled=false`, `requiresHumanReview=true`
+- MedicationRequest absence stays `NOT_REQUESTED`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection`
+- New lab surfaces were required because `/lab/ai-boundary` exposes the boundary payload, not the first AI component result: `GET /lab/first-ai-component`, `GET /api/first-ai-component/v1` (Oracle-backed provider)
+- No Python `ai-service`, LLM, RAG, LangGraph, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
