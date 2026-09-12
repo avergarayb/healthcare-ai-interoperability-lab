@@ -43,6 +43,16 @@ public class ClinicalSnapshotAssembler {
             AccessTokenProvider tokenProvider,
             String patientId,
             FhirServerCapabilities capabilities) {
+        return assemble(
+                destination, tokenProvider, patientId, capabilities, ClinicalSnapshotContents.allCollections());
+    }
+
+    public ClinicalSnapshotResult assemble(
+            String destination,
+            AccessTokenProvider tokenProvider,
+            String patientId,
+            FhirServerCapabilities capabilities,
+            ClinicalSnapshotContents contents) {
         if (destination == null || destination.isBlank()) {
             throw new IllegalArgumentException("Destination must be provided");
         }
@@ -54,6 +64,9 @@ public class ClinicalSnapshotAssembler {
         }
         if (capabilities == null) {
             throw new IllegalArgumentException("Runtime capabilities must be provided");
+        }
+        if (contents == null) {
+            throw new IllegalArgumentException("Clinical snapshot contents must be provided");
         }
         String dest = destination.trim();
         Instant generatedAt = Instant.now(clock);
@@ -74,14 +87,18 @@ public class ClinicalSnapshotAssembler {
                 capabilities,
                 "DiagnosticReport",
                 () -> routingService.searchDiagnosticReports(dest, tokenProvider, patientId));
-        CollectionResult medicationRequests = search(
-                capabilities,
-                "MedicationRequest",
-                () -> routingService.searchMedicationRequests(dest, tokenProvider, patientId));
-        boolean complete = conditions.status() == ClinicalSnapshotResourceStatus.SUCCESS
+        CollectionResult medicationRequests = contents.includeMedicationRequests()
+                ? search(
+                        capabilities,
+                        "MedicationRequest",
+                        () -> routingService.searchMedicationRequests(dest, tokenProvider, patientId))
+                : new CollectionResult(null, null);
+        boolean collectionsOk = conditions.status() == ClinicalSnapshotResourceStatus.SUCCESS
                 && observations.status() == ClinicalSnapshotResourceStatus.SUCCESS
-                && diagnosticReports.status() == ClinicalSnapshotResourceStatus.SUCCESS
-                && medicationRequests.status() == ClinicalSnapshotResourceStatus.SUCCESS;
+                && diagnosticReports.status() == ClinicalSnapshotResourceStatus.SUCCESS;
+        boolean complete = collectionsOk
+                && (!contents.includeMedicationRequests()
+                        || medicationRequests.status() == ClinicalSnapshotResourceStatus.SUCCESS);
         return new ClinicalSnapshotResult(
                 complete
                         ? ClinicalSnapshotOutcome.SNAPSHOT_COMPLETE

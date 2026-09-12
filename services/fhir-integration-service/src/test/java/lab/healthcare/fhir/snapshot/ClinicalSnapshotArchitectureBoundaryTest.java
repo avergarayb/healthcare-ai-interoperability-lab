@@ -25,7 +25,9 @@ class ClinicalSnapshotArchitectureBoundaryTest {
         }
         String text = sources.toString();
         assertThat(text).doesNotContain("lab.healthcare.fhir.vendor.oracle");
+        assertThat(text).doesNotContain("lab.healthcare.fhir.vendor.epic");
         assertThat(text).doesNotContain("ORACLE_HEALTH");
+        assertThat(text).doesNotContain("FhirVendor.EPIC");
         assertThat(text).doesNotContain("IGenericClient");
         assertThat(text).doesNotContain("https://");
         assertThat(text).doesNotContain("cerner.com");

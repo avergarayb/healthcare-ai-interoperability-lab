@@ -146,6 +146,31 @@ class ClinicalSnapshotAssemblerTest {
         verify(routingService, never()).searchConditions(any(), any(), any());
     }
 
+    @Test
+    void withoutMedicationRequestsIsCompleteWhenRequiredCollectionsSucceed() {
+        when(routingService.readPatient(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(new Patient());
+        when(routingService.searchConditions(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(entries(1));
+        when(routingService.searchObservations(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(new Bundle());
+        when(routingService.searchDiagnosticReports(eq(DEST), any(), eq(PATIENT_ID))).thenReturn(entries(2));
+
+        ClinicalSnapshotResult result = assembler()
+                .assemble(
+                        DEST,
+                        token(),
+                        PATIENT_ID,
+                        capabilities("Patient", "Condition", "Observation", "DiagnosticReport", "MedicationRequest"),
+                        ClinicalSnapshotContents.withoutMedicationRequests());
+
+        assertThat(result.outcome()).isEqualTo(ClinicalSnapshotOutcome.SNAPSHOT_COMPLETE);
+        assertThat(result.patientStatus()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
+        assertThat(result.conditionStatus()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
+        assertThat(result.observationStatus()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
+        assertThat(result.diagnosticReportStatus()).isEqualTo(ClinicalSnapshotResourceStatus.SUCCESS);
+        assertThat(result.medicationRequestStatus()).isNull();
+        assertThat(result.medicationRequestCount()).isNull();
+        verify(routingService, never()).searchMedicationRequests(any(), any(), any());
+    }
+
     private ClinicalSnapshotAssembler assembler() {
         return new ClinicalSnapshotAssembler(routingService, CLOCK);
     }
