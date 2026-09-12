@@ -296,3 +296,37 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - No Python `ai-service`, real OAuth, LLM, RAG, HTTP dispatch, or vendor client was added
 - Allowlist 042 was not expanded
 - `.env` was not modified
+
+## Task 063 — AI consumer readiness
+
+- Status: COMPLETED
+- `mvn test`: 793/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+  - `aiConsumerContract=v1`
+  - `aiConsumerStatus=READY`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+  - `aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`
+  - `aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`
+- Package `lab.healthcare.fhir.aiconsumerreadiness` consumes only `AiConsumerPolicyResult`
+- `READY_FOR_FUTURE_HANDOFF` is not handoff authorization and not dispatch
+- Inconsistent execution flags are detected and blocked; they are not silently corrected
+- `handoffAuthorized=false`, `dispatchPerformed=false`, `modelCallAuthorized=false`, `modelCalled=false`, `processingStatus=NOT_EXECUTED`, `dispatchStatus=NOT_DISPATCHED`, `requiresHumanReview=true`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`
+- New lab surfaces: `GET /lab/ai-consumer-readiness`, `GET /api/ai-consumer-readiness/v1` (Oracle-backed provider, synthetic `lab-consumer`)
+- Readiness rules are documented in `docs/fhir/ai-consumer-readiness.md`
+- No Python `ai-service`, real OAuth, LLM, RAG, HTTP dispatch, handoff, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
+

@@ -45,6 +45,8 @@ Task 061 copies that gate verdict onto an internal AI Consumer Contract v1. It d
 
 Task 062 adds a synthetic consumer policy over that contract. It does not add clinical fields, dispatch, or authorize a model. See [ai-consumer-policy.md](ai-consumer-policy.md).
 
+Task 063 adds a readiness boundary over that policy. It does not add clinical fields, authorize handoff, or dispatch. See [ai-consumer-readiness.md](ai-consumer-readiness.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.

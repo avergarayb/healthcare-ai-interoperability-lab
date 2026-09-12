@@ -79,3 +79,5 @@ A later `ai-service` must not accept this contract only because it can reach an 
 Task 061 documents that list. It does not implement it, and it does not send the contract anywhere.
 
 Task 062 adds a synthetic consumer policy over this contract. See [ai-consumer-policy.md](ai-consumer-policy.md). Allowed future consumption is still not dispatch and not model authorization.
+
+Task 063 adds a readiness boundary over that policy. See [ai-consumer-readiness.md](ai-consumer-readiness.md). Ready for a future handoff is still not handoff authorization and not dispatch.
