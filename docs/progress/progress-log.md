@@ -365,4 +365,43 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Allowlist 042 was not expanded
 - `.env` was not modified
 
+## Task 065 — AI consumer authorization boundary
+
+- Status: COMPLETED
+- `mvn test`: 827/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+  - `aiConsumerContract=v1`
+  - `aiConsumerStatus=READY`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+  - `aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`
+  - `aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`
+  - `aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`
+  - `aiConsumerAuthentication=NOT_AUTHENTICATED`
+  - `aiConsumerAuthorization=AUTHORIZATION_NOT_IMPLEMENTED`
+  - `aiConsumerAuthorizationAvailable=false`
+- Package `lab.healthcare.fhir.aiconsumerauthorization` consumes only `AiHandoffAuthorizationResult` plus a synthetic `ConsumerSecurityContext`
+- Deny-by-default: a valid 064 result still yields `AUTHORIZATION_NOT_IMPLEMENTED`
+- Declared identity is `NOT_AUTHENTICATED`; conceptual scope is `NOT_AUTHORIZED`; untrusted `true` assertions are `BLOCKED`
+- Query parameters and headers cannot activate authentication or authorization
+- `authenticationVerified=false`, `authorizationGranted=false`, `realSecurityProviderConfigured=false`, `consumerAuthorizationAvailable=false`, `handoffAuthorized=false`, `dispatchPerformed=false`, `externalAuthorizationAvailable=false`, `modelCallAuthorized=false`, `modelCalled=false`, `processingStatus=NOT_EXECUTED`, `dispatchStatus=NOT_DISPATCHED`, `requiresHumanReview=true`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiConsumerAuthentication=NOT_AUTHENTICATED`, `aiConsumerAuthorization=AUTHORIZATION_NOT_IMPLEMENTED`, `aiConsumerAuthorizationAvailable=false`
+- New lab surfaces: `GET /lab/ai-consumer-authorization`, `GET /api/ai-consumer-authorization/v1` (Oracle-backed provider)
+- Authorization rules are documented in `docs/fhir/ai-consumer-authorization-boundary.md`
+- No Python `ai-service`, real OAuth, JWT, SMART, LLM, RAG, HTTP dispatch, handoff, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
+
+
 
