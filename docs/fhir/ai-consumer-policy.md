@@ -75,4 +75,6 @@ The laboratory page uses a fixed synthetic consumer (`lab-consumer` / `LAB`) to 
 
 ## Next steps outside this task
 
+Task 063 adds a readiness boundary over this policy. See [ai-consumer-readiness.md](ai-consumer-readiness.md). Allowed future consumption is still not handoff authorization and not dispatch.
+
 A later task may add real consumer registration, tokens, scopes, tenants, and schema checks. That work is not Task 062.

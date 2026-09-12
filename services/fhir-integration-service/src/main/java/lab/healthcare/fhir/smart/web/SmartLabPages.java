@@ -11,6 +11,8 @@ import lab.healthcare.fhir.aiconsumer.AiConsumerContractService;
 import lab.healthcare.fhir.aiconsumerpolicy.AiConsumerPolicy;
 import lab.healthcare.fhir.aiconsumerpolicy.AiConsumerPolicyInput;
 import lab.healthcare.fhir.aiconsumerpolicy.AiConsumerPolicyResult;
+import lab.healthcare.fhir.aiconsumerreadiness.AiConsumerReadiness;
+import lab.healthcare.fhir.aiconsumerreadiness.AiConsumerReadinessResult;
 import lab.healthcare.fhir.aigateway.AiExecutionDecision;
 import lab.healthcare.fhir.aigateway.AiExecutionGate;
 import lab.healthcare.fhir.firstai.FirstAiComponent;
@@ -415,6 +417,7 @@ public final class SmartLabPages {
         AiConsumerContract consumerContract = AiConsumerContractService.prepare(executionGate);
         AiConsumerPolicyResult consumerPolicy =
                 AiConsumerPolicy.evaluate(AiConsumerPolicyInput.laboratory(consumerContract));
+        AiConsumerReadinessResult consumerReadiness = AiConsumerReadiness.evaluate(consumerPolicy);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -475,7 +478,9 @@ public final class SmartLabPages {
                                         + "\n"
                                         + aiConsumerContractLines(consumerContract)
                                         + "\n"
-                                        + aiConsumerPolicyLines(consumerPolicy)),
+                                        + aiConsumerPolicyLines(consumerPolicy)
+                                        + "\n"
+                                        + aiConsumerReadinessLines(consumerReadiness)),
                                 extra));
     }
 
@@ -539,6 +544,16 @@ public final class SmartLabPages {
                         .formatted(escape(aiConsumerPolicyLines(result))));
     }
 
+    public static String aiConsumerReadiness(AiConsumerReadinessResult result) {
+        return page(
+                "AI consumer readiness",
+                """
+                <p>AI consumer readiness. Ready for a future handoff is not handoff authorization and not dispatch. No token, Patient ID, projected values, FHIR JSON, or model output are shown.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(aiConsumerReadinessLines(result))));
+    }
+
     private static String aiBoundaryLines(AiBoundaryResult result) {
         return "aiBoundary=PREPARED"
                 + "\nclinicalDataAvailable="
@@ -573,6 +588,10 @@ public final class SmartLabPages {
 
     private static String aiConsumerPolicyLines(AiConsumerPolicyResult result) {
         return "aiConsumerPolicy=" + result.decision().name();
+    }
+
+    private static String aiConsumerReadinessLines(AiConsumerReadinessResult result) {
+        return "aiConsumerReadiness=" + result.readinessStatus().name();
     }
 
     private static String agentLines(DeterministicAgentResult result) {

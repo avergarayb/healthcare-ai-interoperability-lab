@@ -367,6 +367,8 @@ Task 061 copies that gate verdict onto an internal AI Consumer Contract v1 (`aiC
 
 Task 062 evaluates a synthetic laboratory consumer against that contract (`aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`). Allowed future consumption is not dispatch and not model authorization. See [ai-consumer-policy.md](../ai-consumer-policy.md). New lab surfaces: `GET /lab/ai-consumer-policy` and `GET /api/ai-consumer-policy/v1`.
 
+Task 063 evaluates readiness over that policy (`aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`). Ready for a future handoff is not handoff authorization and not dispatch. See [ai-consumer-readiness.md](../ai-consumer-readiness.md). New lab surfaces: `GET /lab/ai-consumer-readiness` and `GET /api/ai-consumer-readiness/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.

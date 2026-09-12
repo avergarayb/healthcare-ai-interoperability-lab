@@ -59,6 +59,8 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/api/ai-consumer-contract/v1` | same contract as JSON |
 | `http://localhost:8081/lab/ai-consumer-policy` | after a token and Patient ID: synthetic AI consumer policy (`ALLOWED_FOR_FUTURE_CONSUMPTION`) |
 | `http://localhost:8081/api/ai-consumer-policy/v1` | same policy decision as JSON |
+| `http://localhost:8081/lab/ai-consumer-readiness` | after a token and Patient ID: AI consumer readiness (`READY_FOR_FUTURE_HANDOFF`) |
+| `http://localhost:8081/api/ai-consumer-readiness/v1` | same readiness verdict as JSON |
 | `http://localhost:8081/smart/callback` | registered redirect; validates callback and attempts token exchange |
 | `http://localhost:8081/oracle/sandbox/fhir/patient-search` | after a token is issued: safe authenticated Patient search diagnosis |
 | `http://localhost:8081/oracle/sandbox/fhir/patient` | after a token and `ORACLE_HEALTH_SANDBOX_PATIENT_ID`: controlled Patient read diagnosis |
