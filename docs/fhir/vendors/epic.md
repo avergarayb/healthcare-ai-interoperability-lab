@@ -1,6 +1,6 @@
 # Epic integration profile
 
-Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 049 searches `Condition` for that configured Patient. Task 050 searches `Observation` the same way. It does **not** search Patient or assemble a snapshot.
+Task 029 prepares an Epic-specific integration profile. Task 046 adds interactive SMART Authorization Code + PKCE against a configured Epic sandbox. Task 047 validates **real CapabilityStatement discovery** (`GET /metadata`, public) through the existing provider-neutral model. Task 048 adds an explicit sandbox Patient context and a capability-aware `GET /Patient/{id}`. Task 049 searches `Condition` for that configured Patient. Task 050 searches `Observation` the same way. Task 051 searches `DiagnosticReport` the same way. It does **not** search Patient or assemble a snapshot.
 
 Read this after [fhir-smart-real-world-readiness.md](../fhir-smart-real-world-readiness.md) and [fhir-server-configuration.md](../fhir-server-configuration.md).
 
@@ -248,6 +248,40 @@ GET /Observation?patient={id}&_count=5&category=vital-signs
 | `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
 
 Lab page: `GET /epic/sandbox/fhir/observation-search` after SMART login **and** a configured Patient ID. It returns only the diagnosis (no token, no Patient ID, no Observation JSON, no codes or values).
+
+## Authenticated DiagnosticReport search by Patient (Task 051)
+
+After Task 050, the laboratory runs one generic DiagnosticReport `SEARCH_TYPE` for the same configured Patient.
+
+```text
+configured Patient ID
+        +
+usable SMART token (Task 046)
+        +
+capabilities.supports("DiagnosticReport", SEARCH_TYPE)   (Task 047 path)
+        ↓
+RoutingService.searchDiagnosticReports(destination, tokenProvider, patientId)
+        ↓
+FhirService.searchDiagnosticReportsByPatientWithCount(id, 5)
+        ↓
+GET /DiagnosticReport?patient={id}&_count=5
+```
+
+`_count=5` is a request, not a retention ceiling. An empty Bundle is success with `hasEntries=false`. There is no `EMPTY` outcome and no Epic-specific category unless a later live rejection proves a portable filter is required for every destination.
+
+### Diagnosis
+
+| Outcome | Meaning |
+|---|---|
+| `DIAGNOSTIC_REPORT_SEARCH_SUCCEEDED` | Epic returned a FHIR Bundle — JSON is not rendered |
+| `PATIENT_CONTEXT_NOT_CONFIGURED` | No sandbox Patient ID — no DiagnosticReport HTTP |
+| `AUTHENTICATION_REQUIRED` | No usable token (or sandbox disabled) — no DiagnosticReport HTTP |
+| `AUTHENTICATION_REJECTED` | HTTP 401 |
+| `AUTHORIZATION_DENIED` | HTTP 403 |
+| `CAPABILITY_UNSUPPORTED` | Runtime model lacks DiagnosticReport `search-type` — no DiagnosticReport HTTP |
+| `DEPENDENCY_FAILURE` | Timeout, connection, 5xx, rate limit (existing taxonomy) |
+
+Lab page: `GET /epic/sandbox/fhir/diagnostic-report-search` after SMART login **and** a configured Patient ID. It returns only the diagnosis (no token, no Patient ID, no DiagnosticReport JSON, no codes or results).
 
 ## Architecture rules
 
