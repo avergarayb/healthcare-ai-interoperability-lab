@@ -47,6 +47,8 @@ Task 062 adds a synthetic consumer policy over that contract. It does not add cl
 
 Task 063 adds a readiness boundary over that policy. It does not add clinical fields, authorize handoff, or dispatch. See [ai-consumer-readiness.md](ai-consumer-readiness.md).
 
+Task 064 adds a deny-by-default handoff authorization boundary. It does not add clinical fields, authorize handoff, or dispatch. See [ai-handoff-authorization-boundary.md](ai-handoff-authorization-boundary.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.

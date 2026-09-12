@@ -81,3 +81,5 @@ Task 061 documents that list. It does not implement it, and it does not send the
 Task 062 adds a synthetic consumer policy over this contract. See [ai-consumer-policy.md](ai-consumer-policy.md). Allowed future consumption is still not dispatch and not model authorization.
 
 Task 063 adds a readiness boundary over that policy. See [ai-consumer-readiness.md](ai-consumer-readiness.md). Ready for a future handoff is still not handoff authorization and not dispatch.
+
+Task 064 adds a deny-by-default authorization boundary over that readiness result. See [ai-handoff-authorization-boundary.md](ai-handoff-authorization-boundary.md).

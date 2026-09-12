@@ -369,6 +369,8 @@ Task 062 evaluates a synthetic laboratory consumer against that contract (`aiCon
 
 Task 063 evaluates readiness over that policy (`aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`). Ready for a future handoff is not handoff authorization and not dispatch. See [ai-consumer-readiness.md](../ai-consumer-readiness.md). New lab surfaces: `GET /lab/ai-consumer-readiness` and `GET /api/ai-consumer-readiness/v1`.
 
+Task 064 evaluates a deny-by-default authorization boundary over that readiness (`aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`). See [ai-handoff-authorization-boundary.md](../ai-handoff-authorization-boundary.md). New lab surfaces: `GET /lab/ai-handoff-authorization` and `GET /api/ai-handoff-authorization/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.
