@@ -6,6 +6,8 @@ import lab.healthcare.fhir.agent.DeterministicAgentResult;
 import lab.healthcare.fhir.aiboundary.AiBoundaryInput;
 import lab.healthcare.fhir.aiboundary.AiBoundaryResult;
 import lab.healthcare.fhir.aiboundary.AiBoundaryService;
+import lab.healthcare.fhir.aiconsumer.AiConsumerContract;
+import lab.healthcare.fhir.aiconsumer.AiConsumerContractService;
 import lab.healthcare.fhir.aigateway.AiExecutionDecision;
 import lab.healthcare.fhir.aigateway.AiExecutionGate;
 import lab.healthcare.fhir.firstai.FirstAiComponent;
@@ -407,6 +409,7 @@ public final class SmartLabPages {
                 AiBoundaryService.prepare(AiBoundaryInput.of(contract, diagnosis, agent));
         FirstAiResult firstAi = FirstAiComponent.process(aiBoundary);
         AiExecutionDecision executionGate = AiExecutionGate.evaluate(firstAi);
+        AiConsumerContract consumerContract = AiConsumerContractService.prepare(executionGate);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -463,7 +466,9 @@ public final class SmartLabPages {
                                         + "\n"
                                         + firstAiLines(firstAi)
                                         + "\n"
-                                        + aiExecutionGateLines(executionGate)),
+                                        + aiExecutionGateLines(executionGate)
+                                        + "\n"
+                                        + aiConsumerContractLines(consumerContract)),
                                 extra));
     }
 
@@ -507,6 +512,16 @@ public final class SmartLabPages {
                         .formatted(escape(aiExecutionGateLines(result))));
     }
 
+    public static String aiConsumerContract(AiConsumerContract result) {
+        return page(
+                "AI consumer contract",
+                """
+                <p>Internal AI Consumer Contract v1. Ready is not dispatch and not model authorization. No token, Patient ID, projected values, FHIR JSON, or model output are shown.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(aiConsumerContractLines(result))));
+    }
+
     private static String aiBoundaryLines(AiBoundaryResult result) {
         return "aiBoundary=PREPARED"
                 + "\nclinicalDataAvailable="
@@ -528,6 +543,15 @@ public final class SmartLabPages {
 
     private static String aiExecutionGateLines(AiExecutionDecision result) {
         return "aiExecutionGate=" + result.executionDecision().name();
+    }
+
+    private static String aiConsumerContractLines(AiConsumerContract result) {
+        return "aiConsumerContract="
+                + result.contractVersion()
+                + "\naiConsumerStatus="
+                + result.contractStatus().name()
+                + "\naiDispatchStatus="
+                + result.dispatchStatus().name();
     }
 
     private static String agentLines(DeterministicAgentResult result) {

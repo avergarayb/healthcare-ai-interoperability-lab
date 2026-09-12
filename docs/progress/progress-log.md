@@ -229,3 +229,36 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - No Python `ai-service`, LLM, RAG, LangGraph, or vendor client was added
 - Allowlist 042 was not expanded
 - `.env` was not modified
+
+## Task 061 — AI Consumer Contract v1
+
+- Status: COMPLETED
+- `mvn test`: 755/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+  - `aiConsumerContract=v1`
+  - `aiConsumerStatus=READY`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+- Package `lab.healthcare.fhir.aiconsumer` consumes only `AiExecutionDecision`
+- `AiConsumerContractMapper` / `AiConsumerContractService` do not call `DeterministicAgent.evaluate`, `AgentStub.observe`, or any HTTP client
+- `ELIGIBLE_BUT_NOT_AUTHORIZED` becomes `contractStatus=READY` and `dispatchStatus=NOT_DISPATCHED`; that is not model permission and not delivery
+- Premature `modelCallAuthorized=true` is rejected with `PREMATURE_MODEL_AUTHORIZATION`, not normalized to `false`
+- `modelCalled=false`, `modelCallAuthorized=false`, `processingStatus=NOT_EXECUTED`, `requiresHumanReview=true`
+- MedicationRequest absence stays `NOT_REQUESTED`
+- Future consumer authentication, scopes, tenant, and schema checks are documented in `docs/fhir/ai-consumer-contract-v1.md` and are not implemented
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiConsumerContract=v1`, `aiConsumerStatus=READY`, and `aiDispatchStatus=NOT_DISPATCHED`
+- New lab surfaces were required because `/lab/ai-execution-gate` exposes the gate, not the contract: `GET /lab/ai-consumer-contract`, `GET /api/ai-consumer-contract/v1` (Oracle-backed provider)
+- No Python `ai-service`, LLM, RAG, LangGraph, HTTP dispatch, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
