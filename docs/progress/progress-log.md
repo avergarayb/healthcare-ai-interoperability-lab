@@ -557,6 +557,71 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Allowlist 042 was not expanded
 - `.env` was not modified
 
+## Task 069 — AI consumer clinical data enforcement boundary
+
+- Status: COMPLETED
+- `mvn test`: 895/0
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `agentStub=SUCCEEDED`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `clinicalDataAvailable=true`
+  - `modelCallAuthorized=false`
+  - `aiModelCalled=false`
+  - `medicationRequestsStatus=NOT_REQUESTED`
+  - `firstAiComponent=PREPARED`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiExecutionGate=ELIGIBLE_BUT_NOT_AUTHORIZED`
+  - `aiConsumerContract=v1`
+  - `aiConsumerStatus=READY`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+  - `aiConsumerPolicy=ALLOWED_FOR_FUTURE_CONSUMPTION`
+  - `aiConsumerReadiness=READY_FOR_FUTURE_HANDOFF`
+  - `aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`
+  - `aiConsumerAuthentication=NOT_AUTHENTICATED`
+  - `aiConsumerAuthorization=AUTHORIZATION_NOT_IMPLEMENTED`
+  - `aiConsumerAuthorizationAvailable=false`
+  - `aiConsumerConsent=CONSENT_NOT_IMPLEMENTED`
+  - `aiConsumerPurpose=PURPOSE_NOT_VERIFIED`
+  - `aiConsumerDataScope=DATA_SCOPE_NOT_VERIFIED`
+  - `aiConsumerConsentAvailable=false`
+  - `aiClinicalDataAccessAllowed=false`
+  - `aiConsumerClinicalDataScope=NOT_READY_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerScopeDeclared=false`
+  - `aiConsumerScopeEvaluated=false`
+  - `aiConsumerMinimizationEvaluated=false`
+  - `aiConsumerPurposeScopeAlignmentEvaluated=false`
+  - `aiClinicalDataScopeProviderConfigured=false`
+  - `aiClinicalDataScopeApprovalAvailable=false`
+  - `aiClinicalDataAccessRequested=false`
+  - `aiClinicalDataAccessGranted=false`
+  - `aiConsumerClinicalDataAccess=NOT_GRANTED_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerAccessRequestDeclared=false`
+  - `aiConsumerAccessRequestEvaluated=false`
+  - `aiConsumerScopeReferencePresent=false`
+  - `aiConsumerRealAuthorizationRequired=true`
+  - `aiClinicalDataAccessGrantAvailable=false`
+  - `aiClinicalDataAccessEnforced=false`
+  - `aiConsumerClinicalDataEnforcement=NOT_ENFORCED_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerEnforcementDecisionAvailable=false`
+  - `aiConsumerEnforcementDecisionEvaluated=false`
+  - `aiClinicalDataAccessEnforcementAvailable=false`
+  - `aiClinicalDataAccessEnforcementProviderConfigured=false`
+- Package `lab.healthcare.fhir.aiconsumerenforcement` consumes only `AiConsumerClinicalDataAccessResult` plus a synthetic `ClinicalDataEnforcementContext`
+- Deny-by-default: a valid 068 result still yields `NOT_ENFORCED_FOR_CLINICAL_DATA_ACCESS`
+- A pending request is `ENFORCEMENT_REQUIRES_ACCESS_DECISION`; an authorization check without a provider is `ENFORCEMENT_REQUIRES_REAL_AUTHORIZATION`
+- Query parameters and headers cannot activate enforcement
+- `enforcementDecisionAvailable=false`, `enforcementDecisionEvaluated=false`, `clinicalDataAccessEnforcementAvailable=false`, `clinicalDataAccessEnforcementProviderConfigured=false`, `clinicalDataAccessEnforcementExecuted=false`, `clinicalDataAccessGranted=false`, `clinicalDataAccessAllowed=false`, `clinicalDataAccessEnforced=false`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiConsumerClinicalDataEnforcement=NOT_ENFORCED_FOR_CLINICAL_DATA_ACCESS` and the related deny flags
+- New lab surfaces: `GET /lab/ai-consumer-clinical-data-enforcement`, `GET /api/ai-consumer-clinical-data-enforcement/v1` (Oracle-backed provider)
+- Enforcement rules are documented in `docs/fhir/ai-consumer-clinical-data-enforcement-boundary.md`
+- No Python `ai-service`, real enforcement provider, OAuth, JWT, SMART, LLM, RAG, HTTP dispatch, handoff, FHIR read, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
+
+
 
 
 

@@ -148,3 +148,5 @@ There is no real clinical-access provider. There is no FHIR read.
 - No model execution
 
 A later task may add a real access provider. That work is not Task 068.
+
+Task 069 adds a deny-by-default clinical data-access enforcement boundary over this result. See [ai-consumer-clinical-data-enforcement-boundary.md](ai-consumer-clinical-data-enforcement-boundary.md). Access remains not granted.
