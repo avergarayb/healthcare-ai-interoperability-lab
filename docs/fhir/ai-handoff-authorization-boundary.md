@@ -133,4 +133,6 @@ Those routes are laboratory surfaces. They are not a public authorization API. `
 
 ## Next steps outside this task
 
-A later task may add real consumer authentication, a granted handoff scope, or dispatch. That work is not Task 064. `HANDOFF_NOT_AUTHORIZED` must stay the default until those controls exist.
+Task 065 adds a deny-by-default consumer authentication and authorization boundary over this result. See [ai-consumer-authorization-boundary.md](ai-consumer-authorization-boundary.md). Handoff remains unauthorized.
+
+A later task may add a real identity provider, a granted handoff scope, or dispatch. That work is not Task 064. `HANDOFF_NOT_AUTHORIZED` must stay the default until those controls exist.

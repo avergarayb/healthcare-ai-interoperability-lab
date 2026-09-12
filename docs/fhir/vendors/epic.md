@@ -371,6 +371,8 @@ Task 063 evaluates readiness over that policy (`aiConsumerReadiness=READY_FOR_FU
 
 Task 064 evaluates a deny-by-default authorization boundary over that readiness (`aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`). See [ai-handoff-authorization-boundary.md](../ai-handoff-authorization-boundary.md). New lab surfaces: `GET /lab/ai-handoff-authorization` and `GET /api/ai-handoff-authorization/v1`.
 
+Task 065 evaluates a deny-by-default consumer authentication and authorization boundary (`aiConsumerAuthorization=AUTHORIZATION_NOT_IMPLEMENTED`). See [ai-consumer-authorization-boundary.md](../ai-consumer-authorization-boundary.md). New lab surfaces: `GET /lab/ai-consumer-authorization` and `GET /api/ai-consumer-authorization/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.

@@ -49,6 +49,8 @@ Task 063 adds a readiness boundary over that policy. It does not add clinical fi
 
 Task 064 adds a deny-by-default handoff authorization boundary. It does not add clinical fields, authorize handoff, or dispatch. See [ai-handoff-authorization-boundary.md](ai-handoff-authorization-boundary.md).
 
+Task 065 adds a deny-by-default consumer authentication and authorization boundary. It does not add clinical fields or implement a real identity provider. See [ai-consumer-authorization-boundary.md](ai-consumer-authorization-boundary.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.

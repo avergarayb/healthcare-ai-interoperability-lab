@@ -102,4 +102,6 @@ Those routes are laboratory surfaces. They are not a public authorization API.
 
 Task 064 adds a deny-by-default handoff authorization boundary over this readiness result. See [ai-handoff-authorization-boundary.md](ai-handoff-authorization-boundary.md). Ready for a future handoff is still not authorization and not dispatch.
 
+Task 065 adds a deny-by-default consumer authentication and authorization boundary. See [ai-consumer-authorization-boundary.md](ai-consumer-authorization-boundary.md).
+
 A later task may add real consumer authentication, authorized handoff, or dispatch. That work is not Task 063. `READY_FOR_FUTURE_HANDOFF` must not be treated as permission to do any of those things.
