@@ -373,6 +373,8 @@ Task 064 evaluates a deny-by-default authorization boundary over that readiness 
 
 Task 065 evaluates a deny-by-default consumer authentication and authorization boundary (`aiConsumerAuthorization=AUTHORIZATION_NOT_IMPLEMENTED`). See [ai-consumer-authorization-boundary.md](../ai-consumer-authorization-boundary.md). New lab surfaces: `GET /lab/ai-consumer-authorization` and `GET /api/ai-consumer-authorization/v1`.
 
+Task 066 evaluates a deny-by-default consent and purpose boundary (`aiConsumerConsent=CONSENT_NOT_IMPLEMENTED`). See [ai-consumer-consent-boundary.md](../ai-consumer-consent-boundary.md). New lab surfaces: `GET /lab/ai-consumer-consent` and `GET /api/ai-consumer-consent/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.

@@ -15,6 +15,8 @@ import lab.healthcare.fhir.aiconsumerreadiness.AiConsumerReadiness;
 import lab.healthcare.fhir.aiconsumerreadiness.AiConsumerReadinessResult;
 import lab.healthcare.fhir.aiconsumerauthorization.AiConsumerAuthorizationBoundary;
 import lab.healthcare.fhir.aiconsumerauthorization.AiConsumerAuthorizationResult;
+import lab.healthcare.fhir.aiconsumerconsent.AiConsumerConsentBoundary;
+import lab.healthcare.fhir.aiconsumerconsent.AiConsumerConsentResult;
 import lab.healthcare.fhir.aihandoffauthorization.AiHandoffAuthorizationBoundary;
 import lab.healthcare.fhir.aihandoffauthorization.AiHandoffAuthorizationResult;
 import lab.healthcare.fhir.aigateway.AiExecutionDecision;
@@ -426,6 +428,7 @@ public final class SmartLabPages {
                 AiHandoffAuthorizationBoundary.evaluate(consumerReadiness);
         AiConsumerAuthorizationResult consumerAuthorization =
                 AiConsumerAuthorizationBoundary.evaluate(handoffAuthorization);
+        AiConsumerConsentResult consumerConsent = AiConsumerConsentBoundary.evaluate(consumerAuthorization);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -492,7 +495,9 @@ public final class SmartLabPages {
                                         + "\n"
                                         + aiHandoffAuthorizationLines(handoffAuthorization)
                                         + "\n"
-                                        + aiConsumerAuthorizationLines(consumerAuthorization)),
+                                        + aiConsumerAuthorizationLines(consumerAuthorization)
+                                        + "\n"
+                                        + aiConsumerConsentLines(consumerConsent)),
                                 extra));
     }
 
@@ -586,6 +591,16 @@ public final class SmartLabPages {
                         .formatted(escape(aiConsumerAuthorizationLines(result))));
     }
 
+    public static String aiConsumerConsent(AiConsumerConsentResult result) {
+        return page(
+                "AI consumer consent",
+                """
+                <p>AI consumer consent and purpose boundary. Authorization is not consent and consent is not clinical access. No token, Patient ID, projected values, FHIR JSON, or model output are shown.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(aiConsumerConsentLines(result))));
+    }
+
     private static String aiBoundaryLines(AiBoundaryResult result) {
         return "aiBoundary=PREPARED"
                 + "\nclinicalDataAvailable="
@@ -637,6 +652,19 @@ public final class SmartLabPages {
                 + result.status().name()
                 + "\naiConsumerAuthorizationAvailable="
                 + result.consumerAuthorizationAvailable();
+    }
+
+    private static String aiConsumerConsentLines(AiConsumerConsentResult result) {
+        return "aiConsumerConsent="
+                + result.status().name()
+                + "\naiConsumerPurpose="
+                + result.purposeDisplay()
+                + "\naiConsumerDataScope="
+                + result.dataScopeDisplay()
+                + "\naiConsumerConsentAvailable="
+                + result.consentAvailable()
+                + "\naiClinicalDataAccessAllowed="
+                + result.clinicalDataAccessAllowed();
     }
 
     private static String agentLines(DeterministicAgentResult result) {

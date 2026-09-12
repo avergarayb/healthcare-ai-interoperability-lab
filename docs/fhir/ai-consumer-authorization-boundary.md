@@ -136,4 +136,6 @@ aiConsumerAuthorizationAvailable=false
 
 ## Next steps outside this task
 
+Task 066 adds a deny-by-default consent and purpose boundary over this result. See [ai-consumer-consent-boundary.md](ai-consumer-consent-boundary.md). Consumer authorization remains unimplemented.
+
 A later task may add a real identity provider, verified scopes, or a later handoff decision. That work is not Task 065. `AUTHORIZATION_NOT_IMPLEMENTED` must stay the default until those controls exist.
