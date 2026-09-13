@@ -79,6 +79,8 @@ Result B: explicit confidential-auth diagnosis
 | `http://localhost:8081/api/ai-consumer-clinical-data-enforcement-execution-verification/v1` | same enforcement-execution verification verdict as JSON |
 | `http://localhost:8081/lab/ai-consumer-clinical-data-enforcement-verification-decision` | after a token and Patient ID: AI consumer clinical data enforcement verification decision (`VERIFICATION_DECISION_NOT_AVAILABLE`) |
 | `http://localhost:8081/api/ai-consumer-clinical-data-enforcement-verification-decision/v1` | same verification-decision verdict as JSON |
+| `http://localhost:8081/lab/ai-consumer-enforcement-verification-approval` | after a token and Patient ID: AI consumer enforcement verification approval (`VERIFICATION_APPROVAL_NOT_AVAILABLE`) |
+| `http://localhost:8081/api/ai-consumer-enforcement-verification-approval/v1` | same verification-approval verdict as JSON |
 | `http://localhost:8081/smart/callback` | registered redirect; validates callback and attempts token exchange |
 | `http://localhost:8081/oracle/sandbox/fhir/patient-search` | after a token is issued: safe authenticated Patient search diagnosis |
 | `http://localhost:8081/oracle/sandbox/fhir/patient` | after a token and `ORACLE_HEALTH_SANDBOX_PATIENT_ID`: controlled Patient read diagnosis |

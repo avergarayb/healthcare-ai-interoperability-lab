@@ -183,6 +183,18 @@ class EpicSandboxClinicalProjectionControllerTest {
                         "aiConsumerEnforcementVerificationDecisionProviderConfigured=false")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString(
                         "aiConsumerVerificationApproved=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiConsumerEnforcementVerificationApproval=VERIFICATION_APPROVAL_NOT_AVAILABLE")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiConsumerVerificationApprovalAvailable=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiConsumerVerificationApprovalEvaluated=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiConsumerApprovalEvidenceEvaluated=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiConsumerApprovalPolicyEvaluated=false")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "aiConsumerApprovalHumanReviewRequired=true")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("access_token"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"resourceType\""))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("active"))))

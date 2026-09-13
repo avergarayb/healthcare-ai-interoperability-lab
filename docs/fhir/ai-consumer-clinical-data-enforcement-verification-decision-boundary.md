@@ -145,3 +145,5 @@ There is no real policy provider. There is no evidence store. There is no FHIR r
 - No model execution
 
 A later task may add a real policy engine or explicit human approval. That work is not Task 072.
+
+Task 073 adds a deny-by-default enforcement verification-approval boundary over this result. See [ai-consumer-enforcement-verification-approval-boundary.md](ai-consumer-enforcement-verification-approval-boundary.md). Verification remains not approved.
