@@ -906,6 +906,26 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Allowlist 042 was not expanded
 - `.env` was not modified
 
+## Task 074 — AI service model-boundary consumer
+
+- Status: COMPLETED
+- Tests: `python -m pytest` in `services/ai-service` = 23/0
+- Service: `services/ai-service` (FastAPI)
+- Consumes existing `GET /api/model-boundary/v1` without wrapping or changing v1 fields
+- Surface: `GET /internal/agent-context` on port `8090`
+- Live (Oracle SMART session, then `GET /lab/agent-stub` and `GET /internal/agent-context`):
+  - Java stub: `outcome=SNAPSHOT_COMPLETE` `hasClinicalData=true` `consumed=true` `modelCalled=false`
+  - Python consumer: `status=received` `modelCalled=false` `contractVersion=v1` `outcome=SNAPSHOT_COMPLETE` `reason=null`
+- Output: `status=received|rejected`, `modelCalled=false`, `contractVersion`, `outcome`, `reason`
+- `SNAPSHOT_PARTIAL` with retained context is `received`
+- Empty context uses `retainedCount > 0` only (`medicationRequests: null` is valid)
+- Non-200 Java HTTP uses `boundary_http_4xx` / `boundary_http_5xx` and does not parse the body
+- Laboratory timeout default is 90 seconds; mocked tests use 5 seconds
+- Java sources, allowlist 042, and Model Boundary Contract v1 fields were not changed
+- No language-model client, Epic/Oracle/HAPI/SMART access, or service-to-service authentication
+- Service-to-service authentication remains Task 075; language-model integration remains Task 076
+- Java endpoint remains open (documented laboratory debt)
+- `.env` was not modified
 
 
 
