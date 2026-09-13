@@ -132,3 +132,5 @@ There is no real execution provider. There is no FHIR read.
 - No model execution
 
 A later task may add a real enforcement provider. That work is not Task 070.
+
+Task 071 adds a deny-by-default clinical data-access enforcement-execution verification boundary over this result. See [ai-consumer-clinical-data-enforcement-execution-verification-boundary.md](ai-consumer-clinical-data-enforcement-execution-verification-boundary.md). Execution remains not verified.

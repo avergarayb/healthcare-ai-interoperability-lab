@@ -23,6 +23,8 @@ import lab.healthcare.fhir.aiconsumerenforcement.AiConsumerClinicalDataEnforceme
 import lab.healthcare.fhir.aiconsumerenforcement.AiConsumerClinicalDataEnforcementResult;
 import lab.healthcare.fhir.aiconsumerenforcementexecution.AiConsumerClinicalDataEnforcementExecutionBoundary;
 import lab.healthcare.fhir.aiconsumerenforcementexecution.AiConsumerClinicalDataEnforcementExecutionResult;
+import lab.healthcare.fhir.aiconsumerenforcementverification.AiConsumerClinicalDataEnforcementExecutionVerificationBoundary;
+import lab.healthcare.fhir.aiconsumerenforcementverification.AiConsumerClinicalDataEnforcementExecutionVerificationResult;
 import lab.healthcare.fhir.aiconsumerscope.AiConsumerDataScopeBoundary;
 import lab.healthcare.fhir.aiconsumerscope.AiConsumerDataScopeResult;
 import lab.healthcare.fhir.aihandoffauthorization.AiHandoffAuthorizationBoundary;
@@ -444,6 +446,10 @@ public final class SmartLabPages {
                 AiConsumerClinicalDataEnforcementBoundary.evaluate(consumerClinicalDataAccess);
         AiConsumerClinicalDataEnforcementExecutionResult consumerClinicalDataEnforcementExecution =
                 AiConsumerClinicalDataEnforcementExecutionBoundary.evaluate(consumerClinicalDataEnforcement);
+        AiConsumerClinicalDataEnforcementExecutionVerificationResult
+                consumerClinicalDataEnforcementExecutionVerification =
+                        AiConsumerClinicalDataEnforcementExecutionVerificationBoundary.evaluate(
+                                consumerClinicalDataEnforcementExecution);
         String extra = result.detail() == null || result.detail().isBlank()
                 ? ""
                 : "<p>detail=" + escape(result.detail()) + "</p>";
@@ -521,7 +527,10 @@ public final class SmartLabPages {
                                         + aiConsumerClinicalDataEnforcementLines(consumerClinicalDataEnforcement)
                                         + "\n"
                                         + aiConsumerClinicalDataEnforcementExecutionLines(
-                                                consumerClinicalDataEnforcementExecution)),
+                                                consumerClinicalDataEnforcementExecution)
+                                        + "\n"
+                                        + aiConsumerClinicalDataEnforcementExecutionVerificationLines(
+                                                consumerClinicalDataEnforcementExecutionVerification)),
                                 extra));
     }
 
@@ -664,6 +673,17 @@ public final class SmartLabPages {
                 <pre>%s</pre>
                 """
                         .formatted(escape(aiConsumerClinicalDataEnforcementExecutionLines(result))));
+    }
+
+    public static String aiConsumerClinicalDataEnforcementExecutionVerification(
+            AiConsumerClinicalDataEnforcementExecutionVerificationResult result) {
+        return page(
+                "AI consumer clinical data enforcement execution verification",
+                """
+                <p>AI consumer clinical data-access enforcement-execution verification boundary. Claimed execution is not verified evidence and verification is not a FHIR read. No token, Patient ID, projected values, FHIR JSON, or model output are shown.</p>
+                <pre>%s</pre>
+                """
+                        .formatted(escape(aiConsumerClinicalDataEnforcementExecutionVerificationLines(result))));
     }
 
     private static String aiBoundaryLines(AiBoundaryResult result) {
@@ -813,6 +833,26 @@ public final class SmartLabPages {
                 + result.enforcementExecutionProviderConfigured()
                 + "\naiConsumerEnforcementExecutionPerformed="
                 + result.enforcementExecutionPerformed();
+    }
+
+    private static String aiConsumerClinicalDataEnforcementExecutionVerificationLines(
+            AiConsumerClinicalDataEnforcementExecutionVerificationResult result) {
+        return "aiConsumerClinicalDataEnforcementExecutionVerification="
+                + result.status().name()
+                + "\naiConsumerVerificationDecisionAvailable="
+                + result.verificationDecisionAvailable()
+                + "\naiConsumerVerificationDecisionEvaluated="
+                + result.verificationDecisionEvaluated()
+                + "\naiConsumerExecutionEvidenceAvailable="
+                + result.executionEvidenceAvailable()
+                + "\naiConsumerExecutionEvidenceEvaluated="
+                + result.executionEvidenceEvaluated()
+                + "\naiConsumerExecutionVerificationAvailable="
+                + result.executionVerificationAvailable()
+                + "\naiConsumerExecutionVerificationProviderConfigured="
+                + result.executionVerificationProviderConfigured()
+                + "\naiConsumerExecutionVerified="
+                + result.executionVerified();
     }
 
     private static String agentLines(DeterministicAgentResult result) {
