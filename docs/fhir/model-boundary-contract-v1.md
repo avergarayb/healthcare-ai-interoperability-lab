@@ -67,6 +67,8 @@ Task 072 adds a deny-by-default clinical data-access enforcement verification-de
 
 Task 073 adds a deny-by-default enforcement verification-approval boundary. It does not add clinical fields or grant access. See [ai-consumer-enforcement-verification-approval-boundary.md](ai-consumer-enforcement-verification-approval-boundary.md).
 
+Task 074 adds an external FastAPI consumer in `services/ai-service` that calls `GET /api/model-boundary/v1` and returns `received` or `rejected` with `modelCalled=false`. It does not change this contract. See [ai-service-model-boundary-consumer.md](ai-service-model-boundary-consumer.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.

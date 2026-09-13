@@ -40,15 +40,13 @@ This repository is independent. It is not CareFlow and must not import or reuse 
 
 Only create components when their responsibility is justified.
 
-Initial service:
+Services:
 - `fhir-integration-service` — Java 21 / Spring Boot
+- `ai-service` — Python / FastAPI consumer of Model Boundary Contract v1 (Task 074; no language-model runtime yet)
 
 Initial infrastructure:
 - HAPI FHIR
 - PostgreSQL
-
-Future service:
-- `ai-service` — Python / FastAPI
 
 ## Git Strategy
 
