@@ -141,3 +141,5 @@ There is no real verification provider. There is no evidence store. There is no 
 - No model execution
 
 A later task may add a real evidence or verification provider. That work is not Task 071.
+
+Task 072 adds a deny-by-default clinical data-access enforcement verification-decision boundary over this result. See [ai-consumer-clinical-data-enforcement-verification-decision-boundary.md](ai-consumer-clinical-data-enforcement-verification-decision-boundary.md). Verification remains not decided.
