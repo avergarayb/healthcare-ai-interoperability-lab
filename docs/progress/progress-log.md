@@ -860,6 +860,52 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Allowlist 042 was not expanded
 - `.env` was not modified
 
+## Task 073 — AI consumer enforcement verification approval boundary
+
+- Status: COMPLETED
+- `mvn test`: 963/0
+- Branch: `feature/ai-consumer-enforcement-verification-approval-boundary`
+- Epic sandbox live result (`GET /epic/sandbox/fhir/clinical-projection`, HTTP 200):
+  - `controlledProjection=SUCCEEDED`
+  - `modelBoundaryContract=v1`
+  - `deterministicAgent=READY`
+  - `aiBoundary=PREPARED`
+  - `modelCallAuthorized=false`
+  - `aiProcessingStatus=NOT_EXECUTED`
+  - `aiDispatchStatus=NOT_DISPATCHED`
+  - `aiHandoffAuthorization=HANDOFF_NOT_AUTHORIZED`
+  - `aiConsumerAuthorization=AUTHORIZATION_NOT_IMPLEMENTED`
+  - `aiConsumerConsent=CONSENT_NOT_IMPLEMENTED`
+  - `aiConsumerClinicalDataScope=NOT_READY_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerClinicalDataAccess=NOT_GRANTED_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerClinicalDataEnforcement=NOT_ENFORCED_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerClinicalDataEnforcementExecution=NOT_EXECUTED_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerClinicalDataEnforcementExecutionVerification=NOT_VERIFIED_FOR_CLINICAL_DATA_ACCESS`
+  - `aiConsumerClinicalDataEnforcementVerificationDecision=VERIFICATION_DECISION_NOT_AVAILABLE`
+  - `aiConsumerEnforcementVerificationApproval=VERIFICATION_APPROVAL_NOT_AVAILABLE`
+  - `aiConsumerVerificationApprovalAvailable=false`
+  - `aiConsumerVerificationApprovalEvaluated=false`
+  - `aiConsumerVerificationApproved=false`
+  - `aiConsumerApprovalEvidenceEvaluated=false`
+  - `aiConsumerApprovalPolicyEvaluated=false`
+  - `aiConsumerApprovalHumanReviewRequired=true`
+  - `aiClinicalDataAccessGranted=false`
+  - `aiClinicalDataAccessEnforced=false`
+  - `aiConsumerEnforcementExecutionPerformed=false`
+  - `aiConsumerExecutionVerified=false`
+  - `requiresHumanReview=true`
+- Package `lab.healthcare.fhir.aiconsumerenforcementverificationapproval` consumes only `AiConsumerVerificationDecisionResult` plus a synthetic `ClinicalDataEnforcementVerificationApprovalContext`
+- Deny-by-default: a valid 072 result still yields `VERIFICATION_APPROVAL_NOT_AVAILABLE`
+- Synthetic approval claims are `HUMAN_REVIEW_REQUIRED`, not `verificationApproved=true`
+- Query parameters and headers cannot activate approval
+- `verificationApprovalAvailable=false`, `verificationApprovalEvaluated=false`, `verificationApproved=false`, `approvalEvidenceEvaluated=false`, `approvalPolicyEvaluated=false`, `approvalHumanReviewRequired=true`
+- Existing confirmation surface reused: `GET /epic/sandbox/fhir/clinical-projection` now also shows `aiConsumerEnforcementVerificationApproval=VERIFICATION_APPROVAL_NOT_AVAILABLE`
+- New lab surfaces: `GET /lab/ai-consumer-enforcement-verification-approval`, `GET /api/ai-consumer-enforcement-verification-approval/v1` (Oracle-backed provider)
+- Approval rules are documented in `docs/fhir/ai-consumer-enforcement-verification-approval-boundary.md`
+- No Python `ai-service`, real policy engine, approval store, OAuth, JWT, SMART, LLM, RAG, HTTP dispatch, handoff, FHIR read, or vendor client was added
+- Allowlist 042 was not expanded
+- `.env` was not modified
+
 
 
 

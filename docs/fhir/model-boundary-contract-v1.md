@@ -65,6 +65,8 @@ Task 071 adds a deny-by-default clinical data-access enforcement-execution verif
 
 Task 072 adds a deny-by-default clinical data-access enforcement verification-decision boundary. It does not add clinical fields or approve verification. See [ai-consumer-clinical-data-enforcement-verification-decision-boundary.md](ai-consumer-clinical-data-enforcement-verification-decision-boundary.md).
 
+Task 073 adds a deny-by-default enforcement verification-approval boundary. It does not add clinical fields or grant access. See [ai-consumer-enforcement-verification-approval-boundary.md](ai-consumer-enforcement-verification-approval-boundary.md).
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.
