@@ -385,6 +385,8 @@ Task 070 evaluates a deny-by-default clinical data-access enforcement-execution 
 
 Task 071 evaluates a deny-by-default clinical data-access enforcement-execution verification boundary (`aiConsumerClinicalDataEnforcementExecutionVerification=NOT_VERIFIED_FOR_CLINICAL_DATA_ACCESS`). See [ai-consumer-clinical-data-enforcement-execution-verification-boundary.md](../ai-consumer-clinical-data-enforcement-execution-verification-boundary.md). New lab surfaces: `GET /lab/ai-consumer-clinical-data-enforcement-execution-verification` and `GET /api/ai-consumer-clinical-data-enforcement-execution-verification/v1`.
 
+Task 072 evaluates a deny-by-default clinical data-access enforcement verification-decision boundary (`aiConsumerClinicalDataEnforcementVerificationDecision=VERIFICATION_DECISION_NOT_AVAILABLE`). See [ai-consumer-clinical-data-enforcement-verification-decision-boundary.md](../ai-consumer-clinical-data-enforcement-verification-decision-boundary.md). New lab surfaces: `GET /lab/ai-consumer-clinical-data-enforcement-verification-decision` and `GET /api/ai-consumer-clinical-data-enforcement-verification-decision/v1`.
+
 ## Architecture rules
 
 - `FhirService` does not import `lab.healthcare.fhir.vendor.epic`.
