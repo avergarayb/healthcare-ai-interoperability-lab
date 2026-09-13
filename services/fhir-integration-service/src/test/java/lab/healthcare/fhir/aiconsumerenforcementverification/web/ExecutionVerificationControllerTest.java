@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(AiConsumerClinicalDataEnforcementExecutionVerificationController.class)
-class AiConsumerClinicalDataEnforcementExecutionVerificationControllerTest {
+class ExecutionVerificationControllerTest {
 
     private static final String HIDDEN_PATIENT = "lab-hidden-patient";
 
