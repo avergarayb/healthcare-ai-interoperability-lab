@@ -69,6 +69,8 @@ Task 073 adds a deny-by-default enforcement verification-approval boundary. It d
 
 Task 074 adds an external FastAPI consumer in `services/ai-service` that calls `GET /api/model-boundary/v1` and returns `received` or `rejected` with `modelCalled=false`. It does not change this contract. See [ai-service-model-boundary-consumer.md](ai-service-model-boundary-consumer.md).
 
+Task 075 requires header `X-Service-Token` on that GET. A valid token does not change v1 fields or HTTP mapping. Service 401 has no contract body. See the same note.
+
 ## What the stub must not know
 
 FHIR, HAPI, Epic, Oracle, SMART, tokens, Patient IDs, or EHR URLs. Vendor adapters choose `ClinicalSnapshotContents` before the contract.

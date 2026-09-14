@@ -60,6 +60,7 @@ def settings() -> Settings:
         model_boundary_base_url="http://model-boundary.test",
         model_boundary_path="/api/model-boundary/v1",
         model_boundary_timeout_seconds=5,
+        model_boundary_service_token="test-model-boundary-token",
         host="127.0.0.1",
         port=8090,
     )

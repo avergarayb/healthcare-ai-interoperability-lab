@@ -505,7 +505,7 @@ GET /lab/agent-stub          HTML observation (counts only)
 GET /api/agent-stub/v1       JSON AgentStubObservation
 ```
 
-`modelCalled` is always false. Oracle is only the current provider behind the contract. Java does not self-call `/api/model-boundary/v1`. Task 074 `ai-service` is an external FastAPI consumer of that GET. It does not call a language model. See [../ai-service-model-boundary-consumer.md](../ai-service-model-boundary-consumer.md).
+`modelCalled` is always false. Oracle is only the current provider behind the contract. Java does not self-call `/api/model-boundary/v1`. Task 074 `ai-service` is an external FastAPI consumer of that GET. Task 075 requires `X-Service-Token` on the GET; a valid token does not change the v1 body. It does not call a language model. See [../ai-service-model-boundary-consumer.md](../ai-service-model-boundary-consumer.md).
 
 ## Architecture rules
 

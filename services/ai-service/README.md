@@ -17,7 +17,7 @@ received | rejected  (modelCalled=false)
 ## What this service does
 
 1. Receives `GET /internal/agent-context`.
-2. Calls `GET {MODEL_BOUNDARY_BASE_URL}{MODEL_BOUNDARY_PATH}`.
+2. Calls `GET {MODEL_BOUNDARY_BASE_URL}{MODEL_BOUNDARY_PATH}` with `X-Service-Token` when `MODEL_BOUNDARY_SERVICE_TOKEN` is set.
 3. Validates HTTP, JSON, required v1 fields, and `outcome`.
 4. Decides `received` or `rejected`.
 5. Always returns `modelCalled=false`.
@@ -29,9 +29,9 @@ It consumes the Java contract as-is. It does not wrap it, copy `records`, or add
 - Language models, prompts, summaries, RAG, LangGraph, MCP
 - Direct Epic, Oracle, HAPI FHIR, or SMART access
 - Patient CRUD or new Java clinical endpoints
-- Service-to-service authentication (documented debt; Task 075)
+- OAuth, production identity, or fine-grained clinical authorization
 
-The Java endpoint is open for laboratory use only. That is not a production configuration.
+Task 075 protects `GET /api/model-boundary/v1` with a laboratory shared secret. That is not a production identity system. Task 076 is the language-model call.
 
 ## Endpoints
 
@@ -49,6 +49,7 @@ Copy `.env.example`. Do not commit `.env`.
 | `MODEL_BOUNDARY_BASE_URL` | `http://localhost:8081` | Java service |
 | `MODEL_BOUNDARY_PATH` | `/api/model-boundary/v1` | Existing contract surface |
 | `MODEL_BOUNDARY_TIMEOUT_SECONDS` | `90` | Java snapshot can take ~60s per socket |
+| `MODEL_BOUNDARY_SERVICE_TOKEN` | (empty) | Same value as Java. Empty omits the header; Java then returns 401 |
 | `AI_SERVICE_HOST` | `0.0.0.0` | |
 | `AI_SERVICE_PORT` | `8090` | |
 

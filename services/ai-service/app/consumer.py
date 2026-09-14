@@ -52,7 +52,10 @@ def fetch_contract(settings: Settings, client: Optional[httpx.Client] = None) ->
     close_client = client is None
     http_client = client or httpx.Client(timeout=settings.model_boundary_timeout_seconds)
     try:
-        response = http_client.get(settings.model_boundary_url)
+        headers = {}
+        if settings.model_boundary_service_token:
+            headers["X-Service-Token"] = settings.model_boundary_service_token
+        response = http_client.get(settings.model_boundary_url, headers=headers)
         return BoundaryResponse(kind="http", status_code=response.status_code, body_text=response.text)
     except httpx.TimeoutException:
         return BoundaryResponse(kind="timeout")

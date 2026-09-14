@@ -1,4 +1,4 @@
-"""Environment settings. No secrets are required for Task 074."""
+"""Environment settings. Do not log MODEL_BOUNDARY_SERVICE_TOKEN."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ class Settings:
     model_boundary_base_url: str
     model_boundary_path: str
     model_boundary_timeout_seconds: float
+    model_boundary_service_token: str
     host: str
     port: int
 
@@ -38,6 +39,7 @@ class Settings:
             model_boundary_base_url=os.getenv("MODEL_BOUNDARY_BASE_URL", "http://localhost:8081").strip(),
             model_boundary_path=os.getenv("MODEL_BOUNDARY_PATH", "/api/model-boundary/v1").strip(),
             model_boundary_timeout_seconds=timeout,
+            model_boundary_service_token=os.getenv("MODEL_BOUNDARY_SERVICE_TOKEN", "").strip(),
             host=os.getenv("AI_SERVICE_HOST", "0.0.0.0").strip() or "0.0.0.0",
             port=port,
         )
