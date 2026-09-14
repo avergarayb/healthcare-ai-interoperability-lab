@@ -927,6 +927,22 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Java endpoint remains open (documented laboratory debt)
 - `.env` was not modified
 
+## Task 075 — Model boundary service-to-service authentication
+
+- Status: COMPLETED
+- Tests: Java `mvn test` passed; `services/ai-service` pytest 26/0
+- Live (`GET /internal/agent-context` after Oracle SMART and matching `X-Service-Token`):
+  - `status=received` `modelCalled=false` `contractVersion=v1` `outcome=SNAPSHOT_COMPLETE` `reason=null`
+- `GET /api/model-boundary/v1` requires `X-Service-Token` matching `MODEL_BOUNDARY_SERVICE_TOKEN`
+- Missing, empty, wrong, or unconfigured token: HTTP 401 before `currentContract()`, no contract body
+- Valid token reaches the existing controller; HTTP still follows `ModelBoundaryHttpStatuses`
+- `/lab/*` and SMART are unchanged
+- `ai-service` sends the same header; 401 maps to `rejected` / `boundary_http_4xx`
+- Dummy in tests only: `test-model-boundary-token`
+- Allowlist 042 and Model Boundary Contract v1 fields were not changed
+- No LLM, OAuth, SMART change, or new clinical endpoints
+- Task 076 remains the language-model integration
+- `.env` was not modified
 
 
 

@@ -10,10 +10,14 @@ import lab.healthcare.fhir.patient.PatientContextSource;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotResourceStatus;
 
+import lab.healthcare.fhir.modelboundary.ModelBoundaryServiceTokenSettings;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -27,6 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(ModelBoundaryContractController.class)
+@Import({ModelBoundaryServiceAuthConfiguration.class, ModelBoundaryServiceTokenSettings.class})
+@TestPropertySource(properties = "MODEL_BOUNDARY_SERVICE_TOKEN=" + ModelBoundaryServiceTokenSettings.TEST_DUMMY)
 class ModelBoundaryContractControllerTest {
 
     private static final String PATIENT_ID = "secret-patient-12724067";
@@ -52,7 +58,8 @@ class ModelBoundaryContractControllerTest {
                         null,
                         null));
 
-        mockMvc.perform(get("/api/model-boundary/v1"))
+        mockMvc.perform(get("/api/model-boundary/v1")
+                        .header(ModelBoundaryServiceTokenSettings.HEADER, ModelBoundaryServiceTokenSettings.TEST_DUMMY))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.contractVersion").value("v1"))
@@ -65,7 +72,8 @@ class ModelBoundaryContractControllerTest {
     void completeReturnsExactV1ContractIncludingRecords() throws Exception {
         when(provider.currentContract()).thenReturn(completeContract());
 
-        mockMvc.perform(get("/api/model-boundary/v1"))
+        mockMvc.perform(get("/api/model-boundary/v1")
+                        .header(ModelBoundaryServiceTokenSettings.HEADER, ModelBoundaryServiceTokenSettings.TEST_DUMMY))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.contractVersion").value("v1"))

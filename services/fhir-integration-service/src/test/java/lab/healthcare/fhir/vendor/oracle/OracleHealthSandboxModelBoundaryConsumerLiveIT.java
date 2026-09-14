@@ -1,6 +1,7 @@
 package lab.healthcare.fhir.vendor.oracle;
 
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContractVersion;
+import lab.healthcare.fhir.modelboundary.ModelBoundaryServiceTokenSettings;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
 
 import org.junit.jupiter.api.Test;
@@ -42,7 +43,8 @@ class OracleHealthSandboxModelBoundaryConsumerLiveIT {
         assumeThat(oracleHealthSandboxProfile.enabled()).isTrue();
         assumeThat(oracleHealthSandboxProfile.fhirBaseUrl()).isNotBlank();
 
-        MvcResult result = mockMvc.perform(get("/api/model-boundary/v1"))
+        MvcResult result = mockMvc.perform(get("/api/model-boundary/v1")
+                        .header(ModelBoundaryServiceTokenSettings.HEADER, ModelBoundaryServiceTokenSettings.TEST_DUMMY))
                 .andReturn();
         JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
 

@@ -2,6 +2,7 @@ package lab.healthcare.fhir.vendor.oracle;
 
 import lab.healthcare.fhir.client.FhirService;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContractVersion;
+import lab.healthcare.fhir.modelboundary.ModelBoundaryServiceTokenSettings;
 import lab.healthcare.fhir.server.FhirServerProfile;
 import lab.healthcare.fhir.vendor.FhirVendor;
 
@@ -41,7 +42,8 @@ class OracleHealthSandboxModelBoundaryConsumerIT {
         assertThat(oracleHealthSandboxProfile.enabled()).isFalse();
         assertThat(fhirService).isNotNull();
 
-        mockMvc.perform(get("/api/model-boundary/v1"))
+        mockMvc.perform(get("/api/model-boundary/v1")
+                        .header(ModelBoundaryServiceTokenSettings.HEADER, ModelBoundaryServiceTokenSettings.TEST_DUMMY))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.contractVersion").value(ModelBoundaryContractVersion.V1))

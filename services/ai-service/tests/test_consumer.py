@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 from fastapi.testclient import TestClient
 
+from app.config import Settings
 from app.consumer import BoundaryResponse, consume, evaluate
 from app.main import app, get_settings
 from app.models import RESULT_FIELDS
@@ -175,7 +176,7 @@ def test_health():
 
 
 def test_consume_timeout_from_httpx(settings, monkeypatch):
-    def boom(self, url):
+    def boom(self, url, **kwargs):
         raise httpx.TimeoutException("slow")
 
     monkeypatch.setattr(httpx.Client, "get", boom)
@@ -185,12 +186,61 @@ def test_consume_timeout_from_httpx(settings, monkeypatch):
 
 
 def test_consume_connection_from_httpx(settings, monkeypatch):
-    def boom(self, url):
+    def boom(self, url, **kwargs):
         raise httpx.ConnectError("down")
 
     monkeypatch.setattr(httpx.Client, "get", boom)
     result = consume(settings, "corr-2")
     assert result.reason == "boundary_connection_error"
+
+
+def test_sends_service_token_header(settings, valid_contract):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["token"] = request.headers.get("X-Service-Token")
+        return httpx.Response(200, json=valid_contract)
+
+    with httpx.Client(transport=httpx.MockTransport(handler), timeout=5) as client:
+        result = consume(settings, "corr-auth", client=client)
+    assert seen["token"] == "test-model-boundary-token"
+    assert result.status == "received"
+    assert result.modelCalled is False
+
+
+def test_omits_service_token_header_when_unconfigured(valid_contract):
+    seen = {}
+    settings = Settings(
+        model_boundary_base_url="http://model-boundary.test",
+        model_boundary_path="/api/model-boundary/v1",
+        model_boundary_timeout_seconds=5,
+        model_boundary_service_token="",
+        host="127.0.0.1",
+        port=8090,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["has_header"] = "X-Service-Token" in request.headers
+        return httpx.Response(401, text="")
+
+    with httpx.Client(transport=httpx.MockTransport(handler), timeout=5) as client:
+        result = consume(settings, "corr-no-token", client=client)
+    assert seen["has_header"] is False
+    assert result.status == "rejected"
+    assert result.reason == "boundary_http_4xx"
+    assert result.modelCalled is False
+
+
+def test_invalid_service_token_is_rejected(settings):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text="")
+
+    with httpx.Client(transport=httpx.MockTransport(handler), timeout=5) as client:
+        result = consume(settings, "corr-bad-token", client=client)
+    assert result.status == "rejected"
+    assert result.reason == "boundary_http_4xx"
+    assert result.contractVersion is None
+    assert result.modelCalled is False
 
 
 def test_retained_count_does_not_read_records():

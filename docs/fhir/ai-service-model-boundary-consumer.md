@@ -27,8 +27,14 @@ Empty context uses collection `retainedCount` only, the same idea as `AgentStub.
 - Health: `GET /health`
 - Upstream: `GET /api/model-boundary/v1` on port `8081`
 
-## Known debt
+## Service authentication (Task 075)
 
-The Java contract endpoint is unauthenticated. Task 075 is service-to-service authentication. Task 076 is a language-model call behind an explicit authorization check.
+`GET /api/model-boundary/v1` requires header `X-Service-Token` matching `MODEL_BOUNDARY_SERVICE_TOKEN` on both processes.
+
+Missing, empty, or wrong token: Java returns HTTP 401 **before** `currentContract()`, with no contract body and no Oracle/Epic call. If the Java variable is blank, that HTTP surface stays fail-closed; Spring Boot, `/lab/*`, and SMART stay up.
+
+A valid token only lets the request reach the existing controller. HTTP still follows `ModelBoundaryHttpStatuses` (200 / 401 / 409 / 502). Service 401 is not SMART `AUTHENTICATION_REQUIRED`. Python maps any Java 4xx to `rejected` / `boundary_http_4xx`.
+
+This is a laboratory shared secret, not production identity. Fine-grained authorization and Task 076 (LLM) remain open.
 
 See `services/ai-service/README.md`.
