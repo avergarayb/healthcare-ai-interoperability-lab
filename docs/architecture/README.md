@@ -1,3 +1,3 @@
-Architecture decisions for this laboratory live in [`../PROJECT.md`](../PROJECT.md). The first numbered ADR is [`../adr/ADR-076-controlled-gemini-integration.md`](../adr/ADR-076-controlled-gemini-integration.md).
+Architecture decisions for this laboratory live in [`../PROJECT.md`](../PROJECT.md). The first numbered ADR is [`../adr/ADR-076-controlled-gemini-integration.md`](../adr/ADR-076-controlled-gemini-integration.md). The technical (non-legal) laboratory state after Tasks 076–077 is [`../ai-governance/laboratory-state.md`](../ai-governance/laboratory-state.md). The experimental LLM threat model (Phase B, docs only) is [`../ai-governance/llm-boundary-threats-and-controls.md`](../ai-governance/llm-boundary-threats-and-controls.md).
 
 This directory is reserved for later design notes. Do not duplicate `PROJECT.md` here.
