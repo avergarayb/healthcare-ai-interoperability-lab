@@ -944,6 +944,21 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Task 076 remains the language-model integration
 - `.env` was not modified
 
+## Task 076 — Controlled Gemini integration
+
+- Status: COMPLETED
+- Tests: `services/ai-service` pytest 49 passed / 1 skipped (live Gemini opt-in); Java `mvn test` exit 0 (unchanged sources)
+- Service: `services/ai-service` only
+- Surface: `POST /internal/experimental-summary`
+- Provider: Gemini `gemini-2.5-flash` via `google-genai==2.24.0`
+- Input: exact synthetic fixture `SYN-076-001`
+- Default: `LLM_EXPERIMENTAL_ENABLED=false`; blank `MODEL_BOUNDARY_SERVICE_TOKEN` is 401
+- `/internal/agent-context`, Model Boundary Contract v1, and Java sources were not changed
+- `requiresHumanReview=true` is application-owned; `modelCalled` is true only after provider invocation starts
+- Live Gemini tests are opt-in (`RUN_LIVE_GEMINI_TESTS=false`)
+- ADR: `docs/adr/ADR-076-controlled-gemini-integration.md`
+- `.env` was not modified
+
 
 
 

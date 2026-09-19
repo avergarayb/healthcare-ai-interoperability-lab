@@ -1,6 +1,8 @@
 # ai-service
 
-Task 074 laboratory consumer for Product B. FastAPI reads the existing Java Model Boundary Contract v1 and stops. It does not call a language model.
+Task 074 laboratory consumer for Product B. FastAPI reads the existing Java Model Boundary Contract v1 and stops. That path does not call a language model.
+
+Task 076 adds a separate, disabled-by-default experimental Gemini summary that accepts only fixture `SYN-076-001`. It does not consume v1 or call Java, Epic, Oracle, or HAPI.
 
 ```text
 Epic / Oracle sandbox
@@ -24,14 +26,17 @@ received | rejected  (modelCalled=false)
 
 It consumes the Java contract as-is. It does not wrap it, copy `records`, or add `usable` / `requiresHumanReview` / `modelCallAuthorized`.
 
+Task 076 is a second path. It does not change the v1 consumer.
+
 ## What this service does not do
 
-- Language models, prompts, summaries, RAG, LangGraph, MCP
+- RAG, LangGraph, MCP, or a second LLM provider
 - Direct Epic, Oracle, HAPI FHIR, or SMART access
 - Patient CRUD or new Java clinical endpoints
 - OAuth, production identity, or fine-grained clinical authorization
+- Sending `ModelBoundaryContract` v1 or live EHR data to Gemini
 
-Task 075 protects `GET /api/model-boundary/v1` with a laboratory shared secret. That is not a production identity system. Task 076 is the language-model call.
+Task 075 protects `GET /api/model-boundary/v1` with a laboratory shared secret. `POST /internal/experimental-summary` reuses the same token on the Python side and stays fail-closed when the token is blank.
 
 ## Endpoints
 
@@ -39,6 +44,7 @@ Task 075 protects `GET /api/model-boundary/v1` with a laboratory shared secret. 
 |---|---|---|
 | `GET` | `/health` | Process liveness |
 | `GET` | `/internal/agent-context` | Consume the Java v1 contract |
+| `POST` | `/internal/experimental-summary` | Gated Gemini summary of fixture `SYN-076-001` |
 
 ## Environment
 
@@ -52,6 +58,10 @@ Copy `.env.example`. Do not commit `.env`.
 | `MODEL_BOUNDARY_SERVICE_TOKEN` | (empty) | Same value as Java. Empty omits the header; Java then returns 401 |
 | `AI_SERVICE_HOST` | `0.0.0.0` | |
 | `AI_SERVICE_PORT` | `8090` | |
+| `LLM_EXPERIMENTAL_ENABLED` | `false` | `true` required before any Gemini call |
+| `GEMINI_API_KEY` | (empty) | Python only. Never commit a real value |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | |
+| `RUN_LIVE_GEMINI_TESTS` | `false` | Opt-in live pytest |
 
 Use `5` seconds only in mocked tests.
 
@@ -99,6 +109,15 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8090
 GET http://localhost:8090/internal/agent-context
 ```
 
+Experimental Gemini (disabled unless `LLM_EXPERIMENTAL_ENABLED=true` and `GEMINI_API_KEY` is set):
+
+```http
+POST http://localhost:8090/internal/experimental-summary
+X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
+```
+
+The body must be exactly fixture `SYN-076-001` from `app/experimental_fixture.py`.
+
 ## Tests
 
 ```bash
@@ -106,4 +125,4 @@ cd services/ai-service
 py -3 -m pytest
 ```
 
-Tests mock HTTP. They do not call Epic, Oracle, or a language model.
+Default tests mock HTTP and use `FakeLLMProvider`. They do not call Epic, Oracle, or Gemini. Live Gemini tests run only when `RUN_LIVE_GEMINI_TESTS=true`.

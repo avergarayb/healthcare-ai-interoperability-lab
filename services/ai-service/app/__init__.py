@@ -1,1 +1,1 @@
-"""Product B laboratory consumer. No language-model runtime."""
+"""Product B laboratory consumer plus a gated experimental Gemini summary."""

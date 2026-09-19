@@ -42,7 +42,7 @@ Only create components when their responsibility is justified.
 
 Services:
 - `fhir-integration-service` — Java 21 / Spring Boot
-- `ai-service` — Python / FastAPI consumer of Model Boundary Contract v1 (Task 074; no language-model runtime yet)
+- `ai-service` — Python / FastAPI consumer of Model Boundary Contract v1 (Task 074) and a gated experimental Gemini summary (Task 076; synthetic fixture only)
 
 Initial infrastructure:
 - HAPI FHIR

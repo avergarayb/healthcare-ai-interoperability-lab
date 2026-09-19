@@ -35,6 +35,8 @@ Missing, empty, or wrong token: Java returns HTTP 401 **before** `currentContrac
 
 A valid token only lets the request reach the existing controller. HTTP still follows `ModelBoundaryHttpStatuses` (200 / 401 / 409 / 502). Service 401 is not SMART `AUTHENTICATION_REQUIRED`. Python maps any Java 4xx to `rejected` / `boundary_http_4xx`.
 
-This is a laboratory shared secret, not production identity. Fine-grained authorization and Task 076 (LLM) remain open.
+This is a laboratory shared secret, not production identity. Fine-grained authorization remains open.
+
+Task 076 adds `POST /internal/experimental-summary` on the same Python process. That endpoint does not consume this v1 contract and does not call Java. See [ADR-076](../adr/ADR-076-controlled-gemini-integration.md).
 
 See `services/ai-service/README.md`.
