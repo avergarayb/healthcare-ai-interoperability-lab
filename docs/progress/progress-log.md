@@ -950,13 +950,25 @@ Safe laboratory evidence only. Do not record tokens, Patient identifiers, FHIR J
 - Tests: `services/ai-service` pytest 49 passed / 1 skipped (live Gemini opt-in); Java `mvn test` exit 0 (unchanged sources)
 - Service: `services/ai-service` only
 - Surface: `POST /internal/experimental-summary`
-- Provider: Gemini `gemini-2.5-flash` via `google-genai==2.24.0`
+- Provider: Gemini via `google-genai==2.24.0`. Task 076 specified `gemini-2.5-flash`; Task 077 aligned the repository default (see below)
 - Input: exact synthetic fixture `SYN-076-001`
 - Default: `LLM_EXPERIMENTAL_ENABLED=false`; blank `MODEL_BOUNDARY_SERVICE_TOKEN` is 401
 - `/internal/agent-context`, Model Boundary Contract v1, and Java sources were not changed
 - `requiresHumanReview=true` is application-owned; `modelCalled` is true only after provider invocation starts
 - Live Gemini tests are opt-in (`RUN_LIVE_GEMINI_TESTS=false`)
+- Live 2026-09-19 (synthetic fixture, no Java): `gemini-2.5-flash` → Google 404; `gemini-2.0-flash` → Google 404; `gemini-flash-latest` → 503 then 200 `COMPLETED` (`modelCalled=true`, `requiresHumanReview=true`)
 - ADR: `docs/adr/ADR-076-controlled-gemini-integration.md`
+- `.env` was not modified
+
+## Task 077 — Gemini model configuration and lifecycle alignment
+
+- Status: COMPLETED
+- Tests: `services/ai-service` pytest 53 passed / 1 skipped (live Gemini opt-in)
+- Repository default `GEMINI_MODEL` / `DEFAULT_MODEL` is `gemini-flash-latest`
+- `GEMINI_MODEL` remains an environment override; empty value falls back to that default
+- No model fallback, router, second provider, or retry architecture
+- Java, v1, 074, and 075 were not changed
+- Task 076 historical specification of `gemini-2.5-flash` remains in `TASK_076_CONTROLLED_LLM_INTEGRATION.md`
 - `.env` was not modified
 
 

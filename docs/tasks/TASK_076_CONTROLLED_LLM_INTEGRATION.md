@@ -1,5 +1,7 @@
 # Task 076 — Controlled LLM Integration via Google Gemini API
 
+Task 076 specified `gemini-2.5-flash`. After the 2026-09-19 live demo, Task 077 sets the repository default to `gemini-flash-latest`. `GEMINI_MODEL` remains overridable. Historical examples below still show the 076-specified id.
+
 **Status:** READY FOR IMPLEMENTATION — PRE-IMPLEMENTATION CONFLICTS CLOSED  
 **Canonical implementation spec:** this file  
 **Branch:** `feature/076-controlled-gemini-integration`  

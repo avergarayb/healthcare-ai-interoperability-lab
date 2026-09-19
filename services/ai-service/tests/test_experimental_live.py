@@ -30,7 +30,7 @@ def test_live_gemini_canonical_fixture():
         port=8090,
         llm_experimental_enabled=True,
         gemini_api_key=api_key,
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash",
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip() or "gemini-flash-latest",
     )
     app.dependency_overrides[get_settings] = lambda: settings
     try:

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 PROMPT_VERSION = "experimental-summary-v1"
 PROVIDER_NAME = "GEMINI"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-flash-latest"
 MAX_SUMMARY_CHARS = 2000
 PROVIDER_TIMEOUT_SECONDS = 30
 

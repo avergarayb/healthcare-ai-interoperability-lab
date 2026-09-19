@@ -16,7 +16,7 @@ class Settings:
     port: int
     llm_experimental_enabled: bool = False
     gemini_api_key: str = field(default="", repr=False)
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-flash-latest"
 
     @property
     def model_boundary_url(self) -> str:
@@ -48,5 +48,5 @@ class Settings:
             port=port,
             llm_experimental_enabled=enabled_raw == "true",
             gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash",
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip() or "gemini-flash-latest",
         )
