@@ -16,7 +16,7 @@ Prove that Product B can invoke one external model under an explicit feature gat
 ## Scope
 
 - Provider: Google Gemini only
-- Model: `gemini-2.5-flash` (configurable)
+- Model: Task 076 specified `gemini-2.5-flash` (configurable). Task 077 sets the repository default to `gemini-flash-latest` after the 2026-09-19 live demo (`gemini-2.5-flash` and `gemini-2.0-flash` returned Google 404; `gemini-flash-latest` returned 503 then 200). `GEMINI_MODEL` remains an override. There is no model fallback.
 - SDK: `google-genai==2.24.0`
 - Surface: `POST /internal/experimental-summary`
 - Input: exact fixture `SYN-076-001`

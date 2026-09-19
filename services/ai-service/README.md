@@ -60,7 +60,7 @@ Copy `.env.example`. Do not commit `.env`.
 | `AI_SERVICE_PORT` | `8090` | |
 | `LLM_EXPERIMENTAL_ENABLED` | `false` | `true` required before any Gemini call |
 | `GEMINI_API_KEY` | (empty) | Python only. Never commit a real value |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Override only. No automatic fallback if Google returns 404 |
 | `RUN_LIVE_GEMINI_TESTS` | `false` | Opt-in live pytest |
 
 Use `5` seconds only in mocked tests.
