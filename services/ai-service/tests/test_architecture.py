@@ -7,6 +7,8 @@ APP = ROOT / "app"
 REQUIREMENTS = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
 APP_SOURCE = "\n".join(path.read_text(encoding="utf-8") for path in APP.glob("*.py")).lower()
 
+ALLOWED_MODEL_DEPENDENCY = "google-genai"
+
 FORBIDDEN_DEPENDENCIES = (
     "openai",
     "anthropic",
@@ -35,6 +37,8 @@ FORBIDDEN_SOURCE = (
 def test_requirements_have_no_language_model_or_clinical_clients():
     for name in FORBIDDEN_DEPENDENCIES:
         assert name not in REQUIREMENTS
+    assert ALLOWED_MODEL_DEPENDENCY in REQUIREMENTS
+    assert "google-genai==" in REQUIREMENTS
 
 
 def test_app_source_does_not_call_a_language_model_or_clinical_host():

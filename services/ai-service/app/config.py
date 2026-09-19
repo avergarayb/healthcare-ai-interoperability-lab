@@ -1,9 +1,9 @@
-"""Environment settings. Do not log MODEL_BOUNDARY_SERVICE_TOKEN."""
+"""Environment settings. Do not log MODEL_BOUNDARY_SERVICE_TOKEN or GEMINI_API_KEY."""
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,9 @@ class Settings:
     model_boundary_service_token: str
     host: str
     port: int
+    llm_experimental_enabled: bool = False
+    gemini_api_key: str = field(default="", repr=False)
+    gemini_model: str = "gemini-2.5-flash"
 
     @property
     def model_boundary_url(self) -> str:
@@ -35,6 +38,7 @@ class Settings:
             raise ValueError("AI_SERVICE_PORT must be an integer") from exc
         if timeout <= 0:
             raise ValueError("MODEL_BOUNDARY_TIMEOUT_SECONDS must be greater than zero")
+        enabled_raw = os.getenv("LLM_EXPERIMENTAL_ENABLED", "false").strip().lower()
         return cls(
             model_boundary_base_url=os.getenv("MODEL_BOUNDARY_BASE_URL", "http://localhost:8081").strip(),
             model_boundary_path=os.getenv("MODEL_BOUNDARY_PATH", "/api/model-boundary/v1").strip(),
@@ -42,4 +46,7 @@ class Settings:
             model_boundary_service_token=os.getenv("MODEL_BOUNDARY_SERVICE_TOKEN", "").strip(),
             host=os.getenv("AI_SERVICE_HOST", "0.0.0.0").strip() or "0.0.0.0",
             port=port,
+            llm_experimental_enabled=enabled_raw == "true",
+            gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash",
         )
