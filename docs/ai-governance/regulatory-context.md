@@ -315,7 +315,7 @@ Verified. No extra controls invented.
 | X-Service-Token (Java) | `ModelBoundaryServiceAuthFilter` | Fail-closed if unconfigured |
 | Constant-time compare (Java only) | `ModelBoundaryServiceTokenSettings.matches` uses `MessageDigest.isEqual` | **Not** claimed for Python |
 | No Java log of the token value | Filter logs `reason=unconfigured\|absent\|empty\|mismatch` only | |
-| X-Service-Token (Python experimental POST) | `experimental_service.authenticate` | Equality compare; fail-closed if blank |
+| X-Service-Token (Python 074 and 076 inbound) | `app/service_auth.authenticate` | Fail-closed if blank. `GET /internal/agent-context` and `POST /internal/experimental-summary` require the header; 074 returns 401 and does not fetch Java when auth fails. Equality compare. **Not** a network boundary |
 | Feature gate | `LLM_EXPERIMENTAL_ENABLED` default false | 503 `DISABLED`, no provider call |
 | Synthetic fixture only | `is_canonical_fixture`; Bundle → 422 | |
 | Timeout 30s | `GeminiProvider` + `PROVIDER_TIMEOUT_SECONDS` | |
@@ -350,8 +350,7 @@ Recorded as **governance/product questions**, not as Tasks in this change:
 - Production Gemini / provider assessment (account, region, terms, retention, subprocessors)
 - v1 or FHIR → Gemini
 - Second LLM provider; fallback; router
-
-Inbound `GET /internal/agent-context` does **not** require `X-Service-Token` (Python sends the token **to** Java).
+- Effective network boundary for Python `:8090` (ADR-082 layer 2). Inbound `X-Service-Token` on `GET /internal/agent-context` and `POST /internal/experimental-summary` is implemented (see §11). That authentication layer does **not** implement network isolation. Default `AI_SERVICE_HOST` remains `0.0.0.0`.
 
 ---
 
