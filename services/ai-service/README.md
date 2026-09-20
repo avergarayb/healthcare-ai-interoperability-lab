@@ -18,8 +18,8 @@ received | rejected  (modelCalled=false)
 
 ## What this service does
 
-1. Receives `GET /internal/agent-context`.
-2. Calls `GET {MODEL_BOUNDARY_BASE_URL}{MODEL_BOUNDARY_PATH}` with `X-Service-Token` when `MODEL_BOUNDARY_SERVICE_TOKEN` is set.
+1. Receives `GET /internal/agent-context` with inbound `X-Service-Token`. Missing, wrong, or unconfigured token returns HTTP 401 and does not call Java.
+2. After authentication, calls `GET {MODEL_BOUNDARY_BASE_URL}{MODEL_BOUNDARY_PATH}` with `X-Service-Token` when `MODEL_BOUNDARY_SERVICE_TOKEN` is set.
 3. Validates HTTP, JSON, required v1 fields, and `outcome`.
 4. Decides `received` or `rejected`.
 5. Always returns `modelCalled=false`.
@@ -36,14 +36,14 @@ Task 076 is a second path. It does not change the v1 consumer.
 - OAuth, production identity, or fine-grained clinical authorization
 - Sending `ModelBoundaryContract` v1 or live EHR data to Gemini
 
-Task 075 protects `GET /api/model-boundary/v1` with a laboratory shared secret. `POST /internal/experimental-summary` reuses the same token on the Python side and stays fail-closed when the token is blank.
+Task 075 protects `GET /api/model-boundary/v1` with a laboratory shared secret. `GET /internal/agent-context` and `POST /internal/experimental-summary` reuse the same inbound token on the Python side and stay fail-closed when the token is blank. Sharing the secret does not merge the two paths.
 
 ## Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Process liveness |
-| `GET` | `/internal/agent-context` | Consume the Java v1 contract |
+| `GET` | `/internal/agent-context` | Consume the Java v1 contract (`X-Service-Token` required) |
 | `POST` | `/internal/experimental-summary` | Gated Gemini summary of fixture `SYN-076-001` |
 
 ## Environment
@@ -55,7 +55,7 @@ Copy `.env.example`. Do not commit `.env`.
 | `MODEL_BOUNDARY_BASE_URL` | `http://localhost:8081` | Java service |
 | `MODEL_BOUNDARY_PATH` | `/api/model-boundary/v1` | Existing contract surface |
 | `MODEL_BOUNDARY_TIMEOUT_SECONDS` | `90` | Java snapshot can take ~60s per socket |
-| `MODEL_BOUNDARY_SERVICE_TOKEN` | (empty) | Same value as Java. Empty omits the header; Java then returns 401 |
+| `MODEL_BOUNDARY_SERVICE_TOKEN` | (empty) | Same value as Java. Empty is fail-closed for inbound 074/076 and for Java v1 |
 | `AI_SERVICE_HOST` | `0.0.0.0` | |
 | `AI_SERVICE_PORT` | `8090` | |
 | `LLM_EXPERIMENTAL_ENABLED` | `false` | `true` required before any Gemini call |
@@ -107,6 +107,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8090
 
 ```http
 GET http://localhost:8090/internal/agent-context
+X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
 ```
 
 Experimental Gemini (disabled unless `LLM_EXPERIMENTAL_ENABLED=true` and `GEMINI_API_KEY` is set):

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.config import Settings
 from app.experimental_fixture import is_canonical_fixture
+from app.service_auth import authenticate
 from app.experimental_models import (
     DEFAULT_MODEL,
     MAX_SUMMARY_CHARS,
@@ -24,16 +25,6 @@ from app.llm_provider import LLMProvider, ProviderGeneration
 log = logging.getLogger("ai-service")
 
 USE_CASE = "experimental-summary"
-
-
-def authenticate(request: Request, settings: Settings) -> bool:
-    presented = request.headers.get("X-Service-Token")
-    configured = settings.model_boundary_service_token
-    if not configured:
-        return False
-    if presented is None or presented == "":
-        return False
-    return presented == configured
 
 
 def gemini_configured(settings: Settings) -> bool:

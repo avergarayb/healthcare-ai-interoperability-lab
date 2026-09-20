@@ -12,6 +12,8 @@ from app.main import app, get_settings
 from app.models import RESULT_FIELDS
 from tests.conftest import collection, contract, empty_contract
 
+AUTH_HEADERS = {"X-Service-Token": "test-model-boundary-token"}
+
 
 def _http(status_code: int, payload: Any | None = None, text: str | None = None) -> BoundaryResponse:
     if text is not None:
@@ -153,7 +155,7 @@ def test_endpoint_uses_injected_settings_and_mock_transport(settings, valid_cont
     monkeypatch.setattr("app.consumer.fetch_contract", fake_fetch)
     app.dependency_overrides[get_settings] = lambda: settings
     try:
-        response = TestClient(app).get("/internal/agent-context")
+        response = TestClient(app).get("/internal/agent-context", headers=AUTH_HEADERS)
         assert response.status_code == 200
         body = response.json()
         assert body == {
@@ -173,6 +175,71 @@ def test_health():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def _raise_if_fetch(*args, **kwargs):
+    raise AssertionError("fetch_contract must not run")
+
+
+def test_missing_inbound_token_is_401_without_fetch(settings, monkeypatch):
+    monkeypatch.setattr("app.consumer.fetch_contract", _raise_if_fetch)
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        response = TestClient(app).get("/internal/agent-context")
+        assert response.status_code == 401
+        assert response.content == b""
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_invalid_inbound_token_is_401_without_fetch(settings, monkeypatch):
+    monkeypatch.setattr("app.consumer.fetch_contract", _raise_if_fetch)
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        response = TestClient(app).get(
+            "/internal/agent-context", headers={"X-Service-Token": "invalid"}
+        )
+        assert response.status_code == 401
+        assert response.content == b""
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_blank_configured_token_is_fail_closed_without_fetch(settings, monkeypatch):
+    unconfigured = Settings(
+        model_boundary_base_url=settings.model_boundary_base_url,
+        model_boundary_path=settings.model_boundary_path,
+        model_boundary_timeout_seconds=settings.model_boundary_timeout_seconds,
+        model_boundary_service_token="",
+        host=settings.host,
+        port=settings.port,
+    )
+    monkeypatch.setattr("app.consumer.fetch_contract", _raise_if_fetch)
+    app.dependency_overrides[get_settings] = lambda: unconfigured
+    try:
+        response = TestClient(app).get("/internal/agent-context", headers=AUTH_HEADERS)
+        assert response.status_code == 401
+        assert response.content == b""
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_inbound_auth_rejection_does_not_log_token(settings, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr("app.consumer.fetch_contract", _raise_if_fetch)
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        with caplog.at_level(logging.INFO, logger="ai-service"):
+            response = TestClient(app).get(
+                "/internal/agent-context", headers={"X-Service-Token": "invalid"}
+            )
+        assert response.status_code == 401
+        assert "invalid" not in caplog.text
+        assert "test-model-boundary-token" not in caplog.text
+        assert "UNAUTHORIZED" in caplog.text
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_consume_timeout_from_httpx(settings, monkeypatch):
