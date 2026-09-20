@@ -288,7 +288,9 @@ def test_agent_context_contract_unchanged(settings, valid_contract, monkeypatch)
 
     monkeypatch.setattr("app.consumer.fetch_contract", fake_fetch)
     app.dependency_overrides[get_settings] = lambda: settings
-    response = TestClient(app).get("/internal/agent-context")
+    response = TestClient(app).get(
+        "/internal/agent-context", headers={"X-Service-Token": "test-model-boundary-token"}
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "received"
     assert response.json()["modelCalled"] is False

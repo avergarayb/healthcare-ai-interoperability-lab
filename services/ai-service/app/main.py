@@ -15,8 +15,11 @@ from app.experimental_service import load_json_body, run_experimental_summary
 from app.gemini_provider import GeminiProvider
 from app.llm_provider import LLMProvider
 from app.models import AgentContextResult
+from app.service_auth import authenticate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+log = logging.getLogger("ai-service")
 
 app = FastAPI(title="ai-service", version="0.1.0")
 
@@ -38,7 +41,16 @@ def health() -> dict[str, str]:
 
 
 @app.get("/internal/agent-context", response_model=AgentContextResult)
-def agent_context(request: Request, settings: Settings = Depends(get_settings)) -> AgentContextResult:
+def agent_context(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> AgentContextResult | Response:
+    if not authenticate(request, settings):
+        correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+        log.info(
+            "agent_context correlationId=%s method=GET path=/internal/agent-context status=UNAUTHORIZED modelCalled=false",
+            correlation_id,
+        )
+        return Response(status_code=401)
     correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
     return consume(settings, correlation_id)
 
