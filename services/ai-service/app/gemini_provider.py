@@ -19,6 +19,12 @@ class GeminiProvider(LLMProvider):
 
     def generate_summary(self, request: ExperimentalSummaryRequest) -> ProviderGeneration:
         prompt = build_experimental_prompt(request)
+        return self._generate_from_prompt(prompt)
+
+    def generate_text(self, prompt: str) -> ProviderGeneration:
+        return self._generate_from_prompt(prompt)
+
+    def _generate_from_prompt(self, prompt: str) -> ProviderGeneration:
         from google import genai
         from google.genai import types
 
@@ -32,8 +38,10 @@ class GeminiProvider(LLMProvider):
                 response = future.result(timeout=PROVIDER_TIMEOUT_SECONDS)
         except FuturesTimeout:
             return ProviderGeneration(invocation_started=True, error="timeout")
-        except Exception:
-            return ProviderGeneration(invocation_started=True, error="http_5xx")
+        except Exception as exc:
+            status_code = _http_status(exc)
+            kind = "http_4xx" if status_code is not None and 400 <= status_code <= 499 else "http_5xx"
+            return ProviderGeneration(invocation_started=True, error=kind, status_code=status_code)
         return self._normalize(response)
 
     def _invoke(self, client, prompt: str):
@@ -47,3 +55,14 @@ class GeminiProvider(LLMProvider):
         if stripped == "":
             return ProviderGeneration(invocation_started=True, error="empty")
         return ProviderGeneration(invocation_started=True, text=stripped)
+
+
+def _http_status(exc: BaseException) -> int | None:
+    code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        return code
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        return status
+    return None

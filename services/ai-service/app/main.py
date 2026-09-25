@@ -1,4 +1,4 @@
-"""FastAPI entrypoint for the Task 074 consumer and Task 076 experimental summary."""
+"""FastAPI entrypoint for the Task 074 consumer, Task 076 summary, and Follow-up Agent."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from fastapi.responses import Response
 from app.config import Settings
 from app.consumer import consume
 from app.experimental_service import load_json_body, run_experimental_summary
+from app.followup_service import run_followup_http
 from app.gemini_provider import GeminiProvider
 from app.llm_provider import LLMProvider
 from app.models import AgentContextResult
@@ -63,3 +64,16 @@ async def experimental_summary(
 ) -> Response:
     body = load_json_body(await request.body())
     return run_experimental_summary(request, settings, provider, body)
+
+
+@app.post("/internal/agent/follow-up")
+async def follow_up(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return run_followup_http(
+        request,
+        settings,
+        lambda: get_llm_provider(settings),
+        await request.body(),
+    )

@@ -17,6 +17,7 @@ class Settings:
     llm_experimental_enabled: bool = False
     gemini_api_key: str = field(default="", repr=False)
     gemini_model: str = "gemini-flash-latest"
+    followup_agent_enabled: bool = False
 
     @property
     def model_boundary_url(self) -> str:
@@ -39,6 +40,7 @@ class Settings:
         if timeout <= 0:
             raise ValueError("MODEL_BOUNDARY_TIMEOUT_SECONDS must be greater than zero")
         enabled_raw = os.getenv("LLM_EXPERIMENTAL_ENABLED", "false").strip().lower()
+        followup_raw = os.getenv("FOLLOWUP_AGENT_ENABLED", "false").strip().lower()
         return cls(
             model_boundary_base_url=os.getenv("MODEL_BOUNDARY_BASE_URL", "http://localhost:8081").strip(),
             model_boundary_path=os.getenv("MODEL_BOUNDARY_PATH", "/api/model-boundary/v1").strip(),
@@ -49,4 +51,5 @@ class Settings:
             llm_experimental_enabled=enabled_raw == "true",
             gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip() or "gemini-flash-latest",
+            followup_agent_enabled=followup_raw == "true",
         )
