@@ -7,14 +7,20 @@ HTTP lives in HapiReadClient.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import unquote
 
 from langchain_core.tools import tool
 
 
+log = logging.getLogger("ai-service")
+
+
 PATIENT_CASE = "SYN-FOLLOWUP-001"
 PATIENT_ID = "SYN-PATIENT-001"
+CASE_IDENTIFIER_SYSTEM = "https://lab.local/followup-case"
 DENIAL_ANSWER = "Tool denied by policy"
 POLICY_VERSION = "policy-v1"
 DEFAULT_TIMESTAMP = "1970-01-01T00:00:00Z"
@@ -64,6 +70,17 @@ def _patient_resource(patient_id: str) -> dict[str, str]:
     return {"resourceType": "Patient", "id": patient_id}
 
 
+def _prepared_case_match(path: str) -> tuple[str, str] | None:
+    """The one prepared record is addressed by its case identifier, not by Patient.id."""
+    prefix = "Patient?identifier="
+    if not path.startswith(prefix):
+        return None
+    system, separator, value = unquote(path[len(prefix) :]).partition("|")
+    if separator and system and value == PATIENT_CASE:
+        return system, value
+    return None
+
+
 def _observation_resource(observation_id: str, patient_id: str, value: str) -> dict[str, object]:
     return {
         "resourceType": "Observation",
@@ -94,6 +111,13 @@ class PreparedReadClient:
     def get(self, path: str) -> dict:
         BOUNDARY_EVENTS.append(f"client:{path}")
         self.calls.append(path)
+        matched = _prepared_case_match(path)
+        if matched is not None:
+            patient = _patient_resource(PATIENT_ID)
+            patient["identifier"] = [{"system": matched[0], "value": matched[1]}]
+            return {"resourceType": "Bundle", "type": "searchset", "entry": [{"resource": patient}]}
+        if path.startswith("Patient?identifier="):
+            return {"resourceType": "Bundle", "type": "searchset", "entry": []}
         if path == f"Patient/{PATIENT_ID}":
             return _patient_resource(PATIENT_ID)
         if path == f"Observation?subject=Patient/{PATIENT_ID}":
@@ -203,7 +227,25 @@ def record_policy_audit(
     )
     BOUNDARY_EVENTS.append(f"audit:{tool_name}:{decision}")
     sink.record(event)
+    _log_policy_audit(event)
     return event
+
+
+def _log_policy_audit(event: PolicyAuditEvent) -> None:
+    """Emit the existing audit event. The line carries only the operational fields."""
+    line = (
+        "followup_tool_policy_audit "
+        f"run_id={event.run_id} "
+        f"case_id={event.case_id} "
+        f"tool_name={event.tool_name} "
+        f"decision={event.decision} "
+        f"policy_version={event.policy_version} "
+        f"reason={event.reason}"
+    )
+    lowered = line.lower()
+    if "x-service-token=" in lowered or "gemini_api_key=" in lowered:
+        raise RuntimeError("policy audit log line must not contain secrets")
+    log.info(line)
 
 
 @tool

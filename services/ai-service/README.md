@@ -224,7 +224,17 @@ LangGraph
         HAPI FHIR
 ```
 
-Policy and audit stay outside the graph. A denied or unknown tool is audited and does not reach `ToolNode`. `MAX_MODEL_TURNS` is 4. LangGraph `recursion_limit` is not the product limit.
+Policy and audit stay outside the graph. `evaluate_tool_policy` runs before `ToolNode`. `ToolNode` executes an allowed tool. It does not authorize. A denied or unknown tool is audited and does not reach `ToolNode`. `MAX_MODEL_TURNS` is 4. LangGraph `recursion_limit` is not the product limit.
+
+Automatic function calling is disabled on both Gemini requests (`AutomaticFunctionCallingConfig(disable=True)`). The first request can propose `get_patient_followup_context`. The second request does not declare tools. It asks only for a JSON object with `answer` and `follow_up_required` (`true`, `false`, or `unknown`). The workflow copies that field. It does not read the answer text. `thought_signature` from the function-call part is sent back on the next request and is not logged or returned.
+
+`record_policy_audit` writes one `followup_tool_policy_audit` line on the `ai-service` logger. That line uses the same `run_id` as the HTTP `runId` and the workflow, plus `case_id`, `tool_name`, `decision`, `policy_version`, and `reason`. It does not include prompts, signatures, Patient, or Observation.
+
+The case id is not a `Patient.id`. The adapter searches `Patient.identifier` (`system` `https://lab.local/followup-case`, `value` equal to the case id), then reads that Patient and the Observations whose subject is that Patient. The laboratory Patient `SYN-PATIENT-001` carries this identifier for `SYN-FOLLOWUP-001`. A case with no matching identifier is `unavailable`. Other accepted case ids have no FHIR patient yet. This path only reads HAPI.
+
+This follow-up has no persistent memory, RAG, checkpointing, or human-in-the-loop interrupt.
+
+A live call for `SYN-FOLLOWUP-001` returned HTTP 200 with `status` `completed` and `followUpRequired` `unknown`. That run confirmed the two Gemini calls, the tool, the audit, and the HAPI reads. It did not inspect Gemini's internal structured payload, so `unknown` stays a valid result when that field is absent or was not observed. The service does not infer it from the answer text.
 
 Gemini settings come from `Settings` (`GEMINI_API_KEY`, `GEMINI_MODEL`). `config.py` was not changed. `GeminiProvider` still serves the experimental summary.
 

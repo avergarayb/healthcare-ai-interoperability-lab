@@ -18,6 +18,7 @@ from langgraph.prebuilt import ToolNode
 
 from app.langgraph_fhir_client import (
     BOUNDARY_EVENTS,
+    CASE_IDENTIFIER_SYSTEM,
     DENIAL_ANSWER,
     FOLLOWUP_TOOL,
     PATIENT_CASE,
@@ -26,7 +27,7 @@ from app.langgraph_fhir_client import (
     InMemoryAuditSink,
     clear_boundary_events,
 )
-from app.langgraph_fhir_followup import UNAVAILABLE_ANSWER, make_followup_tool
+from app.langgraph_fhir_followup import UNAVAILABLE_ANSWER, case_search_path, make_followup_tool
 from app.langgraph_fhir_hapi import HapiReadClient, hapi_base_url
 from app.langgraph_gemini_fhir_followup import (
     MAX_MODEL_TURNS,
@@ -43,6 +44,7 @@ from app.langgraph_gemini_fhir_followup import (
 )
 PATIENT_PATH = f"Patient/{PATIENT_ID}"
 OBSERVATION_PATH = f"Observation?subject=Patient/{PATIENT_ID}"
+CASE_READS = [case_search_path(PATIENT_CASE), PATIENT_PATH, OBSERVATION_PATH]
 FINAL_TEXT = "Context received."
 CLINICAL_TEXT = (
     "Name From Server",
@@ -121,6 +123,7 @@ def _patient(name: str) -> dict:
         "resourceType": "Patient",
         "id": PATIENT_ID,
         "active": True,
+        "identifier": [{"system": CASE_IDENTIFIER_SYSTEM, "value": PATIENT_CASE}],
         "name": [{"text": name}],
     }
 
@@ -149,6 +152,12 @@ def _ok(name: str, observation_id: str, value: str):
     observation = _observation(observation_id, value)
 
     def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path.rstrip("/")
+        if path.endswith("/Patient") and "identifier=" in str(request.url.query):
+            return httpx.Response(
+                200,
+                json={"resourceType": "Bundle", "type": "searchset", "entry": [{"resource": patient}]},
+            )
         if request.url.path.endswith(f"/{PATIENT_PATH}"):
             return httpx.Response(200, json=patient)
         if request.url.path.endswith("/Observation"):
@@ -198,7 +207,7 @@ def test_scripted_model_tool_call_is_authorized_before_the_client():
     assert result["final_answer"] == FINAL_TEXT
     assert result["decision"] == "finish"
     assert workflow.model_calls == 2
-    assert client.calls == [PATIENT_PATH, OBSERVATION_PATH]
+    assert client.calls == CASE_READS
     assert workflow.trace == ["prepare", "agent", "update_state", "agent", "finish"]
     assert sink.events[0].decision == "allowed"
     assert sink.events[0].tool_name == FOLLOWUP_TOOL
@@ -367,6 +376,82 @@ def test_thought_signature_survives_the_second_request():
     assert set(asdict(sink.events[0]).keys()) == set(SAFE_AUDIT_FIELDS)
 
 
+class _TextPart:
+    def __init__(self, text: str) -> None:
+        self.function_call = None
+        self.text = text
+        self.thought_signature = None
+
+
+class _TextResponse:
+    def __init__(self, text: str, parsed: object | None = None) -> None:
+        self.parsed = parsed
+        self.candidates = [type("Candidate", (), {"content": type("Content", (), {"parts": [_TextPart(text)]})()})()]
+
+
+def test_structured_final_response_sets_follow_up_required_without_using_prose():
+    raw = '{"answer": "Context received.", "follow_up_required": "true", "note": "follow-up is false"}'
+    message = followup_message_from_response(_TextResponse(raw))
+    assert message.content == "Context received."
+    assert message.additional_kwargs["follow_up_required"] == "true"
+    assert message.tool_calls == []
+    assert "thought_signatures" not in message.additional_kwargs
+
+    parsed = followup_message_from_response(
+        _TextResponse("ignore this prose that says follow-up is true", {"answer": "No follow-up.", "follow_up_required": "false"})
+    )
+    assert parsed.content == "No follow-up."
+    assert parsed.additional_kwargs["follow_up_required"] == "false"
+
+
+def test_unstructured_text_does_not_set_follow_up_required():
+    prose = "The text says follow-up is true because an observation exists."
+    message = followup_message_from_response(_TextResponse(prose))
+    assert message.content == prose
+    assert "follow_up_required" not in message.additional_kwargs
+    rejected = followup_message_from_response(
+        _TextResponse('{"answer": "Context received.", "follow_up_required": "maybe"}')
+    )
+    assert "follow_up_required" not in rejected.additional_kwargs
+    boolean = followup_message_from_response(
+        _TextResponse('{"answer": "Context received.", "follow_up_required": true}')
+    )
+    assert "follow_up_required" not in boolean.additional_kwargs
+
+
+def test_final_turn_asks_for_the_decision_object_and_the_read_turn_keeps_tools():
+    from app.langgraph_gemini_fhir_followup import _followup_generate_config
+
+    first = _followup_generate_config([HumanMessage(content="Prepare follow-up.")])
+    first_dump = first.model_dump(exclude_none=True)
+    assert first_dump["tools"]
+    assert first.automatic_function_calling.disable is True
+    assert "response_json_schema" not in first_dump
+    second = _followup_generate_config(
+        [
+            HumanMessage(content="Prepare follow-up."),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": FOLLOWUP_TOOL, "args": {"case_id": PATIENT_CASE}, "id": "call-1", "type": "tool_call"}],
+            ),
+            ToolMessage(content="{}", name=FOLLOWUP_TOOL, tool_call_id="call-1"),
+        ]
+    )
+    second_dump = second.model_dump(exclude_none=True)
+    assert second_dump["response_mime_type"] == "application/json"
+    assert "tools" not in second_dump
+    assert second.automatic_function_calling.disable is True
+    assert second_dump["automatic_function_calling"]["disable"] is True
+    assert set(second_dump["response_json_schema"]["required"]) == {"answer", "follow_up_required"}
+    assert second_dump["response_json_schema"]["properties"]["follow_up_required"]["enum"] == [
+        "true",
+        "false",
+        "unknown",
+    ]
+    config_source = inspect.getsource(_followup_generate_config)
+    assert config_source.count("AutomaticFunctionCallingConfig(disable=True)") == 2
+
+
 def test_denied_send_message_never_reaches_the_tool_node():
     model = ScriptedModel(
         [
@@ -514,7 +599,9 @@ def test_boundaries_stay_outside_the_graph_and_c15():
 def gemini_request_source() -> str:
     from app import langgraph_gemini_fhir_followup as lesson
 
-    return inspect.getsource(lesson.gemini_followup_message)
+    return inspect.getsource(lesson.gemini_followup_message) + inspect.getsource(
+        lesson._followup_generate_config
+    )
 
 
 class _Call:
@@ -555,11 +642,29 @@ def _store(base: str, path: str, body: dict) -> None:
         raise AssertionError(f"seed failed with HTTP {response.status_code}")
 
 
+def _has_case_identifier(patient: dict) -> bool:
+    identifiers = patient.get("identifier")
+    if not isinstance(identifiers, list):
+        return False
+    return any(
+        isinstance(item, dict)
+        and item.get("system") == CASE_IDENTIFIER_SYSTEM
+        and item.get("value") == PATIENT_CASE
+        for item in identifiers
+    )
+
+
 def _ensure_records(base: str) -> tuple[dict, dict]:
     reader = HapiReadClient(base)
     try:
-        return reader.get(PATIENT_PATH), reader.get("Observation/obs-synthetic-001")
+        patient = reader.get(PATIENT_PATH)
     except Exception:
+        patient = None
+    try:
+        observation = reader.get("Observation/obs-synthetic-001")
+    except Exception:
+        observation = None
+    if patient is None or not _has_case_identifier(patient):
         _store(
             base,
             PATIENT_PATH,
@@ -567,9 +672,12 @@ def _ensure_records(base: str) -> tuple[dict, dict]:
                 "resourceType": "Patient",
                 "id": PATIENT_ID,
                 "active": True,
+                "identifier": [{"system": CASE_IDENTIFIER_SYSTEM, "value": PATIENT_CASE}],
                 "name": [{"text": "Synthetic Patient"}],
             },
         )
+        patient = reader.get(PATIENT_PATH)
+    if observation is None:
         _store(
             base,
             "Observation/obs-synthetic-001",
@@ -582,7 +690,8 @@ def _ensure_records(base: str) -> tuple[dict, dict]:
                 "valueString": "Synthetic observation result",
             },
         )
-        return reader.get(PATIENT_PATH), reader.get("Observation/obs-synthetic-001")
+        observation = reader.get("Observation/obs-synthetic-001")
+    return patient, observation
 
 
 @pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")
@@ -604,7 +713,7 @@ def test_scripted_model_reads_real_hapi_records():
     assert refs[0] == f"Patient/{stored_patient['id']}"
     assert f"Observation/{stored_observation['id']}" in refs
     assert result["tools_used"] == [FOLLOWUP_TOOL]
-    assert client.calls == [PATIENT_PATH, OBSERVATION_PATH]
+    assert client.calls == CASE_READS
     assert stored_patient["name"][0]["text"] not in _audit_blob(sink)
     assert stored_observation.get("valueString", "missing-value") not in _audit_blob(sink)
 

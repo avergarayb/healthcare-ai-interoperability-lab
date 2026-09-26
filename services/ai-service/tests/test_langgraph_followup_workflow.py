@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import os
 from dataclasses import asdict
 from pathlib import Path
@@ -17,10 +18,12 @@ from langchain_core.messages import AIMessage
 
 from app.langgraph_fhir_client import (
     BOUNDARY_EVENTS,
+    CASE_IDENTIFIER_SYSTEM,
     DENIAL_ANSWER,
     FOLLOWUP_TOOL,
     PATIENT_CASE,
     PATIENT_ID,
+    POLICY_VERSION,
     SAFE_AUDIT_FIELDS,
     FailingPreparedReadClient,
     InMemoryAuditSink,
@@ -29,7 +32,7 @@ from app.langgraph_fhir_client import (
     evaluate_tool_policy,
     record_policy_audit,
 )
-from app.langgraph_fhir_followup import UNAVAILABLE_ANSWER
+from app.langgraph_fhir_followup import UNAVAILABLE_ANSWER, case_search_path, make_followup_tool
 from app.langgraph_fhir_hapi import HapiReadClient, hapi_base_url
 from app.langgraph_followup_workflow import (
     APPLICATION_RESPONSIBILITIES,
@@ -39,7 +42,7 @@ from app.langgraph_followup_workflow import (
     FollowUpWorkflowResult,
     build_live_followup_workflow,
 )
-from app.langgraph_gemini_fhir_followup import MODEL_LIMIT_ANSWER
+from app.langgraph_gemini_fhir_followup import MODEL_LIMIT_ANSWER, followup_message_from_response
 
 
 APP = Path(__file__).resolve().parents[1] / "app"
@@ -52,6 +55,7 @@ C15_MODULES = (
 )
 PATIENT_PATH = f"Patient/{PATIENT_ID}"
 OBSERVATION_PATH = f"Observation?subject=Patient/{PATIENT_ID}"
+CASE_READS = [case_search_path(PATIENT_CASE), PATIENT_PATH, OBSERVATION_PATH]
 FINAL_TEXT = "Context received from the model."
 THOUGHT_SIGNATURE = b"\x01synthetic-thought-signature"
 CLINICAL_TEXT = (
@@ -101,6 +105,25 @@ class MemoryReadClient:
 
     def get(self, path: str) -> dict:
         self.calls.append(path)
+        if path == case_search_path(PATIENT_CASE):
+            return {
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "entry": [
+                    {
+                        "resource": {
+                            "resourceType": "Patient",
+                            "id": PATIENT_ID,
+                            "identifier": [
+                                {"system": CASE_IDENTIFIER_SYSTEM, "value": PATIENT_CASE}
+                            ],
+                            "name": [{"text": self.name}],
+                        }
+                    }
+                ],
+            }
+        if path.startswith("Patient?identifier="):
+            return {"resourceType": "Bundle", "type": "searchset", "entry": []}
         if path == PATIENT_PATH:
             return {
                 "resourceType": "Patient",
@@ -223,7 +246,7 @@ def test_fake_model_returns_an_application_result():
     for token in ("AIMessage", "ToolMessage", "thought_signature", "function_call", "tool_call_id"):
         assert token not in blob
     assert "synthetic-thought-signature" not in blob
-    assert client.calls == [PATIENT_PATH, OBSERVATION_PATH]
+    assert client.calls == CASE_READS
     assert BOUNDARY_EVENTS.index(f"policy:{FOLLOWUP_TOOL}:allowed") < BOUNDARY_EVENTS.index(
         f"audit:{FOLLOWUP_TOOL}:allowed"
     )
@@ -247,7 +270,7 @@ def test_injected_policy_is_called_before_the_tool():
     client = MemoryReadClient()
     _workflow(client, ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]), policy=policy).run(PATIENT_CASE)
     assert seen == [FOLLOWUP_TOOL]
-    assert client.calls == [PATIENT_PATH, OBSERVATION_PATH]
+    assert client.calls == CASE_READS
 
 
 def test_denied_tool_does_not_read_fhir():
@@ -257,6 +280,7 @@ def test_denied_tool_does_not_read_fhir():
     result = _workflow(client, model, sink).run(PATIENT_CASE)
     assert result.status == "denied"
     assert result.final_answer == DENIAL_ANSWER
+    assert result.follow_up_required == "unknown"
     assert result.patient is None
     assert result.observations == []
     assert result.evidence == []
@@ -270,6 +294,122 @@ def test_denied_tool_does_not_read_fhir():
     assert model.seen and len(model.seen) == 1
 
 
+def _policy_audit_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "ai-service" and record.getMessage().startswith("followup_tool_policy_audit ")
+    ]
+
+
+def _assert_policy_audit_line(
+    line: str,
+    *,
+    run_id: str,
+    case_id: str,
+    tool_name: str,
+    decision: str,
+    reason: str,
+) -> None:
+    assert line == (
+        "followup_tool_policy_audit "
+        f"run_id={run_id} case_id={case_id} tool_name={tool_name} "
+        f"decision={decision} policy_version={POLICY_VERSION} reason={reason}"
+    )
+    for token in (
+        "thought_signature",
+        "synthetic-thought-signature",
+        "gemini_api_key",
+        "x-service-token",
+        "authorization",
+        "AIza",
+        "Patient",
+        "Observation",
+        "Synthetic Patient",
+        "Synthetic observation result",
+        "valueString",
+        "prompt",
+        "completion",
+        "args=",
+        FINAL_TEXT,
+        "clinical-note",
+    ):
+        assert token not in line
+
+
+def test_allowed_tool_audit_is_logged_and_the_tool_still_runs(caplog):
+    client = MemoryReadClient()
+    sink = InMemoryAuditSink()
+    with caplog.at_level(logging.INFO, logger="ai-service"):
+        result = _workflow(
+            client,
+            ScriptedModel([_signed_tool_call(), AIMessage(content=FINAL_TEXT)]),
+            sink,
+        ).run(PATIENT_CASE)
+    assert result.status == "finish"
+    assert result.run_id == "run-workflow-001"
+    assert sink.events[0].run_id == result.run_id
+    assert sink.events[0].decision == "allowed"
+    assert client.calls == CASE_READS
+    lines = _policy_audit_lines(caplog)
+    assert len(lines) == 1
+    _assert_policy_audit_line(
+        lines[0],
+        run_id=result.run_id,
+        case_id=PATIENT_CASE,
+        tool_name=FOLLOWUP_TOOL,
+        decision="allowed",
+        reason="read tool is allowed",
+    )
+
+
+def test_denied_tool_audit_is_logged_and_fhir_is_not_read(caplog):
+    client = MemoryReadClient()
+    sink = InMemoryAuditSink()
+    model = ScriptedModel(
+        [_tool_call("send_message", {"patient_id": PATIENT_ID, "body": "clinical-note"})]
+    )
+    with caplog.at_level(logging.INFO, logger="ai-service"):
+        result = _workflow(client, model, sink).run(PATIENT_CASE)
+    assert result.status == "denied"
+    assert result.run_id == sink.events[0].run_id == "run-workflow-001"
+    assert client.calls == []
+    assert "execute:send_message" not in BOUNDARY_EVENTS
+    lines = _policy_audit_lines(caplog)
+    assert len(lines) == 1
+    _assert_policy_audit_line(
+        lines[0],
+        run_id=result.run_id,
+        case_id=PATIENT_CASE,
+        tool_name="send_message",
+        decision="denied",
+        reason="external effect is not allowed",
+    )
+
+
+def test_unknown_tool_audit_is_logged_and_the_tool_does_not_run(caplog):
+    client = MemoryReadClient()
+    sink = InMemoryAuditSink()
+    model = ScriptedModel([_tool_call("unknown_tool", {"note": "clinical-note"})])
+    with caplog.at_level(logging.INFO, logger="ai-service"):
+        result = _workflow(client, model, sink).run(PATIENT_CASE)
+    assert result.status == "denied"
+    assert result.run_id == sink.events[0].run_id
+    assert sink.events[0].reason == "unknown tool is not allowed"
+    assert client.calls == []
+    assert "execute:unknown_tool" not in BOUNDARY_EVENTS
+    lines = _policy_audit_lines(caplog)
+    assert len(lines) == 1
+    _assert_policy_audit_line(
+        lines[0],
+        run_id=result.run_id,
+        case_id=result.case_id,
+        tool_name="unknown_tool",
+        decision="denied",
+        reason="unknown tool is not allowed",
+    )
+
+
 def test_unknown_tool_is_denied_without_reading_fhir():
     client = MemoryReadClient()
     sink = InMemoryAuditSink()
@@ -277,6 +417,7 @@ def test_unknown_tool_is_denied_without_reading_fhir():
     result = _workflow(client, model, sink).run(PATIENT_CASE)
     assert result.status == "denied"
     assert result.final_answer == DENIAL_ANSWER
+    assert result.follow_up_required == "unknown"
     assert result.tools_used == []
     assert result.evidence == []
     assert client.calls == []
@@ -289,6 +430,116 @@ def test_unknown_tool_is_denied_without_reading_fhir():
     )
 
 
+def test_known_case_resolves_the_patient_by_identifier():
+    client = MemoryReadClient()
+    result = _workflow(
+        client,
+        ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]),
+    ).run(PATIENT_CASE)
+    assert result.status == "finish"
+    assert result.patient["id"] == PATIENT_ID
+    assert result.patient["id"] != PATIENT_CASE
+    assert result.observations[0]["id"] == "obs-synthetic-001"
+    assert result.evidence[0]["resources"] == [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]
+    assert client.calls == CASE_READS
+    assert f"Patient/{PATIENT_CASE}" not in client.calls
+
+
+def test_missing_case_is_unavailable_and_does_not_read_another_patient():
+    client = MemoryReadClient()
+    missing = "SYN-FOLLOWUP-005"
+    result = _workflow(
+        client,
+        ScriptedModel([_tool_call(arguments={"case_id": missing})]),
+    ).run(missing)
+    assert result.status == "unavailable"
+    assert result.final_answer == UNAVAILABLE_ANSWER
+    assert result.follow_up_required == "unknown"
+    assert result.patient is None
+    assert result.observations == []
+    assert result.evidence == []
+    assert result.tools_used == []
+    assert client.calls == [case_search_path(missing)]
+    assert PATIENT_PATH not in client.calls
+    assert f"Patient/{missing}" not in client.calls
+
+
+def test_resolution_does_not_treat_the_case_id_as_the_patient_id():
+    tool_source = inspect.getsource(make_followup_tool)
+    module = (APP / "langgraph_fhir_followup.py").read_text(encoding="utf-8")
+    assert "CASE_PATIENT" not in module
+    assert "patient_id_for_case" in tool_source
+    assert PATIENT_ID not in tool_source
+    assert PATIENT_CASE not in tool_source
+
+    class _DistinctClient:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def get(self, path: str) -> dict:
+            self.calls.append(path)
+            if path == f"Patient/{PATIENT_CASE}":
+                raise AssertionError("case id was used as a Patient.id")
+            if path == case_search_path(PATIENT_CASE):
+                return {
+                    "resourceType": "Bundle",
+                    "type": "searchset",
+                    "entry": [
+                        {"resource": {"resourceType": "Patient", "id": PATIENT_CASE}},
+                        {
+                            "resource": {
+                                "resourceType": "Patient",
+                                "id": "SYN-PATIENT-OTHER",
+                                "identifier": [
+                                    {"system": "https://lab.local/other", "value": PATIENT_CASE}
+                                ],
+                            }
+                        },
+                        {
+                            "resource": {
+                                "resourceType": "Patient",
+                                "id": PATIENT_ID,
+                                "identifier": [
+                                    {"system": CASE_IDENTIFIER_SYSTEM, "value": PATIENT_CASE}
+                                ],
+                                "name": [{"text": "Synthetic Patient"}],
+                            }
+                        },
+                    ],
+                }
+            if path == PATIENT_PATH:
+                return {
+                    "resourceType": "Patient",
+                    "id": PATIENT_ID,
+                    "name": [{"text": "Synthetic Patient"}],
+                }
+            if path == OBSERVATION_PATH:
+                return {
+                    "resourceType": "Bundle",
+                    "type": "searchset",
+                    "entry": [
+                        {
+                            "resource": {
+                                "resourceType": "Observation",
+                                "id": "obs-synthetic-001",
+                                "valueString": "Synthetic observation result",
+                            }
+                        }
+                    ],
+                }
+            raise ReadClientError("unexpected path")
+
+    client = _DistinctClient()
+    result = _workflow(
+        client,
+        ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]),
+    ).run(PATIENT_CASE)
+    assert result.status == "finish"
+    assert result.patient["id"] == PATIENT_ID
+    assert result.evidence[0]["resources"] == [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]
+    assert client.calls == CASE_READS
+
+
 def test_fhir_failure_does_not_invent_clinical_context():
     client = FailingPreparedReadClient()
     sink = InMemoryAuditSink()
@@ -296,6 +547,7 @@ def test_fhir_failure_does_not_invent_clinical_context():
     result = _workflow(client, model, sink).run(PATIENT_CASE)
     assert result.status == "unavailable"
     assert result.final_answer == UNAVAILABLE_ANSWER
+    assert result.follow_up_required == "unknown"
     assert result.patient is None
     assert result.observations == []
     assert result.evidence == []
@@ -331,6 +583,7 @@ def test_turn_limit_stops_without_another_model_call():
     result = _workflow(MemoryReadClient(), model).run(PATIENT_CASE)
     assert result.status == "limit"
     assert result.final_answer == MODEL_LIMIT_ANSWER
+    assert result.follow_up_required == "unknown"
     assert result.turns == MAX_MODEL_TURNS
     assert MAX_MODEL_TURNS == 4
     assert model.replies[0].content == "this reply must not be requested"
@@ -406,6 +659,33 @@ def test_run_id_is_the_same_value_used_by_the_audit():
     assert "uuid" not in inspect.getsource(FollowUpWorkflow.run)
 
 
+def test_mapped_model_object_sets_follow_up_required():
+    class _Part:
+        function_call = None
+        thought_signature = None
+
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _Response:
+        parsed = None
+
+        def __init__(self, text: str) -> None:
+            self.candidates = [type("Candidate", (), {"content": type("Content", (), {"parts": [_Part(text)]})()})()]
+
+    message = followup_message_from_response(
+        _Response('{"answer": "Context received from the model.", "follow_up_required": "true"}')
+    )
+    result = _workflow(
+        MemoryReadClient(),
+        ScriptedModel([_tool_call(), message]),
+    ).run(PATIENT_CASE)
+    assert result.status == "finish"
+    assert result.follow_up_required == "true"
+    assert result.final_answer == "Context received from the model."
+    assert "follow_up_required" not in result.final_answer
+
+
 def test_follow_up_required_accepts_an_explicit_structured_value():
     required = _workflow(
         MemoryReadClient(),
@@ -432,6 +712,7 @@ def test_follow_up_required_stays_unknown_without_a_structured_decision():
         ),
     ).run(PATIENT_CASE)
     assert result.follow_up_required == "unknown"
+    assert result.final_answer == "The text says follow-up is true because an observation exists."
     assert result.observations
     assert result.patient is not None
 
@@ -471,7 +752,7 @@ def test_application_workflow_reads_real_hapi_with_a_fake_model():
     assert found["valueString"] == stored_observation["valueString"]
     assert f"Observation/{stored_observation['id']}" in result.evidence[0]["resources"]
     assert result.tools_used == [FOLLOWUP_TOOL]
-    assert client.calls == [PATIENT_PATH, OBSERVATION_PATH]
+    assert client.calls == CASE_READS
     assert stored_patient["name"][0]["text"] not in _audit_blob(sink)
 
 
@@ -514,7 +795,7 @@ def test_live_application_workflow_reads_hapi_before_the_final_answer():
     assert BOUNDARY_EVENTS.index(f"audit:{FOLLOWUP_TOOL}:allowed") < BOUNDARY_EVENTS.index(
         f"execute:{FOLLOWUP_TOOL}"
     )
-    assert workflow.fhir_client.calls == [PATIENT_PATH, OBSERVATION_PATH]
+    assert workflow.fhir_client.calls == CASE_READS
 
 
 def _store(base: str, path: str, body: dict) -> None:
@@ -528,21 +809,42 @@ def _store(base: str, path: str, body: dict) -> None:
         raise AssertionError(f"seed failed with HTTP {response.status_code}")
 
 
+def _seed_patient() -> dict:
+    return {
+        "resourceType": "Patient",
+        "id": PATIENT_ID,
+        "active": True,
+        "identifier": [{"system": CASE_IDENTIFIER_SYSTEM, "value": PATIENT_CASE}],
+        "name": [{"text": "Synthetic Patient"}],
+    }
+
+
+def _has_case_identifier(patient: dict) -> bool:
+    identifiers = patient.get("identifier")
+    if not isinstance(identifiers, list):
+        return False
+    return any(
+        isinstance(item, dict)
+        and item.get("system") == CASE_IDENTIFIER_SYSTEM
+        and item.get("value") == PATIENT_CASE
+        for item in identifiers
+    )
+
+
 def _ensure_records(base: str) -> tuple[dict, dict]:
     reader = HapiReadClient(base)
     try:
-        return reader.get(PATIENT_PATH), reader.get("Observation/obs-synthetic-001")
+        patient = reader.get(PATIENT_PATH)
     except Exception:
-        _store(
-            base,
-            PATIENT_PATH,
-            {
-                "resourceType": "Patient",
-                "id": PATIENT_ID,
-                "active": True,
-                "name": [{"text": "Synthetic Patient"}],
-            },
-        )
+        patient = None
+    try:
+        observation = reader.get("Observation/obs-synthetic-001")
+    except Exception:
+        observation = None
+    if patient is None or not _has_case_identifier(patient):
+        _store(base, PATIENT_PATH, _seed_patient())
+        patient = reader.get(PATIENT_PATH)
+    if observation is None:
         _store(
             base,
             "Observation/obs-synthetic-001",
@@ -555,4 +857,5 @@ def _ensure_records(base: str) -> tuple[dict, dict]:
                 "valueString": "Synthetic observation result",
             },
         )
-        return reader.get(PATIENT_PATH), reader.get("Observation/obs-synthetic-001")
+        observation = reader.get("Observation/obs-synthetic-001")
+    return patient, observation

@@ -49,8 +49,19 @@ SYSTEM_INSTRUCTION = (
     "When clinical context is missing, call get_patient_followup_context "
     "with the case id from the user message. "
     "After the tool result arrives, answer from that result only. "
-    "Do not invent clinical data. Do not call any other tool."
+    "Do not invent clinical data. Do not call any other tool. "
+    "When you are not calling a tool, respond with a JSON object that has "
+    "answer and follow_up_required. follow_up_required is true, false, or unknown."
 )
+FINAL_DECISION_FIELDS = ("true", "false", "unknown")
+FINAL_DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string"},
+        "follow_up_required": {"type": "string", "enum": list(FINAL_DECISION_FIELDS)},
+    },
+    "required": ["answer", "follow_up_required"],
+}
 
 Model = Callable[[list[AnyMessage]], AIMessage]
 
@@ -121,6 +132,32 @@ def _find_read_error(exc: BaseException) -> ReadClientError | None:
     return None
 
 
+def _object_payload(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    dump = getattr(value, "model_dump", None)
+    if not callable(dump):
+        return None
+    dumped = dump()
+    if isinstance(dumped, dict):
+        return dumped
+    return None
+
+
+def _decision_object(response: Any, text: str) -> dict[str, Any] | None:
+    """Read a structured object. Prose that is not that object is left untouched."""
+    parsed = _object_payload(getattr(response, "parsed", None))
+    if parsed is not None:
+        return parsed
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(loaded, dict):
+        return loaded
+    return None
+
+
 def followup_message_from_response(response: Any) -> AIMessage:
     """Map one model response to an AIMessage, keeping each function-call signature."""
     candidates = getattr(response, "candidates", None) or []
@@ -152,10 +189,20 @@ def followup_message_from_response(response: Any) -> AIMessage:
             texts.append(text)
     if not texts and not tool_calls:
         raise ValueError("gemini returned no content")
-    extra: dict[str, Any] = {}
+    content = "".join(texts)
+    kwargs: dict[str, Any] = {}
     if signatures:
-        extra["additional_kwargs"] = {"thought_signatures": signatures}
-    return AIMessage(content="".join(texts), tool_calls=tool_calls, **extra)
+        kwargs["thought_signatures"] = signatures
+    if not tool_calls:
+        decision = _decision_object(response, content)
+        token = decision.get("follow_up_required") if decision is not None else None
+        answer = decision.get("answer") if decision is not None else None
+        if token in FINAL_DECISION_FIELDS:
+            kwargs["follow_up_required"] = token
+            if isinstance(answer, str) and answer.strip():
+                content = answer
+    extra: dict[str, Any] = {"additional_kwargs": kwargs} if kwargs else {}
+    return AIMessage(content=content, tool_calls=tool_calls, **extra)
 
 
 def _contents(messages: list[AnyMessage]) -> list[Any]:
@@ -202,6 +249,24 @@ def _contents(messages: list[AnyMessage]) -> list[Any]:
     return contents
 
 
+def _followup_generate_config(messages: list[AnyMessage]) -> Any:
+    """Tools on the read turn. A JSON decision only after a tool result exists."""
+    from google.genai import types
+
+    if any(isinstance(message, ToolMessage) for message in messages):
+        return types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            response_mime_type="application/json",
+            response_json_schema=FINAL_DECISION_SCHEMA,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        )
+    return types.GenerateContentConfig(
+        system_instruction=SYSTEM_INSTRUCTION,
+        tools=[_declared_followup_tool()],
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+
 def gemini_followup_message(messages: list[AnyMessage]) -> AIMessage:
     """Ask the configured model for one message. Automatic tool execution stays off."""
     from google import genai
@@ -213,11 +278,7 @@ def gemini_followup_message(messages: list[AnyMessage]) -> AIMessage:
         response = client.models.generate_content(
             model=model_name,
             contents=_contents(messages),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                tools=[_declared_followup_tool()],
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-            ),
+            config=_followup_generate_config(messages),
         )
     except Exception as exc:
         raise RuntimeError(

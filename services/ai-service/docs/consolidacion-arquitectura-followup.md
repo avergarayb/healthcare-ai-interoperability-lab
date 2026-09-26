@@ -1,12 +1,59 @@
 # Auditoría de convergencia del follow-up
 
-Estado productivo: `POST /internal/agent/follow-up` llama a `FollowUpWorkflow.run()`. El runtime, el prompt, la traza, la evaluación, las tools, los fixtures y la policy del follow-up antiguo ya no están en el árbol. `GeminiProvider.generate_summary()` sigue en el resumen experimental.
+Estado productivo validado: `POST /internal/agent/follow-up` llama solo a `FollowUpWorkflow.run()`. El runtime manual, `FollowUpResponse`, `generate_text`, el prompt, la traza, la evaluación, las tools de fixture y la policy antigua no están en el árbol. `GeminiProvider.generate_summary()` sigue solo en el resumen experimental.
 
-El texto desde la sección A es el diagnóstico histórico, anterior a esa eliminación. No describe el código actual.
+```text
+POST /internal/agent/follow-up
+        |
+        v
+followup_service
+        |
+        v
+FollowUpWorkflow.run()
+        |
+        v
+Gemini #1  (AutomaticFunctionCallingConfig disable=True, tool declarada)
+        |
+        v
+evaluate_tool_policy
+        |
+        v
+record_policy_audit   (log followup_tool_policy_audit, mismo run_id)
+        |
+        v
+ToolNode              (ejecuta; no autoriza)
+        |
+        v
+get_patient_followup_context
+        |
+        v
+FollowUpFHIRAdapter
+        |
+        v
+ClientFHIRTransport
+        |
+        v
+HapiReadClient        (solo GET)
+        |
+        v
+HAPI FHIR
+        |
+        v
+Gemini #2  (AFC desactivado, sin tools, objeto answer + follow_up_required)
+        |
+        v
+FollowUpEndpointResponse
+```
+
+`caseId` no es `Patient.id`. Se busca `Patient.identifier` con system `https://lab.local/followup-case` y value igual al caso, y después se leen ese Patient y sus Observation. `MAX_MODEL_TURNS` es 4. `thought_signature` se reinyecta en el `Part` del segundo request y no sale en el log ni en el HTTP. No hay memoria persistente, RAG, checkpointing ni human-in-the-loop.
+
+Una llamada live de `SYN-FOLLOWUP-001` terminó en HTTP 200, `status` `completed` y `followUpRequired` `unknown`. Confirmó los dos turnos, la tool, la auditoría y las lecturas HAPI. No inspeccionó el payload estructurado interno de Gemini, así que `unknown` sigue siendo un resultado válido. El texto libre no decide ese campo.
 
 La versión instalada es `langgraph==1.2.12`.
 
-## A. Arquitectura actual
+El texto desde la sección A es el diagnóstico histórico, anterior a la eliminación del runtime. No describe el código actual.
+
+## A. Diagnóstico histórico
 
 ```text
 POST /internal/agent/follow-up          POST /internal/experimental-summary

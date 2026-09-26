@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
 
 from app.config import Settings
-from app.langgraph_followup_workflow import FollowUpWorkflowResult
+from app.langgraph_fhir_client import POLICY_VERSION, InMemoryAuditSink, PreparedReadClient
+from app.langgraph_followup_workflow import FollowUpWorkflow, FollowUpWorkflowResult
+from app.langgraph_gemini_fhir_followup import followup_message_from_response
 from app.main import app, get_settings
 
 
@@ -263,6 +267,154 @@ def test_http_run_id_is_the_workflow_run_id(monkeypatch):
     assert body["runId"] == "12345678-1234-5678-1234-567812345678"
     assert seen["runs"][0].run_id == body["runId"]
     assert body["runId"] != "ignored-by-the-script"
+
+
+def test_http_run_id_matches_the_policy_audit_log(monkeypatch, caplog):
+    fixed = uuid.UUID("12345678123456781234567812345678")
+    monkeypatch.setattr("app.followup_service.uuid.uuid4", lambda: fixed)
+    sink = InMemoryAuditSink()
+    replies = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "get_patient_followup_context",
+                    "args": {"case_id": CASE},
+                    "id": "call-1",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        AIMessage(content="Context received from the model."),
+    ]
+
+    def factory(run_id: str) -> FollowUpWorkflow:
+        return FollowUpWorkflow(
+            model=lambda _messages: replies.pop(0),
+            sink=sink,
+            fhir_client=PreparedReadClient(),
+            clock=lambda: "2026-09-25T00:00:03Z",
+            run_id=run_id,
+        )
+
+    monkeypatch.setattr("app.followup_service.build_followup_workflow", factory)
+    app.dependency_overrides[get_settings] = lambda: _settings()
+    with caplog.at_level(logging.INFO, logger="ai-service"):
+        response = _post(TestClient(app), {"caseId": CASE}, headers=_auth_headers())
+    body = response.json()
+    assert response.status_code == 200
+    assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
+    assert body["runId"] == "12345678-1234-5678-1234-567812345678"
+    assert body["caseId"] == CASE
+    assert body["status"] == "completed"
+    assert "followup_tool_policy_audit" not in response.text
+    assert POLICY_VERSION not in response.text
+    assert "thought_signature" not in response.text
+    event = sink.events[0]
+    assert event.run_id == body["runId"]
+    assert event.case_id == body["caseId"]
+    assert event.tool_name == "get_patient_followup_context"
+    assert event.decision == "allowed"
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("followup_tool_policy_audit ")
+    ]
+    assert lines == [
+        "followup_tool_policy_audit "
+        f"run_id={body['runId']} case_id={CASE} "
+        "tool_name=get_patient_followup_context decision=allowed "
+        f"policy_version={POLICY_VERSION} reason=read tool is allowed"
+    ]
+    for token in (
+        "thought_signature",
+        "gemini_api_key",
+        "x-service-token",
+        "authorization",
+        "Patient",
+        "Observation",
+        "Synthetic observation result",
+        "valueString",
+        "prompt",
+        "completion",
+        "args=",
+    ):
+        assert token not in lines[0]
+
+
+class _DecisionPart:
+    function_call = None
+    thought_signature = None
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _DecisionResponse:
+    parsed = None
+
+    def __init__(self, text: str) -> None:
+        self.candidates = [
+            type("Candidate", (), {"content": type("Content", (), {"parts": [_DecisionPart(text)]})()})()
+        ]
+
+
+def _post_real_workflow(monkeypatch, final: AIMessage):
+    replies = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "get_patient_followup_context",
+                    "args": {"case_id": CASE},
+                    "id": "call-1",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        final,
+    ]
+
+    def factory(run_id: str) -> FollowUpWorkflow:
+        return FollowUpWorkflow(
+            model=lambda _messages: replies.pop(0),
+            sink=InMemoryAuditSink(),
+            fhir_client=PreparedReadClient(),
+            clock=lambda: "2026-09-25T00:00:03Z",
+            run_id=run_id,
+        )
+
+    monkeypatch.setattr("app.followup_service.build_followup_workflow", factory)
+    app.dependency_overrides[get_settings] = lambda: _settings()
+    return _post(TestClient(app), {"caseId": CASE}, headers=_auth_headers())
+
+
+@pytest.mark.parametrize(
+    ("token", "answer"),
+    [("true", "Needs a synthetic follow-up."), ("false", "No follow-up is needed.")],
+)
+def test_http_projects_a_structured_follow_up_required(monkeypatch, token, answer):
+    message = followup_message_from_response(
+        _DecisionResponse('{"answer": "%s", "follow_up_required": "%s"}' % (answer, token))
+    )
+    response = _post_real_workflow(monkeypatch, message)
+    body = response.json()
+    assert response.status_code == 200
+    assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
+    assert body["status"] == "completed"
+    assert body["followUpRequired"] == token
+    assert body["answer"] == answer
+    assert "thought_signature" not in response.text
+
+
+def test_http_keeps_follow_up_required_unknown_when_the_model_omits_it(monkeypatch):
+    prose = "The text says follow-up is true because an observation exists."
+    response = _post_real_workflow(monkeypatch, AIMessage(content=prose))
+    body = response.json()
+    assert response.status_code == 200
+    assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
+    assert body["followUpRequired"] == "unknown"
+    assert body["answer"] == prose
 
 
 def test_http_response_does_not_include_a_trace(monkeypatch):

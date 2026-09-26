@@ -2,29 +2,27 @@
 
 The tool asks FollowUpFHIRAdapter. The adapter asks a FHIRTransport.
 Neither one opens HTTP or imports LangGraph.
+
+A case id is an application identifier. It is stored on Patient.identifier
+with system https://lab.local/followup-case. It is not Patient.id.
 """
 
 from __future__ import annotations
+
+from urllib.parse import quote
 
 from langchain_core.tools import tool
 
 from app.langgraph_fhir_client import (
     BOUNDARY_EVENTS,
+    CASE_IDENTIFIER_SYSTEM,
     FOLLOWUP_TOOL,
-    PATIENT_CASE,
-    PATIENT_ID,
     FHIRTransport,
     ReadClientError,
 )
 
 
-MISSING_CASE = "SYN-FOLLOWUP-005"
-MISSING_PATIENT_ID = "SYN-PATIENT-NOT-FOUND"
 UNAVAILABLE_ANSWER = "stopped: clinical context unavailable"
-CASE_PATIENT = {
-    PATIENT_CASE: PATIENT_ID,
-    MISSING_CASE: MISSING_PATIENT_ID,
-}
 
 
 def _mark(event: str) -> None:
@@ -68,12 +66,63 @@ def _observations_from_bundle(payload: dict) -> list[dict]:
     return observations
 
 
+def case_search_path(case_id: str) -> str:
+    """Search Patient by identifier. The case id is the identifier value, not Patient.id."""
+    token = quote(f"{CASE_IDENTIFIER_SYSTEM}|{case_id}", safe="")
+    return f"Patient?identifier={token}"
+
+
+def _case_identifier_matches(patient: dict, case_id: str) -> bool:
+    identifiers = patient.get("identifier")
+    if not isinstance(identifiers, list):
+        return False
+    return any(
+        isinstance(item, dict)
+        and item.get("system") == CASE_IDENTIFIER_SYSTEM
+        and item.get("value") == case_id
+        for item in identifiers
+    )
+
+
+def _patient_id_from_case_search(payload: dict, case_id: str) -> str:
+    if payload.get("resourceType") != "Bundle":
+        raise ReadClientError("case search must be a bundle")
+    entries = payload.get("entry") or []
+    if not isinstance(entries, list):
+        raise ReadClientError("case search entries must be a list")
+    matches: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource")
+        if not isinstance(resource, dict) or resource.get("resourceType") != "Patient":
+            continue
+        if not _case_identifier_matches(resource, case_id):
+            continue
+        patient_id = resource.get("id")
+        if not isinstance(patient_id, str) or not patient_id:
+            raise ReadClientError("matched patient has no id")
+        matches.append(patient_id)
+    if not matches:
+        raise ReadClientError("case has no patient")
+    if len(matches) != 1:
+        raise ReadClientError("case matched more than one patient")
+    return matches[0]
+
+
 class FollowUpFHIRAdapter:
     """Map a patient and that patient's observations. This class does not open HTTP."""
 
     def __init__(self, transport: FHIRTransport) -> None:
         self.transport = transport
         self.calls: list[tuple[str, str]] = []
+
+    def patient_id_for_case(self, case_id: str) -> str:
+        """Resolve one case through Patient.identifier. This does not read Patient/{case_id}."""
+        _mark("adapter:patient_for_case")
+        self.calls.append(("patient_for_case", case_id))
+        payload = self.transport.get(case_search_path(case_id))
+        return _patient_id_from_case_search(payload, case_id)
 
     def get_patient(self, patient_id: str) -> dict[str, str]:
         _mark("adapter:get_patient")
@@ -104,10 +153,8 @@ def make_followup_tool(adapter: FollowUpFHIRAdapter):
     @tool
     def get_patient_followup_context(case_id: str) -> dict[str, object]:
         """Read one case through the adapter."""
-        patient_id = CASE_PATIENT.get(case_id)
-        if patient_id is None:
-            raise ReadClientError("case has no patient")
         _mark(f"execute:{FOLLOWUP_TOOL}")
+        patient_id = adapter.patient_id_for_case(case_id)
         return {
             "patient": adapter.get_patient(patient_id),
             "observations": adapter.get_observations(patient_id),

@@ -13,6 +13,8 @@ import httpx
 import pytest
 
 from app.langgraph_fhir_client import (
+    CASE_IDENTIFIER_SYSTEM,
+    PATIENT_CASE,
     PATIENT_ID,
     ClientFHIRTransport,
     FHIRAdapter,
@@ -29,6 +31,7 @@ SEEDED_PATIENT = {
     "resourceType": "Patient",
     "id": PATIENT_ID,
     "active": True,
+    "identifier": [{"system": CASE_IDENTIFIER_SYSTEM, "value": PATIENT_CASE}],
     "name": [{"text": "Synthetic Patient"}],
 }
 SEEDED_OBSERVATION = {
