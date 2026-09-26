@@ -24,10 +24,6 @@ class LLMProvider(ABC):
     def generate_summary(self, request: ExperimentalSummaryRequest) -> ProviderGeneration:
         """Return model text or a provider error. Never set requiresHumanReview."""
 
-    @abstractmethod
-    def generate_text(self, prompt: str) -> ProviderGeneration:
-        """Return model text for a raw prompt. Never set requiresHumanReview."""
-
 
 def build_experimental_prompt(request: ExperimentalSummaryRequest) -> str:
     payload = request.model_dump(by_alias=True)

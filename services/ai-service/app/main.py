@@ -71,9 +71,4 @@ async def follow_up(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    return run_followup_http(
-        request,
-        settings,
-        lambda: get_llm_provider(settings),
-        await request.body(),
-    )
+    return run_followup_http(request, settings, await request.body())

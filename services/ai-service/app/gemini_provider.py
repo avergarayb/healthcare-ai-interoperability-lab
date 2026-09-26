@@ -21,9 +21,6 @@ class GeminiProvider(LLMProvider):
         prompt = build_experimental_prompt(request)
         return self._generate_from_prompt(prompt)
 
-    def generate_text(self, prompt: str) -> ProviderGeneration:
-        return self._generate_from_prompt(prompt)
-
     def _generate_from_prompt(self, prompt: str) -> ProviderGeneration:
         from google import genai
         from google.genai import types

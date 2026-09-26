@@ -1,4 +1,4 @@
-"""Follow-up provider is resolved only after auth, the feature flag, and a valid body."""
+"""Follow-up does not resolve GeminiProvider. Auth and the feature flag still come first."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.fake_llm_provider import FakeLLMProvider
 from app.gemini_provider import GeminiProvider
 from app.main import app, get_settings
 
@@ -35,11 +34,6 @@ def _settings(**overrides) -> Settings:
 
 def _auth_headers() -> dict[str, str]:
     return {"X-Service-Token": "test-model-boundary-token"}
-
-
-class _TextResponse:
-    def __init__(self, text: str) -> None:
-        self.text = text
 
 
 @pytest.fixture(autouse=True)
@@ -93,30 +87,39 @@ def test_invalid_token_does_not_resolve_provider_when_enabled(monkeypatch):
     assert calls["count"] == 0
 
 
-def test_enabled_valid_request_resolves_provider(monkeypatch):
-    provider = FakeLLMProvider(
-        script=[
-            {
-                "type": "final",
-                "output": {
-                    "followUpRequired": "unknown",
-                    "summary": "Synthetic follow-up summary.",
-                    "reason": "Synthetic reason.",
-                    "suggestedActions": [{"type": "none", "detail": "No action"}],
-                    "evidence": [],
-                    "requiresHumanReview": True,
-                },
-            }
-        ]
-    )
-    calls = _spy(monkeypatch, provider)
+def test_enabled_valid_request_runs_the_workflow_and_not_the_summary_provider(monkeypatch):
+    from app.langgraph_followup_workflow import FollowUpWorkflowResult
+
+    calls = _spy(monkeypatch)
+    runs: list[str] = []
+
+    class _Workflow:
+        def __init__(self, run_id: str) -> None:
+            self.run_id = run_id
+
+        def run(self, case_id: str) -> FollowUpWorkflowResult:
+            runs.append(case_id)
+            return FollowUpWorkflowResult(
+                case_id=case_id,
+                status="finish",
+                final_answer="Synthetic answer.",
+                patient=None,
+                observations=[],
+                evidence=[],
+                tools_used=[],
+                turns=1,
+                run_id=self.run_id,
+                follow_up_required="unknown",
+            )
+
+    monkeypatch.setattr("app.followup_service.build_followup_workflow", lambda run_id: _Workflow(run_id))
     response = _post({"caseId": CASE}, _settings(followup_agent_enabled=True), _auth_headers())
     body = response.json()
     assert response.status_code == 200
-    assert body["status"] == "COMPLETED"
-    assert body["modelCalled"] is True
-    assert calls["count"] == 1
-    assert provider.calls == 1
+    assert body["status"] == "completed"
+    assert body["answer"] == "Synthetic answer."
+    assert calls["count"] == 0
+    assert runs == [CASE]
 
 
 def test_enabled_malformed_body_does_not_resolve_provider(monkeypatch):
@@ -141,24 +144,30 @@ def test_gemini_provider_does_not_execute_tools():
     assert "generate_content" in inspect.getsource(GeminiProvider._invoke)
 
 
-def test_enabled_endpoint_reaches_gemini_generate_text(monkeypatch):
-    provider = GeminiProvider(api_key="test-key", model="gemini-flash-latest")
-    seen: list[str] = []
+def test_enabled_endpoint_does_not_call_generate_text(monkeypatch):
+    from app.langgraph_followup_workflow import FollowUpWorkflowResult
 
-    def fake_invoke(client, prompt: str):
-        seen.append(prompt)
-        return _TextResponse(
-            '{"type":"final","output":{"followUpRequired":"unknown","summary":"Synthetic follow-up summary.","reason":"Synthetic reason.","suggestedActions":[{"type":"none","detail":"No action"}],"evidence":[],"requiresHumanReview":false}}'
-        )
+    assert not hasattr(GeminiProvider, "generate_text")
 
-    monkeypatch.setattr(provider, "_invoke", fake_invoke)
-    calls = _spy(monkeypatch, provider)
+    class _Workflow:
+        def __init__(self, run_id: str) -> None:
+            self.run_id = run_id
+
+        def run(self, case_id: str) -> FollowUpWorkflowResult:
+            return FollowUpWorkflowResult(
+                case_id=case_id,
+                status="finish",
+                final_answer="Synthetic answer.",
+                patient=None,
+                observations=[],
+                evidence=[],
+                tools_used=[],
+                turns=1,
+                run_id=self.run_id,
+                follow_up_required="unknown",
+            )
+
+    monkeypatch.setattr("app.followup_service.build_followup_workflow", lambda run_id: _Workflow(run_id))
     response = _post({"caseId": CASE}, _settings(followup_agent_enabled=True), _auth_headers())
-    body = response.json()
-    assert calls["count"] == 1
-    assert len(seen) == 1
-    assert "caseId=SYN-FOLLOWUP-001" in seen[0]
     assert response.status_code == 200
-    assert body["status"] == "COMPLETED"
-    assert body["modelCalled"] is True
-    assert body["requiresHumanReview"] is True
+    assert response.json()["status"] == "completed"

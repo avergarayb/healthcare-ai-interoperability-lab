@@ -1,11 +1,11 @@
-"""HTTP adapter for the Follow-up Agent. Auth, then runtime. No tool or policy logic."""
+"""HTTP adapter for follow-up. Auth, flag, validation, then FollowUpWorkflow.run."""
 
 from __future__ import annotations
 
 import json
 import logging
 import uuid
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
@@ -14,34 +14,57 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.followup_models import (
+    Evidence,
+    FollowUpEndpointResponse,
+    FollowUpEndpointStatus,
     FollowUpRequest,
     FollowUpRequired,
-    FollowUpStatus,
-    dump_followup_response,
-    followup_response,
+    dump_followup_endpoint_response,
 )
-from app.followup_runtime import run_followup_agent
-from app.llm_provider import LLMProvider
+from app.langgraph_fhir_client import InMemoryAuditSink, default_clock
+from app.langgraph_followup_workflow import (
+    FollowUpWorkflow,
+    FollowUpWorkflowResult,
+    build_live_followup_workflow,
+)
 from app.service_auth import authenticate
 
 log = logging.getLogger("ai-service")
 
 DISABLED_DETAIL = "Follow-up agent is disabled"
+WORKFLOW_FAILED_DETAIL = "Follow-up workflow failed"
+
+_HTTP_STATUS = {
+    "finish": FollowUpEndpointStatus.COMPLETED,
+    "denied": FollowUpEndpointStatus.DENIED,
+    "unavailable": FollowUpEndpointStatus.UNAVAILABLE,
+    "limit": FollowUpEndpointStatus.LIMIT,
+}
+
+
+def build_followup_workflow(run_id: str) -> FollowUpWorkflow:
+    """Compose the live workflow. The caller owns run_id."""
+    return build_live_followup_workflow(
+        InMemoryAuditSink(),
+        clock=default_clock,
+        run_id=run_id,
+    )
 
 
 def run_followup_http(
     request: Request,
     settings: Settings,
-    resolve_provider: Callable[[], Optional[LLMProvider]],
     raw_body: bytes,
+    *,
+    build_workflow: Callable[[str], FollowUpWorkflow] | None = None,
 ) -> Response:
     correlation_id = request.headers.get("X-Correlation-ID") or "missing"
     if not authenticate(request, settings):
-        _log(correlation_id, "UNAUTHORIZED", False)
+        _log(correlation_id, "UNAUTHORIZED")
         return Response(status_code=401)
 
     if not settings.followup_agent_enabled:
-        _log(correlation_id, "DISABLED", False)
+        _log(correlation_id, "DISABLED")
         return JSONResponse(status_code=503, content={"detail": DISABLED_DETAIL})
 
     try:
@@ -49,22 +72,49 @@ def run_followup_http(
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
 
-    provider = resolve_provider()
-    if provider is None:
-        payload = followup_response(
-            status=FollowUpStatus.PROVIDER_ERROR,
-            run_id=str(uuid.uuid4()),
-            case_id=parsed.case_id,
-            follow_up_required=FollowUpRequired.UNKNOWN,
-            model_called=False,
-            reason="provider unavailable",
-        )
-        _log(correlation_id, payload.status.value, False)
-        return JSONResponse(status_code=200, content=dump_followup_response(payload))
+    run_id = str(uuid.uuid4())
+    factory = build_workflow or build_followup_workflow
+    workflow = factory(run_id)
+    try:
+        result = workflow.run(parsed.case_id)
+    except Exception:
+        _log(correlation_id, "error")
+        return JSONResponse(status_code=502, content={"detail": WORKFLOW_FAILED_DETAIL})
 
-    result = run_followup_agent(parsed.case_id, provider)
-    _log(correlation_id, result.status.value, result.model_called)
-    return JSONResponse(status_code=200, content=dump_followup_response(result))
+    payload = _project(result)
+    if payload is None:
+        _log(correlation_id, "error")
+        return JSONResponse(status_code=502, content={"detail": WORKFLOW_FAILED_DETAIL})
+    _log(correlation_id, payload.status.value)
+    return JSONResponse(status_code=200, content=dump_followup_endpoint_response(payload))
+
+
+def _project(result: FollowUpWorkflowResult) -> FollowUpEndpointResponse | None:
+    status = _HTTP_STATUS.get(result.status)
+    allowed = {item.value for item in FollowUpRequired}
+    if status is None or result.run_id == "" or result.follow_up_required not in allowed:
+        return None
+    return FollowUpEndpointResponse(
+        runId=result.run_id,
+        caseId=result.case_id,
+        status=status,
+        followUpRequired=FollowUpRequired(result.follow_up_required),
+        answer=result.final_answer,
+        evidence=_evidence(result.evidence),
+    )
+
+
+def _evidence(evidence: list[dict[str, Any]]) -> list[Evidence]:
+    items: list[Evidence] = []
+    for entry in evidence:
+        tool = entry.get("tool")
+        resources = entry.get("resources")
+        if not isinstance(tool, str) or not isinstance(resources, list):
+            continue
+        for reference in resources:
+            if isinstance(reference, str) and reference:
+                items.append(Evidence(tool=tool, id=reference))
+    return items
 
 
 def _load_body(raw: bytes) -> Any:
@@ -76,11 +126,10 @@ def _load_body(raw: bytes) -> Any:
         return None
 
 
-def _log(correlation_id: str, status: str, model_called: bool) -> None:
+def _log(correlation_id: str, status: str) -> None:
     line = (
         f"follow_up correlationId={correlation_id} method=POST "
-        f"path=/internal/agent/follow-up status={status} "
-        f"modelCalled={str(model_called).lower()}"
+        f"path=/internal/agent/follow-up status={status}"
     )
     lowered = line.lower()
     if "x-service-token=" in lowered or "gemini_api_key=" in lowered:
