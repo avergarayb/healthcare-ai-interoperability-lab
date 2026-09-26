@@ -135,7 +135,8 @@ def test_base_url_comes_from_the_environment(monkeypatch):
         hapi_base_url()
 
 
-def test_http_errors_stay_on_the_client():
+def test_http_errors_stay_on_the_client(monkeypatch):
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", lambda _delay: None)
     def missing(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"resourceType": "OperationOutcome", "issue": []})
 
@@ -194,6 +195,69 @@ def test_local_server_returns_the_seeded_patient_and_observation():
 
 
 @pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")
+def test_transient_fhir_status_retries_then_reads(monkeypatch):
+    waits: list[float] = []
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", waits.append)
+    seen: list[int] = []
+
+    def recover(request: httpx.Request) -> httpx.Response:
+        del request
+        seen.append(1)
+        if len(seen) == 1:
+            return httpx.Response(503, json={"resourceType": "OperationOutcome"})
+        return httpx.Response(200, json={"resourceType": "Patient", "id": "recovered"})
+
+    client, http = _client(recover)
+    try:
+        payload = client.get(PATIENT_PATH)
+    finally:
+        http.close()
+    assert payload["resourceType"] == "Patient"
+    assert len(seen) == 2
+    assert waits == [0.25]
+
+
+def test_permanent_fhir_status_does_not_retry(monkeypatch):
+    waits: list[float] = []
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", waits.append)
+    seen: list[int] = []
+
+    def missing(request: httpx.Request) -> httpx.Response:
+        del request
+        seen.append(1)
+        return httpx.Response(404, json={"resourceType": "OperationOutcome"})
+
+    client, http = _client(missing)
+    try:
+        with pytest.raises(ReadClientError, match="HTTP 404"):
+            client.get(PATIENT_PATH)
+    finally:
+        http.close()
+    assert len(seen) == 1
+    assert waits == []
+
+
+def test_transient_fhir_status_stops_at_the_attempt_limit(monkeypatch):
+    waits: list[float] = []
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", waits.append)
+    seen: list[int] = []
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        del request
+        seen.append(1)
+        return httpx.Response(503, json={"resourceType": "OperationOutcome"})
+
+    client, http = _client(broken)
+    try:
+        with pytest.raises(ReadClientError, match="HTTP 503"):
+            client.get(PATIENT_PATH)
+    finally:
+        http.close()
+    assert len(seen) == 3
+    assert waits == [0.25, 0.5]
+    assert len(client.calls) == 3
+
+
 def test_local_server_missing_patient_is_not_a_clinical_result():
     client = HapiReadClient(hapi_base_url())
     with pytest.raises(ReadClientError, match="HTTP 404"):

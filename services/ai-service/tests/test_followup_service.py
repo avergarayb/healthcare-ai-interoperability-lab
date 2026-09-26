@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage
 from app.config import Settings
 from app.langgraph_fhir_client import POLICY_VERSION, InMemoryAuditSink, PreparedReadClient
 from app.langgraph_followup_workflow import FollowUpWorkflow, FollowUpWorkflowResult
-from app.langgraph_gemini_fhir_followup import followup_message_from_response
+from app.langgraph_gemini_fhir_followup import followup_message_from_response, gemini_followup_message
 from app.main import app, get_settings
 
 
@@ -473,6 +473,106 @@ def test_health_ignores_the_followup_flag():
     response = TestClient(app).get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_http_contract_stays_the_same_when_gemini_retries(monkeypatch, caplog):
+    from google.genai.errors import ClientError
+
+    calls: list[int] = []
+    options: list[object] = []
+
+    class _Call:
+        name = "get_patient_followup_context"
+        args = {"case_id": CASE}
+        id = "call-1"
+
+    class _ToolPart:
+        function_call = _Call()
+        text = None
+        thought_signature = b"\x01synthetic-thought-signature"
+
+    class _ToolResponse:
+        candidates = [type("Candidate", (), {"content": type("Content", (), {"parts": [_ToolPart()]})()})()]
+
+    class _FinalPart:
+        function_call = None
+        thought_signature = None
+        text = '{"answer": "Context received.", "follow_up_required": "true"}'
+
+    class _FinalResponse:
+        parsed = None
+        candidates = [type("Candidate", (), {"content": type("Content", (), {"parts": [_FinalPart()]})()})()]
+
+    replies: list[object] = [
+        ClientError(429, {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "temporary"}}, None),
+        _ToolResponse(),
+        _FinalResponse(),
+    ]
+
+    class _Client:
+        def __init__(self, *, api_key: str, http_options: object) -> None:
+            del api_key
+            options.append(http_options)
+            self.models = self
+
+        def generate_content(self, *, model: str, contents: list[object], config: object) -> object:
+            del model, contents, config
+            calls.append(1)
+            item = replies.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    monkeypatch.setattr("google.genai.Client", _Client)
+    monkeypatch.setattr("app.langgraph_gemini_fhir_followup._retry_sleep", lambda _delay: None)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-flash-latest")
+    sink = InMemoryAuditSink()
+
+    def factory(run_id: str) -> FollowUpWorkflow:
+        return FollowUpWorkflow(
+            model=gemini_followup_message,
+            sink=sink,
+            fhir_client=PreparedReadClient(),
+            clock=lambda: "2026-09-25T00:00:03Z",
+            run_id=run_id,
+        )
+
+    monkeypatch.setattr("app.followup_service.build_followup_workflow", factory)
+    app.dependency_overrides[get_settings] = lambda: _settings()
+    try:
+        with caplog.at_level(logging.INFO, logger="ai-service"):
+            response = _post(TestClient(app), {"caseId": CASE}, headers=_auth_headers())
+    finally:
+        app.dependency_overrides.clear()
+    body = response.json()
+    assert response.status_code == 200
+    assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
+    assert body["status"] == "completed"
+    assert body["followUpRequired"] == "true"
+    assert body["answer"] == "Context received."
+    assert {item["tool"] for item in body["evidence"]} == {"get_patient_followup_context"}
+    assert "thought_signature" not in response.text
+    assert "synthetic-thought-signature" not in response.text
+    assert len(calls) == 3
+    assert len(sink.events) == 1
+    assert sink.events[0].run_id == body["runId"]
+    assert options[0].retry_options.attempts == 1
+    prepared = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "ai-service"
+    ]
+    assert sum(line.startswith("followup_tool_policy_audit ") for line in prepared) == 1
+    assert "gemini_followup_retry status=429 attempt=1" in prepared
+    for token in (
+        "test-key-not-real",
+        "synthetic-thought-signature",
+        "valueString",
+        "Synthetic observation result",
+        "x-service-token",
+    ):
+        assert token not in "\n".join(prepared)
 
 
 def test_followup_flag_defaults_false_and_is_independent(monkeypatch):

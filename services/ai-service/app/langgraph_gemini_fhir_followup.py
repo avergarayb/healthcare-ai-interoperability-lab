@@ -8,9 +8,11 @@ The adapter, transport, and read client stay outside this graph.
 from __future__ import annotations
 
 import json
+import logging
 import operator
 import os
 import re
+import time
 from typing import Annotated, Any, Callable, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
@@ -44,6 +46,13 @@ from app.langgraph_fhir_hapi import HapiReadClient
 
 MAX_MODEL_TURNS = 4
 MODEL_LIMIT_ANSWER = "stopped: model turn limit reached"
+GEMINI_RETRY_ATTEMPTS = 3
+GEMINI_RETRY_INITIAL_SECONDS = 0.25
+GEMINI_RETRY_MAX_SECONDS = 1.0
+TRANSIENT_GEMINI_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+log = logging.getLogger("ai-service")
+_retry_sleep = time.sleep
 SYSTEM_INSTRUCTION = (
     "You prepare a synthetic follow-up. "
     "When clinical context is missing, call get_patient_followup_context "
@@ -267,24 +276,64 @@ def _followup_generate_config(messages: list[AnyMessage]) -> Any:
     )
 
 
+def _gemini_http_options() -> Any:
+    """One SDK attempt. The application retry below is the only retry."""
+    from google.genai import types
+
+    return types.HttpOptions(
+        timeout=30_000,
+        retry_options=types.HttpRetryOptions(attempts=1),
+    )
+
+
+def _backoff_seconds(failed_attempt: int) -> float:
+    delay = GEMINI_RETRY_INITIAL_SECONDS * (2 ** (failed_attempt - 1))
+    return min(delay, GEMINI_RETRY_MAX_SECONDS)
+
+
+def _gemini_retryable(exc: BaseException) -> bool:
+    """Retry provider overload and transport loss. Leave permanent request errors alone."""
+    import httpx
+
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError)):
+        return True
+    code = getattr(exc, "code", None)
+    return isinstance(code, int) and not isinstance(code, bool) and code in TRANSIENT_GEMINI_STATUS
+
+
+def _retry_status_label(exc: BaseException) -> str:
+    code = getattr(exc, "code", None)
+    if isinstance(code, int) and not isinstance(code, bool) and code in TRANSIENT_GEMINI_STATUS:
+        return str(code)
+    return "transport"
+
+
+def _generate_with_retry(client: Any, model_name: str, messages: list[AnyMessage]) -> Any:
+    """Repeat one generateContent. This does not re-enter the graph or the tool."""
+    for attempt in range(1, GEMINI_RETRY_ATTEMPTS + 1):
+        try:
+            return client.models.generate_content(
+                model=model_name,
+                contents=_contents(messages),
+                config=_followup_generate_config(messages),
+            )
+        except Exception as exc:
+            if attempt >= GEMINI_RETRY_ATTEMPTS or not _gemini_retryable(exc):
+                raise RuntimeError(
+                    f"gemini follow-up request failed model={model_name} {gemini_error_diagnostics(exc)}"
+                ) from None
+            log.info("gemini_followup_retry status=%s attempt=%s", _retry_status_label(exc), attempt)
+            _retry_sleep(_backoff_seconds(attempt))
+    raise RuntimeError(f"gemini follow-up request failed model={model_name} status=unknown")
+
+
 def gemini_followup_message(messages: list[AnyMessage]) -> AIMessage:
     """Ask the configured model for one message. Automatic tool execution stays off."""
     from google import genai
-    from google.genai import types
 
     api_key, model_name = _gemini_config()
-    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=30_000))
-    try:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=_contents(messages),
-            config=_followup_generate_config(messages),
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            f"gemini follow-up request failed model={model_name} {gemini_error_diagnostics(exc)}"
-        ) from None
-    return followup_message_from_response(response)
+    client = genai.Client(api_key=api_key, http_options=_gemini_http_options())
+    return followup_message_from_response(_generate_with_retry(client, model_name, messages))
 
 
 def gemini_error_diagnostics(exc: BaseException) -> str:

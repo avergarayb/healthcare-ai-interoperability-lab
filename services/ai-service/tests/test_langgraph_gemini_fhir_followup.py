@@ -30,16 +30,19 @@ from app.langgraph_fhir_client import (
 from app.langgraph_fhir_followup import UNAVAILABLE_ANSWER, case_search_path, make_followup_tool
 from app.langgraph_fhir_hapi import HapiReadClient, hapi_base_url
 from app.langgraph_gemini_fhir_followup import (
+    GEMINI_RETRY_ATTEMPTS,
     MAX_MODEL_TURNS,
     MODEL_LIMIT_ANSWER,
     GeminiFhirFollowUp,
+    _contents,
+    _gemini_http_options,
     build_gemini_fhir_followup,
     build_live_gemini_fhir_followup,
-    _contents,
     describe_followup_contents,
     followup_message_from_response,
     followup_tool_schema,
     gemini_error_diagnostics,
+    gemini_followup_message,
     initial_state,
 )
 PATIENT_PATH = f"Patient/{PATIENT_ID}"
@@ -762,3 +765,177 @@ def test_live_gemini_reads_hapi_before_the_final_answer():
 def _client_calls(workflow: GeminiFhirFollowUp) -> list[str]:
     transport = workflow.adapter.transport
     return list(getattr(transport, "calls", []))
+
+
+class _GeminiScript:
+    def __init__(self, replies: list[object]) -> None:
+        self.replies = list(replies)
+        self.calls: list[list[object]] = []
+        self.options: list[object] = []
+
+    def install(self, monkeypatch, waits: list[float] | None = None) -> None:
+        script = self
+
+        class _Client:
+            def __init__(self, *, api_key: str, http_options: object) -> None:
+                del api_key
+                script.options.append(http_options)
+                self.models = self
+
+            def generate_content(self, *, model: str, contents: list[object], config: object) -> object:
+                del model, config
+                script.calls.append(list(contents))
+                if not script.replies:
+                    raise AssertionError("gemini called after the script ended")
+                item = script.replies.pop(0)
+                if isinstance(item, Exception):
+                    raise item
+                return item
+
+        monkeypatch.setattr("google.genai.Client", _Client)
+        monkeypatch.setattr(
+            "app.langgraph_gemini_fhir_followup._retry_sleep",
+            waits.append if waits is not None else (lambda _delay: None),
+        )
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+        monkeypatch.setenv("GEMINI_MODEL", "gemini-flash-latest")
+
+
+def _provider_error(status: int):
+    from google.genai.errors import ClientError, ServerError
+
+    kind = ServerError if status >= 500 else ClientError
+    return kind(status, {"error": {"code": status, "status": "TRANSIENT", "message": "temporary"}}, None)
+
+
+def _signature_present(contents: list[object]) -> bool:
+    for content in contents:
+        for part in getattr(content, "parts", None) or []:
+            if getattr(part, "thought_signature", None) == THOUGHT_SIGNATURE:
+                return True
+    return False
+
+
+def test_sdk_retry_stays_at_one_attempt_while_the_application_retries():
+    from google.genai._api_client import retry_args
+
+    options = _gemini_http_options()
+    assert options.retry_options.attempts == 1
+    assert retry_args(options.retry_options)["stop"].max_attempt_number == 1
+    assert GEMINI_RETRY_ATTEMPTS == 3
+
+
+def test_gemini_503_retries_then_succeeds(monkeypatch):
+    waits: list[float] = []
+    script = _GeminiScript([_provider_error(503), _SignedResponse()])
+    script.install(monkeypatch, waits)
+    message = gemini_followup_message([HumanMessage(content="Prepare follow-up.")])
+    assert len(script.calls) == 2
+    assert waits == [0.25]
+    assert message.tool_calls[0]["name"] == FOLLOWUP_TOOL
+    assert message.additional_kwargs["thought_signatures"]["call-1"] is THOUGHT_SIGNATURE
+    assert script.options[0].retry_options.attempts == 1
+
+
+def test_gemini_429_retries_then_succeeds(monkeypatch):
+    script = _GeminiScript(
+        [
+            _provider_error(429),
+            _TextResponse('{"answer": "Context received.", "follow_up_required": "true"}'),
+        ]
+    )
+    script.install(monkeypatch)
+    message = gemini_followup_message([HumanMessage(content="Prepare follow-up.")])
+    assert len(script.calls) == 2
+    assert message.additional_kwargs["follow_up_required"] == "true"
+    assert message.content == "Context received."
+
+
+def test_gemini_503_exhausts_the_attempt_limit(monkeypatch):
+    waits: list[float] = []
+    script = _GeminiScript([_provider_error(503), _provider_error(503), _provider_error(503), _SignedResponse()])
+    script.install(monkeypatch, waits)
+    with pytest.raises(RuntimeError, match="status=503"):
+        gemini_followup_message([HumanMessage(content="Prepare follow-up.")])
+    assert len(script.calls) == GEMINI_RETRY_ATTEMPTS
+    assert waits == [0.25, 0.5]
+    assert len(script.replies) == 1
+
+
+@pytest.mark.parametrize("status", [400, 401])
+def test_permanent_gemini_status_does_not_retry(monkeypatch, status):
+    waits: list[float] = []
+    script = _GeminiScript([_provider_error(status), _SignedResponse()])
+    script.install(monkeypatch, waits)
+    with pytest.raises(RuntimeError, match=f"status={status}"):
+        gemini_followup_message([HumanMessage(content="Prepare follow-up.")])
+    assert len(script.calls) == 1
+    assert waits == []
+    assert len(script.replies) == 1
+
+
+def test_gemini_transport_error_retries_then_succeeds(monkeypatch, caplog):
+    script = _GeminiScript([httpx.ConnectError("down"), _SignedResponse()])
+    script.install(monkeypatch)
+    with caplog.at_level("INFO", logger="ai-service"):
+        message = gemini_followup_message([HumanMessage(content="Prepare follow-up.")])
+    assert len(script.calls) == 2
+    assert message.additional_kwargs["thought_signatures"]["call-1"] is THOUGHT_SIGNATURE
+    assert "gemini_followup_retry status=transport attempt=1" in caplog.text
+    assert "test-key-not-real" not in caplog.text
+    assert "synthetic-thought-signature" not in caplog.text
+
+
+def test_model_retry_keeps_one_tool_call_one_audit_and_the_signature(monkeypatch, caplog):
+    waits: list[float] = []
+    final = _TextResponse('{"answer": "Context received.", "follow_up_required": "false"}')
+    script = _GeminiScript([_provider_error(503), _SignedResponse(), _provider_error(429), final])
+    script.install(monkeypatch, waits)
+    client, http = _client(_ok("Name From Server", "obs-from-transport", "Value read from the server"))
+    sink = InMemoryAuditSink()
+    workflow = _workflow(client, gemini_followup_message, sink)
+    try:
+        with caplog.at_level("INFO", logger="ai-service"):
+            result = workflow.invoke(PATIENT_CASE)
+    finally:
+        http.close()
+    assert workflow.model_calls == 2
+    assert len(script.calls) == 4
+    assert client.calls == CASE_READS
+    assert len(sink.events) == 1
+    assert sink.events[0].run_id == workflow.run_id == "run-gemini-followup-001"
+    assert result["decision"] == "finish"
+    assert result["final_answer"] == "Context received."
+    assert not _signature_present(script.calls[0])
+    assert _signature_present(script.calls[2])
+    assert _signature_present(script.calls[3])
+    assert waits == [0.25, 0.25]
+    assert caplog.text.count("followup_tool_policy_audit ") == 1
+    for token in ("test-key-not-real", "synthetic-thought-signature", "valueString", "Name From Server"):
+        assert token not in caplog.text
+
+
+def test_exhausted_fhir_retry_stays_unavailable_without_another_model_call(monkeypatch):
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", lambda _delay: None)
+    seen: list[int] = []
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        del request
+        seen.append(1)
+        return httpx.Response(503, json={"resourceType": "OperationOutcome"})
+
+    client, http = _client(broken)
+    sink = InMemoryAuditSink()
+    model = ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)])
+    workflow = _workflow(client, model, sink)
+    try:
+        result = workflow.invoke(PATIENT_CASE)
+    finally:
+        http.close()
+    assert result["decision"] == "unavailable"
+    assert result["final_answer"] == UNAVAILABLE_ANSWER
+    assert workflow.model_calls == 1
+    assert len(sink.events) == 1
+    assert sink.events[0].run_id == "run-gemini-followup-001"
+    assert len(seen) == 3
+    assert len(model.replies) == 1
