@@ -184,6 +184,17 @@ The default suite stays deterministic. It does not call Epic, Oracle, or Gemini,
 
 Follow-up endpoint tests inject a scripted workflow. Experimental-summary tests use `FakeLLMProvider` and stub `GeminiProvider._invoke` for `generate_summary()`.
 
+## Follow-up evaluation
+
+`evaluation` runs the same `FollowUpWorkflow` with a scripted model and the in-memory FHIR client. It checks system behavior: which tools ran, in what order, whether policy allowed them, which FHIR ids were read, whether `follow_up_required` is the structured token, how many model turns were used, and whether the run stopped by `finish`, `close`, `denied`, `unavailable`, or `limit`.
+
+It does not judge clinical correctness. A scripted `true`, `false`, or `unknown` checks that the workflow kept the model's structured field. It is not a rule that an appointment, an observation, or an empty search means follow-up is required. The harness does not call Gemini, does not use another model as a judge, and does not show clinical safety or clinical effectiveness. It does not replace human review.
+
+```bash
+cd services/ai-service
+py -3 -m pytest tests/test_followup_evaluation.py
+```
+
 ## Live Gemini
 
 Set `RUN_LIVE_GEMINI_TESTS=true` together with `RUN_HAPI_INTEGRATION_TESTS=true` to run the opt-in follow-up case. It stays skipped otherwise. HAPI reads alone use `RUN_HAPI_INTEGRATION_TESTS=true`. The experimental summary has its own opt-in live test and still uses `GeminiProvider.generate_summary()`.
