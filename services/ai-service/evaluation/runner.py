@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage
 
@@ -59,6 +60,7 @@ class EvaluationObservation:
     close_count: int
     fhir_calls: tuple[str, ...]
     executed_effects: tuple[str, ...]
+    classifications: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class EvaluationResult:
     status: str
     model_turns: int
     close_used: bool
+    classifications: tuple[str, ...]
     failures: tuple[str, ...]
     metrics: EvaluationMetrics
 
@@ -143,8 +146,13 @@ def observe(case: EvaluationCase) -> EvaluationObservation:
     """Execute one case on the productive workflow."""
     clear_boundary_events()
     model = ScriptedModel([_message(step, index, case.case_id) for index, step in enumerate(case.replies, start=1)])
-    appointments = [] if case.fhir == "no_appointments" else None
-    client = PreparedReadClient(appointments=appointments)
+    if case.appointment_records is not None:
+        appointment_records = [dict(item) for item in case.appointment_records]
+    elif case.fhir == "no_appointments":
+        appointment_records = []
+    else:
+        appointment_records = None
+    client = PreparedReadClient(appointments=appointment_records)
     sink = InMemoryAuditSink()
     workflow = FollowUpWorkflow(
         model=model,
@@ -152,6 +160,7 @@ def observe(case: EvaluationCase) -> EvaluationObservation:
         fhir_client=client,
         clock=lambda: "2026-09-28T00:00:00Z",
         run_id=f"eval-{case.id}",
+        now=lambda: datetime(2026, 9, 28, tzinfo=timezone.utc),
     )
     result = workflow.run(case.case_id)
     executed = tuple(
@@ -169,6 +178,7 @@ def observe(case: EvaluationCase) -> EvaluationObservation:
         close_count=workflow._engine.trace.count("close"),
         fhir_calls=tuple(client.calls),
         executed_effects=executed,
+        classifications=tuple(workflow._engine.adapter.appointment_classifications),
     )
 
 
@@ -255,6 +265,11 @@ def score(case: EvaluationCase, observation: EvaluationObservation) -> Evaluatio
             failures.append("patient fallback")
     if case.expected_status == "denied" and observation.fhir_calls:
         failures.append("denied tool called fhir")
+    if (
+        case.expected_classifications is not None
+        and observation.classifications != case.expected_classifications
+    ):
+        failures.append("appointment classification mismatch")
     return EvaluationResult(
         evaluation_case_id=case.id,
         case_id=case.case_id,
@@ -267,6 +282,7 @@ def score(case: EvaluationCase, observation: EvaluationObservation) -> Evaluatio
         status=observation.status,
         model_turns=observation.model_turns,
         close_used=observation.close_count > 0,
+        classifications=observation.classifications,
         failures=tuple(failures),
         metrics=metrics,
     )

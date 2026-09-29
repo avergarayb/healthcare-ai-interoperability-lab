@@ -42,6 +42,7 @@ human review, and PHI protection. Those are not LangGraph nodes.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Literal
 
 from app.langgraph_fhir_client import (
@@ -111,6 +112,7 @@ class FollowUpWorkflow:
         audit: Callable[..., Any] = record_policy_audit,
         clock: Callable[[], str],
         run_id: str,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self.model = model
         self.sink = sink
@@ -127,6 +129,7 @@ class FollowUpWorkflow:
             run_id=run_id,
             policy=policy,
             audit=audit,
+            now=now,
         )
 
     def run(self, case_id: str) -> FollowUpWorkflowResult:

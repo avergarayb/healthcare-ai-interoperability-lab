@@ -597,8 +597,16 @@ def test_empty_appointment_search_adds_no_appointment_evidence():
         result = _workflow(client, model, sink).invoke()
     finally:
         http.close()
+    assert result["decision"] == "finish"
     assert result["tools_used"] == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
     assert len(sink.events) == 2
+    appointment_results = [
+        json.loads(message.content) if isinstance(message.content, str) else message.content
+        for message in result["messages"]
+        if isinstance(message, ToolMessage) and message.name == APPOINTMENTS_TOOL
+    ]
+    assert appointment_results[-1]["classifications"] == ["NONE"]
+    assert appointment_results[-1]["appointments"] == []
     refs = [reference for _, reference in _flat_evidence(result)]
     assert f"Patient/{PATIENT_ID}" in refs
     assert "Observation/obs-from-transport" in refs

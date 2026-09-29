@@ -1,0 +1,15 @@
+{
+  "resourceType": "Appointment",
+  "id": "appointment-synthetic-cancelled-001",
+  "status": "cancelled",
+  "start": "2027-04-01T15:00:00Z",
+  "end": "2027-04-01T15:30:00Z",
+  "participant": [
+    {
+      "actor": {
+        "reference": "Patient/SYN-PATIENT-003"
+      },
+      "status": "accepted"
+    }
+  ]
+}

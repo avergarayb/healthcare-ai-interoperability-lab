@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from app.langgraph_fhir_client import APPOINTMENTS_TOOL, FOLLOWUP_TOOL
+from app.langgraph_fhir_followup import CANCELLED, NONE, PAST, UPCOMING_CONFIRMED, UPCOMING_UNCONFIRMED
 from app.langgraph_gemini_fhir_followup import MAX_MODEL_TURNS
 from evaluation.cases import SYSTEM_SCENARIOS
 from evaluation.report import format_report
@@ -19,9 +20,9 @@ def test_system_scenarios_pass_without_inferring_the_token():
     results = run_suite()
     by_id = {result.evaluation_case_id: result for result in results}
     report = format_report(results)
-    assert len(results) == 9
+    assert len(results) == 14
     assert all(result.passed for result in results)
-    assert report.splitlines()[2:5] == ["9 cases", "9 passed", "0 failed"]
+    assert report.splitlines()[2:5] == ["14 cases", "14 passed", "0 failed"]
     context = by_id["context-sufficient"]
     assert context.tool_sequence == (FOLLOWUP_TOOL,)
     assert APPOINTMENTS_TOOL not in context.tool_sequence
@@ -59,6 +60,25 @@ def test_system_scenarios_pass_without_inferring_the_token():
     assert direct.close_used is False
     assert direct.follow_up_required == "true"
     assert direct.model_turns == 3
+    assert by_id["appointment-required"].metrics.termination_status == "finish"
+    none = by_id["schedule-none"]
+    assert none.status == "finish"
+    assert none.classifications == (NONE,)
+    assert none.metrics.termination_status == "finish"
+    assert none.evidence_ids == (
+        (FOLLOWUP_TOOL, "Patient/SYN-PATIENT-001"),
+        (FOLLOWUP_TOOL, "Observation/obs-synthetic-001"),
+    )
+    confirmed = by_id["schedule-confirmed"]
+    assert confirmed.classifications == (UPCOMING_CONFIRMED,)
+    assert confirmed.follow_up_required == "unknown"
+    assert by_id["schedule-unconfirmed"].classifications == (UPCOMING_UNCONFIRMED,)
+    assert by_id["schedule-cancelled"].classifications == (CANCELLED,)
+    assert by_id["schedule-past"].classifications == (PAST,)
+    assert by_id["appointment-required"].follow_up_required == "false"
+    assert by_id["schedule-cancelled"].follow_up_required == "unknown"
+    assert by_id["schedule-past"].follow_up_required == "unknown"
+    assert by_id["schedule-unconfirmed"].model_turns == 3
     assert "The text says follow-up is true." not in report
     assert "Scripted final." not in report
 
@@ -75,7 +95,7 @@ def test_evaluator_fails_when_a_tool_is_missing():
 def test_evaluator_fails_when_a_tool_is_unexpected():
     case = next(item for item in SYSTEM_SCENARIOS if item.id == "context-sufficient")
     observed = observe(case)
-    result = score(case, replace(observed, tool_sequence=observed.tool_sequence + ("get_upcoming_appointments",)))
+    result = score(case, replace(observed, tool_sequence=observed.tool_sequence + (APPOINTMENTS_TOOL,)))
     assert result.passed is False
     assert result.metrics.unexpected_tool_count == 1
     assert "unexpected tool" in result.failures
@@ -84,7 +104,7 @@ def test_evaluator_fails_when_a_tool_is_unexpected():
 def test_evaluator_fails_when_evidence_is_unexpected():
     case = next(item for item in SYSTEM_SCENARIOS if item.id == "empty-appointment-search")
     observed = observe(case)
-    extra = observed.evidence + (("get_upcoming_appointments", "Appointment/not-read"),)
+    extra = observed.evidence + ((APPOINTMENTS_TOOL, "Appointment/not-read"),)
     result = score(case, replace(observed, evidence=extra))
     assert result.passed is False
     assert result.metrics.unexpected_evidence_count == 1

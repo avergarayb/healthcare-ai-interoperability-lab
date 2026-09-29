@@ -1,0 +1,12 @@
+{
+  "resourceType": "Observation",
+  "id": "obs-synthetic-006",
+  "status": "final",
+  "code": {
+    "text": "Synthetic observation"
+  },
+  "subject": {
+    "reference": "Patient/SYN-PATIENT-006"
+  },
+  "valueString": "Synthetic observation result"
+}

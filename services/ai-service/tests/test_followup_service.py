@@ -8,7 +8,12 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from app.config import Settings
-from app.langgraph_fhir_client import POLICY_VERSION, InMemoryAuditSink, PreparedReadClient
+from app.langgraph_fhir_client import (
+    APPOINTMENTS_TOOL,
+    POLICY_VERSION,
+    InMemoryAuditSink,
+    PreparedReadClient,
+)
 from app.langgraph_followup_workflow import FollowUpWorkflow, FollowUpWorkflowResult
 from app.langgraph_gemini_fhir_followup import followup_message_from_response, gemini_followup_message
 from app.main import app, get_settings
@@ -444,7 +449,7 @@ def test_http_evidence_lists_resources_from_each_read_tool(monkeypatch):
     sink = InMemoryAuditSink()
     replies = [
         _tool_reply("get_patient_followup_context", "call-1"),
-        _tool_reply("get_upcoming_appointments", "call-2"),
+        _tool_reply(APPOINTMENTS_TOOL, "call-2"),
         AIMessage(content="A visit is booked.", additional_kwargs={"follow_up_required": "false"}),
     ]
 
@@ -466,11 +471,11 @@ def test_http_evidence_lists_resources_from_each_read_tool(monkeypatch):
     assert body["evidence"] == [
         {"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"},
         {"tool": "get_patient_followup_context", "id": "Observation/obs-synthetic-001"},
-        {"tool": "get_upcoming_appointments", "id": "Appointment/appointment-synthetic-001"},
+        {"tool": APPOINTMENTS_TOOL, "id": "Appointment/appointment-synthetic-001"},
     ]
     assert [event.tool_name for event in sink.events] == [
         "get_patient_followup_context",
-        "get_upcoming_appointments",
+        APPOINTMENTS_TOOL,
     ]
     assert {event.run_id for event in sink.events} == {body["runId"]}
 

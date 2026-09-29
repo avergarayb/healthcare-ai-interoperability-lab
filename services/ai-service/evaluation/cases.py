@@ -11,6 +11,14 @@ from app.langgraph_fhir_client import (
     FOLLOWUP_TOOL,
     PATIENT_CASE,
     PATIENT_ID,
+    synthetic_appointment,
+)
+from app.langgraph_fhir_followup import (
+    CANCELLED,
+    NONE,
+    PAST,
+    UPCOMING_CONFIRMED,
+    UPCOMING_UNCONFIRMED,
 )
 from app.langgraph_gemini_fhir_followup import MAX_MODEL_TURNS
 
@@ -63,6 +71,8 @@ class EvaluationCase:
     expected_close_count: int
     fhir: FhirMode = "linked"
     max_model_turns: int = field(default_factory=lambda: MAX_MODEL_TURNS)
+    expected_classifications: tuple[str, ...] | None = None
+    appointment_records: tuple[dict[str, object], ...] | None = None
 
 
 def _context(case_id: str = PATIENT_CASE) -> ToolReply:
@@ -81,8 +91,34 @@ _APPOINTMENT_EVIDENCE = ((APPOINTMENTS_TOOL, f"Appointment/{APPOINTMENT_ID}"),)
 _BOTH_EVIDENCE = _CONTEXT_EVIDENCE + _APPOINTMENT_EVIDENCE
 
 
+def _schedule_case(
+    case_name: str,
+    *,
+    appointments: tuple[dict[str, object], ...] | None,
+    classification: tuple[str, ...],
+    evidence: tuple[tuple[str, str], ...],
+    follow_up_required: str,
+) -> EvaluationCase:
+    """One agenda fact. The scripted token is transport, not a consequence of the classification."""
+    return EvaluationCase(
+        id=case_name,
+        case_id=PATIENT_CASE,
+        replies=(_context(), _appointments(), FinalReply(follow_up_required)),
+        expected_tools=(FOLLOWUP_TOOL, APPOINTMENTS_TOOL),
+        expected_status="finish",
+        expected_policy=((FOLLOWUP_TOOL, "allowed"), (APPOINTMENTS_TOOL, "allowed")),
+        expected_evidence=_CONTEXT_EVIDENCE + evidence,
+        allowed_evidence=_CONTEXT_EVIDENCE + evidence,
+        expected_follow_up_required=follow_up_required,
+        expected_structured=True,
+        expected_close_count=0,
+        expected_classifications=classification,
+        appointment_records=appointments,
+    )
+
+
 def system_scenarios() -> tuple[EvaluationCase, ...]:
-    """Nine system scenarios. Expected tokens are scripted, not clinical rules."""
+    """System scenarios. Expected tokens are scripted, not clinical rules."""
     context_allowed = ((FOLLOWUP_TOOL, "allowed"),)
     both_allowed = context_allowed + ((APPOINTMENTS_TOOL, "allowed"),)
     return (
@@ -111,6 +147,7 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_follow_up_required="false",
             expected_structured=True,
             expected_close_count=0,
+            expected_classifications=(UPCOMING_CONFIRMED,),
         ),
         EvaluationCase(
             id="empty-appointment-search",
@@ -125,6 +162,7 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_structured=True,
             expected_close_count=0,
             fhir="no_appointments",
+            expected_classifications=(NONE,),
         ),
         EvaluationCase(
             id="unknown-tool",
@@ -196,6 +234,7 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_follow_up_required="unknown",
             expected_structured=True,
             expected_close_count=1,
+            expected_classifications=(UPCOMING_CONFIRMED,),
         ),
         EvaluationCase(
             id="direct-structured-final",
@@ -209,6 +248,63 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_follow_up_required="true",
             expected_structured=True,
             expected_close_count=0,
+            expected_classifications=(UPCOMING_CONFIRMED,),
+        ),
+        _schedule_case(
+            "schedule-none",
+            appointments=(),
+            classification=(NONE,),
+            evidence=(),
+            follow_up_required="unknown",
+        ),
+        _schedule_case(
+            "schedule-confirmed",
+            appointments=None,
+            classification=(UPCOMING_CONFIRMED,),
+            evidence=_APPOINTMENT_EVIDENCE,
+            follow_up_required="unknown",
+        ),
+        _schedule_case(
+            "schedule-unconfirmed",
+            appointments=(
+                synthetic_appointment(
+                    appointment_id="appointment-synthetic-pending-001",
+                    status="pending",
+                    start="2027-06-01T15:00:00Z",
+                    patient_id=PATIENT_ID,
+                ),
+            ),
+            classification=(UPCOMING_UNCONFIRMED,),
+            evidence=((APPOINTMENTS_TOOL, "Appointment/appointment-synthetic-pending-001"),),
+            follow_up_required="unknown",
+        ),
+        _schedule_case(
+            "schedule-cancelled",
+            appointments=(
+                synthetic_appointment(
+                    appointment_id="appointment-synthetic-cancelled-001",
+                    status="cancelled",
+                    start="2027-04-01T15:00:00Z",
+                    patient_id=PATIENT_ID,
+                ),
+            ),
+            classification=(CANCELLED,),
+            evidence=((APPOINTMENTS_TOOL, "Appointment/appointment-synthetic-cancelled-001"),),
+            follow_up_required="unknown",
+        ),
+        _schedule_case(
+            "schedule-past",
+            appointments=(
+                synthetic_appointment(
+                    appointment_id="appointment-synthetic-past-001",
+                    status="booked",
+                    start="2020-01-15T15:00:00Z",
+                    patient_id=PATIENT_ID,
+                ),
+            ),
+            classification=(PAST,),
+            evidence=((APPOINTMENTS_TOOL, "Appointment/appointment-synthetic-past-001"),),
+            follow_up_required="unknown",
         ),
     )
 

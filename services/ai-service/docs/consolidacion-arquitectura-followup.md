@@ -25,7 +25,7 @@ ToolNode               (ejecuta; no autoriza)
         |
         v
 get_patient_followup_context
-get_upcoming_appointments
+get_patient_appointments
         |
         v
 FollowUpFHIRAdapter
@@ -46,7 +46,7 @@ el modelo decide: otra tool, o la decisión final
 FollowUpEndpointResponse
 ```
 
-`caseId` no es `Patient.id`. Se busca `Patient.identifier` con system `https://lab.local/followup-case` y value igual al caso. La tool de contexto lee ese Patient y sus Observation. La tool de citas usa el mismo identificador y después `Appointment?patient=Patient/{id}`. El modelo elige si llama a la segunda tool; el grafo no encadena las dos. Si el mensaje ya trae `follow_up_required` estructurado (`true`, `false` o `unknown`), el workflow termina. Si el modelo deja de pedir tools después de una lectura y no trae ese token, el nodo `close` hace un solo request posterior: pide el JSON y no declara tools. `close` no elige una tool. El texto libre no decide el campo. `MAX_MODEL_TURNS` es 4. `thought_signature` se reinyecta en el `Part` del siguiente request y no sale en el log ni en el HTTP. No hay memoria persistente, RAG, checkpointing ni human-in-the-loop. FHIR sigue siendo la fuente de verdad y el workflow no escribe.
+`caseId` no es `Patient.id`. Se busca `Patient.identifier` con system `https://lab.local/followup-case` y value igual al caso. La tool de contexto lee ese Patient y sus Observation. `get_patient_appointments` usa el mismo identificador y después `Appointment?patient=Patient/{id}`. Clasifica cada Appointment leído como hecho operativo. Esa clasificación no fija `follow_up_required`. Una búsqueda vacía es `NONE` y no inventa un id. El modelo elige si llama a la segunda tool; el grafo no encadena las dos. Si el mensaje ya trae `follow_up_required` estructurado (`true`, `false` o `unknown`), el workflow termina. Si el modelo deja de pedir tools después de una lectura y no trae ese token, el nodo `close` hace un solo request posterior: pide el JSON y no declara tools. `close` no elige una tool. El texto libre no decide el campo. `MAX_MODEL_TURNS` es 4. `thought_signature` se reinyecta en el `Part` del siguiente request y no sale en el log ni en el HTTP. No hay memoria persistente, RAG, checkpointing ni human-in-the-loop. FHIR sigue siendo la fuente de verdad y el workflow no escribe.
 
 Un `generateContent` y un GET de HAPI reintentan solo fallos transitorios: HTTP 408, 429, 500, 502, 503 y 504, y la pérdida de transporte. El máximo es 3 intentos, contando el primero. La espera es 0.25 s y después 0.5 s, con tope de 1 s. No se reintentan 400, 401, 404 ni un caso sin Patient. El retry del SDK queda en un intento, así que no se suma al de la aplicación. El `run_id` no cambia. El retry no vuelve a auditar ni reejecuta una tool que ya tuvo éxito. Si los intentos se agotan, Gemini sigue siendo HTTP 502 y un 5xx de HAPI sigue siendo `unavailable`. El contrato HTTP no cambia. Ese retry está cubierto por tests deterministas; no hay una validación live de esta recuperación.
 

@@ -25,7 +25,7 @@ DENIAL_ANSWER = "Tool denied by policy"
 POLICY_VERSION = "policy-v1"
 DEFAULT_TIMESTAMP = "1970-01-01T00:00:00Z"
 FOLLOWUP_TOOL = "get_patient_followup_context"
-APPOINTMENTS_TOOL = "get_upcoming_appointments"
+APPOINTMENTS_TOOL = "get_patient_appointments"
 APPOINTMENT_ID = "appointment-synthetic-001"
 ALLOWED_READ_TOOLS = frozenset({FOLLOWUP_TOOL, APPOINTMENTS_TOOL})
 SAFE_AUDIT_FIELDS = (
@@ -98,7 +98,7 @@ def _bundle(observation: dict[str, object]) -> dict[str, object]:
 
 
 def synthetic_followup_appointment() -> dict[str, object]:
-    """One future synthetic visit for the follow-up patient. Not a record of another patient."""
+    """One future booked visit for the follow-up patient. Not a record of another patient."""
     return {
         "resourceType": "Appointment",
         "id": APPOINTMENT_ID,
@@ -113,6 +113,30 @@ def synthetic_followup_appointment() -> dict[str, object]:
             }
         ],
     }
+
+
+def synthetic_appointment(
+    *,
+    appointment_id: str,
+    status: str,
+    start: str | None,
+    patient_id: str,
+) -> dict[str, object]:
+    """One synthetic Appointment. Status and start stay on the resource; they are not a clinical rule."""
+    resource: dict[str, object] = {
+        "resourceType": "Appointment",
+        "id": appointment_id,
+        "status": status,
+        "participant": [
+            {
+                "actor": {"reference": f"Patient/{patient_id}"},
+                "status": "accepted",
+            }
+        ],
+    }
+    if start is not None:
+        resource["start"] = start
+    return resource
 
 
 class PreparedReadClient:

@@ -13,6 +13,7 @@ import operator
 import os
 import re
 import time
+from datetime import datetime
 from typing import Annotated, Any, Callable, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
@@ -62,9 +63,11 @@ SYSTEM_INSTRUCTION = (
     "You prepare a synthetic follow-up. "
     "When clinical context is missing, call get_patient_followup_context "
     "with the case id from the user message. "
-    "After that result, you may call get_upcoming_appointments with the same case id "
-    "when you need to know whether a follow-up visit is already scheduled. "
+    "After that result, you may call get_patient_appointments with the same case id "
+    "when you need the appointment facts for that patient. "
     "Skip that call when the context is enough to decide. "
+    "Appointment classifications are operational facts about records that were read. "
+    "They do not by themselves decide whether follow-up is clinically required. "
     "Do not invent clinical data. Do not call any other tool. "
     "When you are not calling a tool, respond with a JSON object that has "
     "answer and follow_up_required. follow_up_required is true, false, or unknown."
@@ -455,7 +458,9 @@ def _declared_followup_tools():
             types.FunctionDeclaration(
                 name=APPOINTMENTS_TOOL,
                 description=(
-                    "Read upcoming appointments for the patient linked to one follow-up case. "
+                    "Read appointment facts for the patient linked to one follow-up case. "
+                    "The result classifies each read Appointment. "
+                    "That classification is an operational fact, not a clinical follow-up decision. "
                     "Pass the case id. Do not pass a patient id or a FHIR query."
                 ),
                 parameters_json_schema={
@@ -697,11 +702,12 @@ def build_gemini_fhir_followup(
     run_id: str,
     policy: Callable[[str], Any] = evaluate_tool_policy,
     audit: Callable[..., Any] = record_policy_audit,
+    now: Callable[[], datetime] | None = None,
 ) -> GeminiFhirFollowUp:
     """Wire the workflow to a read client and a model. The graph selects neither."""
     return GeminiFhirFollowUp(
         sink,
-        FollowUpFHIRAdapter(ClientFHIRTransport(client)),
+        FollowUpFHIRAdapter(ClientFHIRTransport(client), now=now),
         model,
         clock=clock,
         run_id=run_id,

@@ -10,6 +10,7 @@ with system https://lab.local/followup-case. It is not Patient.id.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -27,7 +28,15 @@ from app.langgraph_fhir_client import (
 
 UNAVAILABLE_ANSWER = "stopped: clinical context unavailable"
 _PATIENT_ID_TOKEN = re.compile(r"[A-Za-z0-9\-]+")
-_UPCOMING_STATUS = frozenset({"proposed", "pending", "booked"})
+UPCOMING_CONFIRMED = "UPCOMING_CONFIRMED"
+UPCOMING_UNCONFIRMED = "UPCOMING_UNCONFIRMED"
+CANCELLED = "CANCELLED"
+PAST = "PAST"
+NONE = "NONE"
+OTHER = "OTHER"
+_UNCONFIRMED_STATUS = frozenset({"pending", "proposed"})
+_PAST_STATUS = frozenset({"booked", "fulfilled"})
+_CLASS_ORDER = (UPCOMING_CONFIRMED, UPCOMING_UNCONFIRMED, CANCELLED, PAST, OTHER)
 
 
 def _mark(event: str) -> None:
@@ -118,9 +127,11 @@ def _patient_id_from_case_search(payload: dict, case_id: str) -> str:
 class FollowUpFHIRAdapter:
     """Map a patient and that patient's observations. This class does not open HTTP."""
 
-    def __init__(self, transport: FHIRTransport) -> None:
+    def __init__(self, transport: FHIRTransport, now: Callable[[], datetime] | None = None) -> None:
         self.transport = transport
         self.calls: list[tuple[str, str]] = []
+        self.appointment_classifications: tuple[str, ...] = ()
+        self._now = now or (lambda: datetime.now(timezone.utc))
 
     def patient_id_for_case(self, case_id: str) -> str:
         """Resolve one case through Patient.identifier. This does not read Patient/{case_id}."""
@@ -151,12 +162,15 @@ class FollowUpFHIRAdapter:
                 raise ReadClientError("observation has no id")
         return observations
 
-    def get_upcoming_appointments(self, patient_id: str) -> list[dict]:
-        """Read upcoming appointments for the resolved patient. An empty search is an empty list."""
-        _mark("adapter:get_upcoming_appointments")
-        self.calls.append(("get_upcoming_appointments", patient_id))
+    def get_patient_appointments(self, patient_id: str, now: datetime | None = None) -> dict[str, object]:
+        """Read this patient's appointments and label each operational fact. An empty search is NONE."""
+        _mark("adapter:get_patient_appointments")
+        self.calls.append(("get_patient_appointments", patient_id))
         payload = self.transport.get(appointment_search_path(patient_id))
-        return _upcoming_appointments(payload, patient_id)
+        facts = appointment_facts(payload, patient_id, now or self._now())
+        classifications = facts["classifications"]
+        self.appointment_classifications = tuple(classifications) if isinstance(classifications, list) else ()
+        return facts
 
 
 def appointment_search_path(patient_id: str) -> str:
@@ -173,23 +187,44 @@ def _actor_is_patient(reference: object, patient_id: str) -> bool:
     return reference == expected or reference.endswith(f"/{expected}")
 
 
-def _starts_in_the_future(resource: dict, now: datetime) -> bool:
-    raw = resource.get("start")
+def _parsed_start(raw: object) -> datetime | None:
     if not isinstance(raw, str) or not raw.strip():
-        return False
+        return None
     try:
         start = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
     except ValueError:
-        return False
+        return None
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
-    return start >= now
+    return start
 
 
-def _upcoming_appointment(resource: dict, patient_id: str, now: datetime) -> dict | None:
-    """Keep a visit that belongs to this patient and is still upcoming. Other patients are omitted."""
-    if resource.get("status") not in _UPCOMING_STATUS:
-        return None
+def appointment_classification(status: object, start: object, now: datetime) -> str:
+    """Label one Appointment as an operational fact. This does not decide follow-up."""
+    if status == "cancelled":
+        return CANCELLED
+    parsed = _parsed_start(start)
+    future = parsed is not None and parsed >= now
+    past = parsed is not None and parsed < now
+    if status == "booked" and future:
+        return UPCOMING_CONFIRMED
+    if status in _UNCONFIRMED_STATUS and future:
+        return UPCOMING_UNCONFIRMED
+    if status in _PAST_STATUS and past:
+        return PAST
+    return OTHER
+
+
+def schedule_classifications(appointments: list[dict]) -> list[str]:
+    """Summarize labels that were actually read. An empty list is NONE, not an invented id."""
+    if not appointments:
+        return [NONE]
+    found = {item.get("classification") for item in appointments}
+    return [name for name in _CLASS_ORDER if name in found]
+
+
+def _appointment_view(resource: dict, patient_id: str, now: datetime) -> dict | None:
+    """Keep a visit that belongs to this patient. Other patients are omitted."""
     participants = resource.get("participant")
     if not isinstance(participants, list):
         return None
@@ -200,7 +235,7 @@ def _upcoming_appointment(resource: dict, patient_id: str, now: datetime) -> dic
         if _actor_is_patient(reference, patient_id):
             matched = True
             break
-    if not matched or not _starts_in_the_future(resource, now):
+    if not matched:
         return None
     appointment_id = resource.get("id")
     if not isinstance(appointment_id, str) or not appointment_id:
@@ -210,20 +245,21 @@ def _upcoming_appointment(resource: dict, patient_id: str, now: datetime) -> dic
         "id": appointment_id,
         "status": resource.get("status"),
         "patient": f"Patient/{patient_id}",
+        "classification": appointment_classification(resource.get("status"), resource.get("start"), now),
     }
     start = resource.get("start")
-    if isinstance(start, str) and start.strip():
+    if isinstance(start, str) and start.strip() and _parsed_start(start) is not None:
         view["start"] = start.strip()
     return view
 
 
-def _upcoming_appointments(payload: dict, patient_id: str) -> list[dict]:
+def appointment_facts(payload: dict, patient_id: str, now: datetime) -> dict[str, object]:
+    """Classify appointments returned for one patient. The query is chosen by the caller."""
     if payload.get("resourceType") != "Bundle":
         raise ReadClientError("appointment response must be a bundle")
     entries = payload.get("entry") or []
     if not isinstance(entries, list):
         raise ReadClientError("appointment bundle entries must be a list")
-    now = datetime.now(timezone.utc)
     appointments: list[dict] = []
     for entry in entries:
         if not isinstance(entry, dict):
@@ -231,10 +267,14 @@ def _upcoming_appointments(payload: dict, patient_id: str) -> list[dict]:
         resource = entry.get("resource")
         if not isinstance(resource, dict) or resource.get("resourceType") != "Appointment":
             raise ReadClientError("bundle entry must contain an appointment")
-        view = _upcoming_appointment(resource, patient_id, now)
+        view = _appointment_view(resource, patient_id, now)
         if view is not None:
             appointments.append(view)
-    return appointments
+    return {
+        "patientId": patient_id,
+        "classifications": schedule_classifications(appointments),
+        "appointments": appointments,
+    }
 
 
 def make_followup_tool(adapter: FollowUpFHIRAdapter):
@@ -257,16 +297,13 @@ def make_appointments_tool(adapter: FollowUpFHIRAdapter):
     """Build the appointment read. The model supplies a case id. The adapter resolves the patient."""
 
     @tool
-    def get_upcoming_appointments(case_id: str) -> dict[str, object]:
-        """Read upcoming appointments for the patient linked to one follow-up case."""
+    def get_patient_appointments(case_id: str) -> dict[str, object]:
+        """Read appointment facts for the patient linked to one follow-up case."""
         _mark(f"execute:{APPOINTMENTS_TOOL}")
         patient_id = adapter.patient_id_for_case(case_id)
-        return {
-            "patientId": patient_id,
-            "appointments": adapter.get_upcoming_appointments(patient_id),
-        }
+        return adapter.get_patient_appointments(patient_id)
 
-    return get_upcoming_appointments
+    return get_patient_appointments
 
 
 def _resource_refs(patient: dict, observations: list[dict]) -> list[str]:
