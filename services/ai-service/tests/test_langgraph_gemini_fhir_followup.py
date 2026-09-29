@@ -17,6 +17,8 @@ from langgraph.graph import END, START
 from langgraph.prebuilt import ToolNode
 
 from app.langgraph_fhir_client import (
+    APPOINTMENT_ID,
+    APPOINTMENTS_TOOL,
     BOUNDARY_EVENTS,
     CASE_IDENTIFIER_SYSTEM,
     DENIAL_ANSWER,
@@ -26,8 +28,14 @@ from app.langgraph_fhir_client import (
     SAFE_AUDIT_FIELDS,
     InMemoryAuditSink,
     clear_boundary_events,
+    synthetic_followup_appointment,
 )
-from app.langgraph_fhir_followup import UNAVAILABLE_ANSWER, case_search_path, make_followup_tool
+from app.langgraph_fhir_followup import (
+    UNAVAILABLE_ANSWER,
+    appointment_search_path,
+    case_search_path,
+    make_followup_tool,
+)
 from app.langgraph_fhir_hapi import HapiReadClient, hapi_base_url
 from app.langgraph_gemini_fhir_followup import (
     GEMINI_RETRY_ATTEMPTS,
@@ -40,6 +48,7 @@ from app.langgraph_gemini_fhir_followup import (
     build_live_gemini_fhir_followup,
     describe_followup_contents,
     followup_message_from_response,
+    FINAL_DECISION_REQUEST,
     followup_tool_schema,
     gemini_error_diagnostics,
     gemini_followup_message,
@@ -121,6 +130,12 @@ def _tool_call(
     )
 
 
+def _answer(text: str = FINAL_TEXT, decision: str = "unknown") -> AIMessage:
+    message = AIMessage(content=text)
+    message.additional_kwargs["follow_up_required"] = decision
+    return message
+
+
 def _patient(name: str) -> dict:
     return {
         "resourceType": "Patient",
@@ -185,7 +200,7 @@ def _audit_blob(sink: InMemoryAuditSink) -> str:
 
 
 def test_scripted_model_tool_call_is_authorized_before_the_client():
-    model = ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)])
+    model = ScriptedModel([_tool_call(), _answer()])
     client, http = _client(_ok("Name From Server", "obs-from-transport", "Value read from the server"))
     sink = InMemoryAuditSink()
     try:
@@ -360,7 +375,7 @@ def test_thought_signature_survives_the_second_request():
     assert response_part.function_response.response["patient"]["id"] == PATIENT_ID
     assert response_part.thought_signature is None
 
-    model = ScriptedModel([message, AIMessage(content=FINAL_TEXT)])
+    model = ScriptedModel([message, _answer()])
     client, http = _client(_ok("Name From Server", "obs-from-transport", "Value read from the server"))
     sink = InMemoryAuditSink()
     try:
@@ -422,37 +437,332 @@ def test_unstructured_text_does_not_set_follow_up_required():
     assert "follow_up_required" not in boolean.additional_kwargs
 
 
+def _declared_names(config) -> list[str]:
+    names: list[str] = []
+    dump = config.model_dump(exclude_none=True)
+    for tool in dump.get("tools") or []:
+        for declaration in tool.get("function_declarations") or []:
+            names.append(declaration["name"])
+    return names
+
+
 def test_final_turn_asks_for_the_decision_object_and_the_read_turn_keeps_tools():
     from app.langgraph_gemini_fhir_followup import _followup_generate_config
 
     first = _followup_generate_config([HumanMessage(content="Prepare follow-up.")])
     first_dump = first.model_dump(exclude_none=True)
-    assert first_dump["tools"]
+    assert _declared_names(first) == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
     assert first.automatic_function_calling.disable is True
     assert "response_json_schema" not in first_dump
-    second = _followup_generate_config(
-        [
-            HumanMessage(content="Prepare follow-up."),
-            AIMessage(
-                content="",
-                tool_calls=[{"name": FOLLOWUP_TOOL, "args": {"case_id": PATIENT_CASE}, "id": "call-1", "type": "tool_call"}],
-            ),
-            ToolMessage(content="{}", name=FOLLOWUP_TOOL, tool_call_id="call-1"),
-        ]
-    )
+    after_tool = [
+        HumanMessage(content="Prepare follow-up."),
+        AIMessage(
+            content="",
+            tool_calls=[{"name": FOLLOWUP_TOOL, "args": {"case_id": PATIENT_CASE}, "id": "call-1", "type": "tool_call"}],
+        ),
+        ToolMessage(content="{}", name=FOLLOWUP_TOOL, tool_call_id="call-1"),
+    ]
+    second = _followup_generate_config(after_tool)
     second_dump = second.model_dump(exclude_none=True)
-    assert second_dump["response_mime_type"] == "application/json"
-    assert "tools" not in second_dump
+    assert _declared_names(second) == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
+    assert "response_json_schema" not in second_dump
     assert second.automatic_function_calling.disable is True
-    assert second_dump["automatic_function_calling"]["disable"] is True
-    assert set(second_dump["response_json_schema"]["required"]) == {"answer", "follow_up_required"}
-    assert second_dump["response_json_schema"]["properties"]["follow_up_required"]["enum"] == [
+    closing = _followup_generate_config([*after_tool, HumanMessage(content=FINAL_DECISION_REQUEST)])
+    closing_dump = closing.model_dump(exclude_none=True)
+    assert closing_dump["response_mime_type"] == "application/json"
+    assert "tools" not in closing_dump
+    assert closing.automatic_function_calling.disable is True
+    assert closing_dump["automatic_function_calling"]["disable"] is True
+    assert set(closing_dump["response_json_schema"]["required"]) == {"answer", "follow_up_required"}
+    assert closing_dump["response_json_schema"]["properties"]["follow_up_required"]["enum"] == [
         "true",
         "false",
         "unknown",
     ]
+    schema = followup_tool_schema()["function_declarations"]
+    assert [item["name"] for item in schema] == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
+    for declaration in schema:
+        assert set(declaration["parameters_json_schema"]["properties"]) == {"case_id"}
+        assert "patient_id" not in declaration["parameters_json_schema"]["properties"]
     config_source = inspect.getsource(_followup_generate_config)
     assert config_source.count("AutomaticFunctionCallingConfig(disable=True)") == 2
+
+
+def _with_appointments(handler):
+    """Delegate patient and observation reads, then answer the appointment search."""
+
+    def wrapped(request: httpx.Request) -> httpx.Response:
+        if request.url.path.rstrip("/").endswith("/Appointment"):
+            return handler(request)
+        return _ok("Name From Server", "obs-from-transport", "Value read from the server")(request)
+
+    return wrapped
+
+
+def _appointment_bundle(resources: list[dict]) -> dict:
+    return {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "entry": [{"resource": resource} for resource in resources],
+    }
+
+
+def _flat_evidence(result: dict) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    for entry in result["evidence"]:
+        for reference in entry["resources"]:
+            rows.append((entry["tool"], reference))
+    return rows
+
+
+def test_model_can_finish_after_context_without_the_appointment_tool():
+    model = ScriptedModel([_tool_call(), _answer("Context is enough.", "false")])
+    client, http = _client(_ok("Name From Server", "obs-from-transport", "Value read from the server"))
+    sink = InMemoryAuditSink()
+    try:
+        workflow = _workflow(client, model, sink)
+        result = workflow.invoke()
+    finally:
+        http.close()
+    assert result["decision"] == "finish"
+    assert result["final_answer"] == "Context is enough."
+    assert result["tools_used"] == [FOLLOWUP_TOOL]
+    assert sink.events[0].tool_name == FOLLOWUP_TOOL
+    assert len(sink.events) == 1
+    assert {event.run_id for event in sink.events} == {"run-gemini-followup-001"}
+    assert workflow.model_calls == 2
+    assert APPOINTMENTS_TOOL not in BOUNDARY_EVENTS
+    assert all(not path.startswith("Appointment") for path in client.calls)
+    assert all(reference.startswith(("Patient/", "Observation/")) for _, reference in _flat_evidence(result))
+
+
+def test_model_can_read_appointments_after_context_and_then_finish():
+    def appointments(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert str(request.url).endswith(appointment_search_path(PATIENT_ID))
+        return httpx.Response(200, json=_appointment_bundle([synthetic_followup_appointment()]))
+
+    model = ScriptedModel(
+        [
+            _tool_call(call_id="call-1"),
+            _tool_call(APPOINTMENTS_TOOL, call_id="call-2"),
+            _answer("A visit is already booked.", "false"),
+        ]
+    )
+    client, http = _client(_with_appointments(appointments))
+    sink = InMemoryAuditSink()
+    try:
+        workflow = _workflow(client, model, sink)
+        result = workflow.invoke()
+    finally:
+        http.close()
+    assert result["decision"] == "finish"
+    assert result["tools_used"] == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
+    assert [event.tool_name for event in sink.events] == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
+    assert {event.run_id for event in sink.events} == {workflow.run_id}
+    assert all(event.decision == "allowed" for event in sink.events)
+    assert _flat_evidence(result) == [
+        (FOLLOWUP_TOOL, f"Patient/{PATIENT_ID}"),
+        (FOLLOWUP_TOOL, "Observation/obs-from-transport"),
+        (APPOINTMENTS_TOOL, f"Appointment/{APPOINTMENT_ID}"),
+    ]
+    assert workflow.model_calls == 3
+    assert workflow.trace == [
+        "prepare",
+        "agent",
+        "update_state",
+        "agent",
+        "update_state",
+        "agent",
+        "finish",
+    ]
+    assert "close" not in workflow.trace
+
+
+def test_empty_appointment_search_adds_no_appointment_evidence():
+    def appointments(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        return httpx.Response(200, json={"resourceType": "Bundle", "type": "searchset", "total": 0})
+
+    model = ScriptedModel(
+        [
+            _tool_call(call_id="call-1"),
+            _tool_call(APPOINTMENTS_TOOL, call_id="call-2"),
+            _answer("No visit is scheduled.", "unknown"),
+        ]
+    )
+    client, http = _client(_with_appointments(appointments))
+    sink = InMemoryAuditSink()
+    try:
+        result = _workflow(client, model, sink).invoke()
+    finally:
+        http.close()
+    assert result["tools_used"] == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
+    assert len(sink.events) == 2
+    refs = [reference for _, reference in _flat_evidence(result)]
+    assert f"Patient/{PATIENT_ID}" in refs
+    assert "Observation/obs-from-transport" in refs
+    assert not any(reference.startswith("Appointment/") for reference in refs)
+
+
+def test_unknown_tool_is_denied_before_execution():
+    model = ScriptedModel([_tool_call("unknown_tool", {"case_id": PATIENT_CASE})])
+
+    def fail_if_called(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(request.url)
+
+    client, http = _client(fail_if_called)
+    sink = InMemoryAuditSink()
+    try:
+        result = _workflow(client, model, sink).invoke()
+    finally:
+        http.close()
+    assert result["decision"] == "denied"
+    assert result["tools_used"] == []
+    assert client.calls == []
+    assert sink.events[0].tool_name == "unknown_tool"
+    assert sink.events[0].decision == "denied"
+    assert "execute:unknown_tool" not in BOUNDARY_EVENTS
+
+
+def test_appointment_tool_ignores_another_patients_visit():
+    foreign = synthetic_followup_appointment()
+    foreign["participant"] = [{"actor": {"reference": "Patient/patient-001"}, "status": "accepted"}]
+
+    def appointments(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/Appointment")
+        assert f"patient=Patient/{PATIENT_ID}" in str(request.url)
+        assert "patient=Patient/patient-001" not in str(request.url)
+        return httpx.Response(200, json=_appointment_bundle([foreign]))
+
+    model = ScriptedModel(
+        [
+            _tool_call(call_id="call-1"),
+            _tool_call(APPOINTMENTS_TOOL, {"case_id": PATIENT_CASE}, "call-2"),
+            _answer("No visit belongs to this patient.", "unknown"),
+        ]
+    )
+    client, http = _client(_with_appointments(appointments))
+    try:
+        result = _workflow(client, model).invoke()
+    finally:
+        http.close()
+    assert appointment_search_path(PATIENT_ID) in client.calls
+    assert "Appointment?patient=Patient/patient-001" not in client.calls
+    assert not any(reference.startswith("Appointment/") for _, reference in _flat_evidence(result))
+    assert result["patient"]["id"] == PATIENT_ID
+
+
+def test_appointment_tool_does_not_fall_back_to_patient_001():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "Appointment" not in request.url.path
+        assert "Appointment?patient=Patient/patient-001" not in str(request.url)
+        if request.url.path.rstrip("/").endswith("/Patient") and "identifier=" in str(request.url.query):
+            return httpx.Response(200, json={"resourceType": "Bundle", "type": "searchset", "entry": []})
+        return httpx.Response(404, json={"resourceType": "OperationOutcome"})
+
+    model = ScriptedModel([_tool_call(APPOINTMENTS_TOOL, {"case_id": "patient-001"})])
+    client, http = _client(handler)
+    try:
+        result = _workflow(client, model).invoke()
+    finally:
+        http.close()
+    assert result["decision"] == "unavailable"
+    assert result["evidence"] == []
+    assert all(not path.startswith("Appointment") for path in client.calls)
+    assert "Appointment?patient=Patient/patient-001" not in client.calls
+
+
+def test_appointment_read_retries_503_without_a_second_audit(monkeypatch):
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", lambda _delay: None)
+    seen = {"appointment": 0}
+
+    def appointments(request: httpx.Request) -> httpx.Response:
+        seen["appointment"] += 1
+        if seen["appointment"] == 1:
+            return httpx.Response(503, json={"resourceType": "OperationOutcome"})
+        return httpx.Response(200, json=_appointment_bundle([synthetic_followup_appointment()]))
+
+    model = ScriptedModel(
+        [
+            _tool_call(call_id="call-1"),
+            _tool_call(APPOINTMENTS_TOOL, call_id="call-2"),
+            _answer("The visit is booked.", "false"),
+        ]
+    )
+    client, http = _client(_with_appointments(appointments))
+    sink = InMemoryAuditSink()
+    try:
+        result = _workflow(client, model, sink).invoke()
+    finally:
+        http.close()
+    assert result["decision"] == "finish"
+    assert seen["appointment"] == 2
+    assert [event.tool_name for event in sink.events] == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
+    assert len(sink.events) == 2
+    assert (APPOINTMENTS_TOOL, f"Appointment/{APPOINTMENT_ID}") in _flat_evidence(result)
+
+
+def test_unstructured_stop_requests_one_schema_turn_without_tools():
+    from app.langgraph_gemini_fhir_followup import _followup_generate_config
+
+    prose = "The text says follow-up is true because an observation exists."
+    model = ScriptedModel(
+        [
+            _tool_call(),
+            AIMessage(content=prose),
+            _answer("No structured fact was inferred.", "unknown"),
+        ]
+    )
+    client, http = _client(_ok("Name From Server", "obs-from-transport", "Value read from the server"))
+    try:
+        workflow = _workflow(client, model)
+        result = workflow.invoke()
+    finally:
+        http.close()
+    assert result["decision"] == "finish"
+    assert result["final_answer"] == "No structured fact was inferred."
+    last = result["messages"][-1]
+    assert isinstance(last, AIMessage)
+    assert last.additional_kwargs["follow_up_required"] == "unknown"
+    assert workflow.model_calls == 3
+    assert workflow.trace[-3:] == ["close", "agent", "finish"]
+    assert isinstance(model.seen[-1][-1], HumanMessage)
+    assert model.seen[-1][-1].content == FINAL_DECISION_REQUEST
+    closing = _followup_generate_config(model.seen[-1])
+    closing_dump = closing.model_dump(exclude_none=True)
+    assert "tools" not in closing_dump
+    assert closing_dump["response_mime_type"] == "application/json"
+    assert closing.automatic_function_calling.disable is True
+    assert "true" not in result["final_answer"]
+
+
+def test_thought_signature_is_kept_across_both_tool_calls():
+    second_signature = b"\x02synthetic-thought-signature"
+    first = _tool_call(call_id="call-1")
+    first.additional_kwargs["thought_signatures"] = {"call-1": THOUGHT_SIGNATURE}
+    second = _tool_call(APPOINTMENTS_TOOL, call_id="call-2")
+    second.additional_kwargs["thought_signatures"] = {"call-2": second_signature}
+
+    def appointments(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_appointment_bundle([synthetic_followup_appointment()]))
+
+    model = ScriptedModel([first, second, _answer("Signed path finished.", "false")])
+    client, http = _client(_with_appointments(appointments))
+    try:
+        result = _workflow(client, model).invoke()
+    finally:
+        http.close()
+    rebuilt = _contents(result["messages"])
+    found = {
+        part.function_call.id: part.thought_signature
+        for content in rebuilt
+        for part in content.parts or []
+        if getattr(part, "function_call", None) is not None and getattr(part, "thought_signature", None) is not None
+    }
+    assert found["call-1"] == THOUGHT_SIGNATURE
+    assert found["call-2"] == second_signature
+    assert result["decision"] == "finish"
 
 
 def test_denied_send_message_never_reaches_the_tool_node():
@@ -523,7 +833,7 @@ def test_fhir_client_error_does_not_invent_evidence():
     def missing(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"resourceType": "OperationOutcome"})
 
-    model = ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)])
+    model = ScriptedModel([_tool_call(), _answer()])
     client, http = _client(missing)
     sink = InMemoryAuditSink()
     try:
@@ -581,7 +891,7 @@ def test_boundaries_stay_outside_the_graph_and_c15():
     assert "AutomaticFunctionCallingConfig(disable=True)" in gemini_request_source()
     client, http = _client(_ok("Name From Server", "obs-from-transport", "Value read from the server"))
     try:
-        workflow = _workflow(client, ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]))
+        workflow = _workflow(client, ScriptedModel([_tool_call(), _answer()]))
         drawing = workflow.graph.get_graph()
         assert isinstance(workflow.graph.nodes["tools"].bound, ToolNode)
     finally:
@@ -694,7 +1004,31 @@ def _ensure_records(base: str) -> tuple[dict, dict]:
             },
         )
         observation = reader.get("Observation/obs-synthetic-001")
+    _ensure_appointment(base, reader)
     return patient, observation
+
+
+def _appointment_is_for_followup_patient(resource: dict) -> bool:
+    participants = resource.get("participant")
+    if not isinstance(participants, list):
+        return False
+    expected = f"Patient/{PATIENT_ID}"
+    return any(
+        isinstance(item, dict)
+        and isinstance(item.get("actor"), dict)
+        and item["actor"].get("reference") == expected
+        for item in participants
+    )
+
+
+def _ensure_appointment(base: str, reader: HapiReadClient) -> None:
+    try:
+        stored = reader.get(f"Appointment/{APPOINTMENT_ID}")
+    except Exception:
+        stored = None
+    if isinstance(stored, dict) and _appointment_is_for_followup_patient(stored):
+        return
+    _store(base, f"Appointment/{APPOINTMENT_ID}", synthetic_followup_appointment())
 
 
 @pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")
@@ -702,7 +1036,7 @@ def test_scripted_model_reads_real_hapi_records():
     base = hapi_base_url()
     stored_patient, stored_observation = _ensure_records(base)
     clear_boundary_events()
-    model = ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)])
+    model = ScriptedModel([_tool_call(), _answer()])
     client = HapiReadClient(base)
     sink = InMemoryAuditSink()
     result = _workflow(client, model, sink).invoke()
@@ -721,6 +1055,30 @@ def test_scripted_model_reads_real_hapi_records():
     assert stored_observation.get("valueString", "missing-value") not in _audit_blob(sink)
 
 
+@pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")
+def test_scripted_model_reads_the_synthetic_appointment_with_get_only():
+    base = hapi_base_url()
+    _ensure_records(base)
+    clear_boundary_events()
+    model = ScriptedModel(
+        [
+            _tool_call(call_id="call-1"),
+            _tool_call(APPOINTMENTS_TOOL, call_id="call-2"),
+            _answer("A synthetic visit is booked.", "false"),
+        ]
+    )
+    client = HapiReadClient(base)
+    result = _workflow(client, model, InMemoryAuditSink()).invoke()
+    client_source = inspect.getsource(HapiReadClient)
+    for method in (".post(", ".put(", ".patch(", ".delete("):
+        assert method not in client_source
+    assert result["decision"] == "finish"
+    assert appointment_search_path(PATIENT_ID) in client.calls
+    assert all(path.startswith(("Patient", "Observation", "Appointment")) for path in client.calls)
+    assert (APPOINTMENTS_TOOL, f"Appointment/{APPOINTMENT_ID}") in _flat_evidence(result)
+    assert "Patient/patient-001" not in json.dumps(result["evidence"])
+
+
 @pytest.mark.skipif(
     not (_live_gemini() and _hapi_enabled()),
     reason="set RUN_LIVE_GEMINI_TESTS=true and RUN_HAPI_INTEGRATION_TESTS=true",
@@ -736,13 +1094,18 @@ def test_live_gemini_reads_hapi_before_the_final_answer():
     result = workflow.invoke()
     assert workflow.model_calls >= 2
     assert workflow.model_calls <= MAX_MODEL_TURNS
-    assert result["tools_used"]
-    assert all(name == FOLLOWUP_TOOL for name in result["tools_used"])
+    assert FOLLOWUP_TOOL in result["tools_used"]
+    assert set(result["tools_used"]) <= {FOLLOWUP_TOOL, APPOINTMENTS_TOOL}
     assert result["patient"]["id"] == stored_patient["id"]
     assert result["patient"]["name"] == stored_patient["name"][0]["text"]
     found = next(item for item in result["observations"] if item.get("id") == stored_observation["id"])
     assert found["valueString"] == stored_observation["valueString"]
-    assert f"Observation/{stored_observation['id']}" in result["evidence"][0]["resources"]
+    observed = [
+        reference
+        for entry in result["evidence"]
+        for reference in entry["resources"]
+    ]
+    assert f"Observation/{stored_observation['id']}" in observed
     assert result["final_answer"]
     assert result["decision"] == "finish"
     last = result["messages"][-1]
@@ -926,7 +1289,7 @@ def test_exhausted_fhir_retry_stays_unavailable_without_another_model_call(monke
 
     client, http = _client(broken)
     sink = InMemoryAuditSink()
-    model = ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)])
+    model = ScriptedModel([_tool_call(), _answer()])
     workflow = _workflow(client, model, sink)
     try:
         result = workflow.invoke(PATIENT_CASE)

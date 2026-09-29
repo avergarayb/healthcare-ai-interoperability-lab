@@ -1,0 +1,16 @@
+{
+  "resourceType": "Appointment",
+  "id": "appointment-synthetic-001",
+  "status": "booked",
+  "description": "Synthetic follow-up visit",
+  "start": "2027-03-15T15:00:00Z",
+  "end": "2027-03-15T15:30:00Z",
+  "participant": [
+    {
+      "actor": {
+        "reference": "Patient/SYN-PATIENT-001"
+      },
+      "status": "accepted"
+    }
+  ]
+}

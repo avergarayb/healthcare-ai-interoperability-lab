@@ -23,6 +23,7 @@ from langgraph.prebuilt import ToolNode
 
 from app.config import Settings
 from app.langgraph_fhir_client import (
+    APPOINTMENTS_TOOL,
     BOUNDARY_EVENTS,
     DENIAL_ANSWER,
     FOLLOWUP_TOOL,
@@ -38,12 +39,16 @@ from app.langgraph_fhir_client import (
 from app.langgraph_fhir_followup import (
     UNAVAILABLE_ANSWER,
     FollowUpFHIRAdapter,
+    _appointment_refs,
     _resource_refs,
+    make_appointments_tool,
     make_followup_tool,
 )
 from app.langgraph_fhir_hapi import HapiReadClient
 
 
+# AIMessages already in state, counted before the next model call.
+# Four covers a context read, an appointment read, and a final answer.
 MAX_MODEL_TURNS = 4
 MODEL_LIMIT_ANSWER = "stopped: model turn limit reached"
 GEMINI_RETRY_ATTEMPTS = 3
@@ -57,10 +62,17 @@ SYSTEM_INSTRUCTION = (
     "You prepare a synthetic follow-up. "
     "When clinical context is missing, call get_patient_followup_context "
     "with the case id from the user message. "
-    "After the tool result arrives, answer from that result only. "
+    "After that result, you may call get_upcoming_appointments with the same case id "
+    "when you need to know whether a follow-up visit is already scheduled. "
+    "Skip that call when the context is enough to decide. "
     "Do not invent clinical data. Do not call any other tool. "
     "When you are not calling a tool, respond with a JSON object that has "
     "answer and follow_up_required. follow_up_required is true, false, or unknown."
+)
+FINAL_DECISION_REQUEST = (
+    "Respond with the JSON object only. "
+    "Do not call a tool. "
+    "follow_up_required must be true, false, or unknown."
 )
 FINAL_DECISION_FIELDS = ("true", "false", "unknown")
 FINAL_DECISION_SCHEMA = {
@@ -258,11 +270,20 @@ def _contents(messages: list[AnyMessage]) -> list[Any]:
     return contents
 
 
+def _is_final_decision_turn(messages: list[AnyMessage]) -> bool:
+    """JSON schema applies only after the model has stopped proposing tools."""
+    if not messages or not isinstance(messages[-1], HumanMessage):
+        return False
+    if str(messages[-1].content).strip() != FINAL_DECISION_REQUEST:
+        return False
+    return any(isinstance(message, ToolMessage) for message in messages)
+
+
 def _followup_generate_config(messages: list[AnyMessage]) -> Any:
-    """Tools on the read turn. A JSON decision only after a tool result exists."""
+    """Offer the read tools until the model stops. The closing request asks for JSON only."""
     from google.genai import types
 
-    if any(isinstance(message, ToolMessage) for message in messages):
+    if _is_final_decision_turn(messages):
         return types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             response_mime_type="application/json",
@@ -271,7 +292,7 @@ def _followup_generate_config(messages: list[AnyMessage]) -> Any:
         )
     return types.GenerateContentConfig(
         system_instruction=SYSTEM_INSTRUCTION,
-        tools=[_declared_followup_tool()],
+        tools=[_declared_followup_tools()],
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
@@ -358,8 +379,8 @@ def gemini_error_diagnostics(exc: BaseException) -> str:
 
 
 def followup_tool_schema() -> dict[str, Any]:
-    """Return the function declaration sent with the model request."""
-    return _declared_followup_tool().model_dump(exclude_none=True)
+    """Return the function declarations sent while the model may still call a tool."""
+    return _declared_followup_tools().model_dump(exclude_none=True)
 
 
 def describe_followup_contents(messages: list[AnyMessage]) -> list[dict[str, Any]]:
@@ -416,22 +437,44 @@ def _redact(text: str) -> str:
     return text
 
 
-def _declared_followup_tool():
+def _declared_followup_tools():
     from google.genai import types
 
+    case_parameters = {
+        "type": "object",
+        "properties": {"case_id": {"type": "string"}},
+        "required": ["case_id"],
+    }
     return types.Tool(
         function_declarations=[
             types.FunctionDeclaration(
                 name=FOLLOWUP_TOOL,
                 description="Read the patient and recent observations for one follow-up case.",
+                parameters_json_schema=dict(case_parameters),
+            ),
+            types.FunctionDeclaration(
+                name=APPOINTMENTS_TOOL,
+                description=(
+                    "Read upcoming appointments for the patient linked to one follow-up case. "
+                    "Pass the case id. Do not pass a patient id or a FHIR query."
+                ),
                 parameters_json_schema={
                     "type": "object",
                     "properties": {"case_id": {"type": "string"}},
                     "required": ["case_id"],
                 },
-            )
+            ),
         ]
     )
+
+
+def _has_structured_decision(message: AIMessage) -> bool:
+    token = (message.additional_kwargs or {}).get("follow_up_required")
+    return token in FINAL_DECISION_FIELDS
+
+
+def _saw_tool_result(state: GeminiFollowUpState) -> bool:
+    return any(isinstance(message, ToolMessage) for message in state["messages"])
 
 
 class GeminiFhirFollowUp:
@@ -460,6 +503,7 @@ class GeminiFhirFollowUp:
         self._status = ""
         self._reason = ""
         self.followup_tool = make_followup_tool(adapter)
+        self.appointments_tool = make_appointments_tool(adapter)
         self.graph = self._compile()
 
     def prepare_node(self, state: GeminiFollowUpState) -> dict[str, object]:
@@ -496,7 +540,9 @@ class GeminiFhirFollowUp:
         if not isinstance(last, AIMessage):
             raise ValueError("agent state cannot be routed")
         if not last.tool_calls:
-            return "finish"
+            if _has_structured_decision(last) or not _saw_tool_result(state) or state["decision"] == "closing":
+                return "finish"
+            return "close"
         verdict = None
         for call in last.tool_calls:
             verdict = self.policy(call["name"])
@@ -528,29 +574,57 @@ class GeminiFhirFollowUp:
             "policy_reason": self._reason,
         }
 
+    def close_node(self, state: GeminiFollowUpState) -> dict[str, object]:
+        """Ask once for the structured decision after the model stops calling tools."""
+        del state
+        self.trace.append("close")
+        return {
+            "decision": "closing",
+            "messages": [HumanMessage(content=FINAL_DECISION_REQUEST)],
+        }
+
     def update_state(self, state: GeminiFollowUpState) -> dict[str, object]:
         self.trace.append("update_state")
         if self._status != "allowed":
             raise ValueError("update_state requires an allowed tool")
-        if not state["messages"] or not isinstance(state["messages"][-1], ToolMessage):
+        results = _trailing_tool_messages(state["messages"])
+        if not results:
             raise ValueError("update_state requires a tool result")
-        message = state["messages"][-1]
-        if (message.name or "") != FOLLOWUP_TOOL:
-            raise ValueError("unknown tool result")
-        payload = _tool_payload(message.content)
-        patient = payload.get("patient")
-        observations = payload.get("observations")
-        if not isinstance(patient, dict) or not isinstance(observations, list) or not observations:
-            raise ValueError("tool result must include patient and observations")
-        return {
+        patient = None
+        observations = None
+        evidence: list[dict[str, object]] = []
+        tools_used: list[str] = []
+        for message in results:
+            name = message.name or ""
+            payload = _tool_payload(message.content)
+            if name == FOLLOWUP_TOOL:
+                patient = payload.get("patient")
+                observations = payload.get("observations")
+                if not isinstance(patient, dict) or not isinstance(observations, list) or not observations:
+                    raise ValueError("tool result must include patient and observations")
+                evidence.append({"tool": FOLLOWUP_TOOL, "resources": _resource_refs(patient, observations)})
+                tools_used.append(FOLLOWUP_TOOL)
+            elif name == APPOINTMENTS_TOOL:
+                appointments = payload.get("appointments")
+                if not isinstance(appointments, list):
+                    raise ValueError("appointment result must include appointments")
+                refs = _appointment_refs(appointments)
+                if refs:
+                    evidence.append({"tool": APPOINTMENTS_TOOL, "resources": refs})
+                tools_used.append(APPOINTMENTS_TOOL)
+            else:
+                raise ValueError("unknown tool result")
+        update: dict[str, object] = {
             "decision": "allowed",
             "policy_decision": self._status,
             "policy_reason": self._reason,
-            "patient": patient,
-            "observations": observations,
-            "evidence": [{"tool": FOLLOWUP_TOOL, "resources": _resource_refs(patient, observations)}],
-            "tools_used": [FOLLOWUP_TOOL],
+            "evidence": evidence,
+            "tools_used": tools_used,
         }
+        if isinstance(patient, dict) and isinstance(observations, list):
+            update["patient"] = patient
+            update["observations"] = observations
+        return update
 
     def finish_node(self, state: GeminiFollowUpState) -> dict[str, str]:
         self.trace.append("finish")
@@ -565,11 +639,12 @@ class GeminiFhirFollowUp:
 
     def _compile(self):
         graph: StateGraph[GeminiFollowUpState] = StateGraph(GeminiFollowUpState)
-        tools: list[BaseTool] = [self.followup_tool, send_message]
+        tools: list[BaseTool] = [self.followup_tool, self.appointments_tool, send_message]
         graph.add_node("prepare", self.prepare_node)
         graph.add_node("agent", self.agent_node)
         graph.add_node("tools", ToolNode(tools, handle_tool_errors=False))
         graph.add_node("update_state", self.update_state)
+        graph.add_node("close", self.close_node)
         graph.add_node("denied", self.denied_node)
         graph.add_node("finish", self.finish_node)
         graph.add_edge(START, "prepare")
@@ -577,10 +652,11 @@ class GeminiFhirFollowUp:
         graph.add_conditional_edges(
             "agent",
             self.route_after_agent,
-            {"tools": "tools", "denied": "denied", "finish": "finish"},
+            {"tools": "tools", "denied": "denied", "finish": "finish", "close": "close"},
         )
         graph.add_edge("tools", "update_state")
         graph.add_edge("update_state", "agent")
+        graph.add_edge("close", "agent")
         graph.add_edge("denied", "finish")
         graph.add_edge("finish", END)
         return graph.compile()
@@ -593,6 +669,16 @@ class GeminiFhirFollowUp:
             if found is None or str(found) == "transport failed":
                 raise
             return _unavailable(case_id)
+
+
+def _trailing_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
+    found: list[ToolMessage] = []
+    for message in reversed(messages):
+        if not isinstance(message, ToolMessage):
+            break
+        found.append(message)
+    found.reverse()
+    return found
 
 
 def _unavailable(case_id: str) -> GeminiFollowUpState:

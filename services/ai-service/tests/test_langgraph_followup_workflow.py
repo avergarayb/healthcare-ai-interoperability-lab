@@ -14,9 +14,11 @@ from pathlib import Path
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.langgraph_fhir_client import (
+    APPOINTMENT_ID,
+    APPOINTMENTS_TOOL,
     BOUNDARY_EVENTS,
     CASE_IDENTIFIER_SYSTEM,
     DENIAL_ANSWER,
@@ -31,8 +33,14 @@ from app.langgraph_fhir_client import (
     clear_boundary_events,
     evaluate_tool_policy,
     record_policy_audit,
+    synthetic_followup_appointment,
 )
-from app.langgraph_fhir_followup import UNAVAILABLE_ANSWER, case_search_path, make_followup_tool
+from app.langgraph_fhir_followup import (
+    UNAVAILABLE_ANSWER,
+    appointment_search_path,
+    case_search_path,
+    make_followup_tool,
+)
 from app.langgraph_fhir_hapi import HapiReadClient, hapi_base_url
 from app.langgraph_followup_workflow import (
     APPLICATION_RESPONSIBILITIES,
@@ -42,7 +50,11 @@ from app.langgraph_followup_workflow import (
     FollowUpWorkflowResult,
     build_live_followup_workflow,
 )
-from app.langgraph_gemini_fhir_followup import MODEL_LIMIT_ANSWER, followup_message_from_response
+from app.langgraph_gemini_fhir_followup import (
+    FINAL_DECISION_REQUEST,
+    MODEL_LIMIT_ANSWER,
+    followup_message_from_response,
+)
 
 
 APP = Path(__file__).resolve().parents[1] / "app"
@@ -146,6 +158,12 @@ class MemoryReadClient:
                     }
                 ],
             }
+        if path == appointment_search_path(PATIENT_ID):
+            return {
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "entry": [{"resource": synthetic_followup_appointment()}],
+            }
         raise ReadClientError("unknown path")
 
 
@@ -213,7 +231,7 @@ def test_workflow_can_be_built_without_calling_a_model():
 def test_fake_model_returns_an_application_result():
     client = MemoryReadClient()
     sink = InMemoryAuditSink()
-    result = _workflow(client, ScriptedModel([_signed_tool_call(), AIMessage(content=FINAL_TEXT)]), sink).run(
+    result = _workflow(client, ScriptedModel([_signed_tool_call(), _final("unknown")]), sink).run(
         PATIENT_CASE
     )
     assert isinstance(result, FollowUpWorkflowResult)
@@ -268,7 +286,7 @@ def test_injected_policy_is_called_before_the_tool():
         return evaluate_tool_policy(name)
 
     client = MemoryReadClient()
-    _workflow(client, ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]), policy=policy).run(PATIENT_CASE)
+    _workflow(client, ScriptedModel([_tool_call(), _final("unknown")]), policy=policy).run(PATIENT_CASE)
     assert seen == [FOLLOWUP_TOOL]
     assert client.calls == CASE_READS
 
@@ -343,7 +361,7 @@ def test_allowed_tool_audit_is_logged_and_the_tool_still_runs(caplog):
     with caplog.at_level(logging.INFO, logger="ai-service"):
         result = _workflow(
             client,
-            ScriptedModel([_signed_tool_call(), AIMessage(content=FINAL_TEXT)]),
+            ScriptedModel([_signed_tool_call(), _final("unknown")]),
             sink,
         ).run(PATIENT_CASE)
     assert result.status == "finish"
@@ -434,7 +452,7 @@ def test_known_case_resolves_the_patient_by_identifier():
     client = MemoryReadClient()
     result = _workflow(
         client,
-        ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]),
+        ScriptedModel([_tool_call(), _final("unknown")]),
     ).run(PATIENT_CASE)
     assert result.status == "finish"
     assert result.patient["id"] == PATIENT_ID
@@ -532,7 +550,7 @@ def test_resolution_does_not_treat_the_case_id_as_the_patient_id():
     client = _DistinctClient()
     result = _workflow(
         client,
-        ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]),
+        ScriptedModel([_tool_call(), _final("unknown")]),
     ).run(PATIENT_CASE)
     assert result.status == "finish"
     assert result.patient["id"] == PATIENT_ID
@@ -543,7 +561,7 @@ def test_resolution_does_not_treat_the_case_id_as_the_patient_id():
 def test_fhir_failure_does_not_invent_clinical_context():
     client = FailingPreparedReadClient()
     sink = InMemoryAuditSink()
-    model = ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)])
+    model = ScriptedModel([_tool_call(), _final("unknown")])
     result = _workflow(client, model, sink).run(PATIENT_CASE)
     assert result.status == "unavailable"
     assert result.final_answer == UNAVAILABLE_ANSWER
@@ -593,11 +611,11 @@ def test_turn_limit_stops_without_another_model_call():
 def test_the_same_workflow_accepts_a_different_fhir_client():
     first = _workflow(
         MemoryReadClient(),
-        ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]),
+        ScriptedModel([_tool_call(), _final("unknown")]),
     ).run(PATIENT_CASE)
     second = _workflow(
         MemoryReadClient(name="Alternate Synthetic", observation_id="obs-synthetic-002", value="Alternate value"),
-        ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]),
+        ScriptedModel([_tool_call(), _final("unknown")]),
     ).run(PATIENT_CASE)
     assert type(first) is type(second)
     assert first.observations[0]["id"] == "obs-synthetic-001"
@@ -645,7 +663,7 @@ def _final(decision: str, text: str = FINAL_TEXT) -> AIMessage:
 def test_run_id_is_the_same_value_used_by_the_audit():
     sink = InMemoryAuditSink()
     workflow = FollowUpWorkflow(
-        model=ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]),
+        model=ScriptedModel([_tool_call(), _final("unknown")]),
         sink=sink,
         fhir_client=MemoryReadClient(),
         clock=_clock,
@@ -702,17 +720,20 @@ def test_follow_up_required_accepts_an_explicit_structured_value():
 
 
 def test_follow_up_required_stays_unknown_without_a_structured_decision():
-    result = _workflow(
-        MemoryReadClient(),
-        ScriptedModel(
-            [
-                _tool_call(),
-                AIMessage(content="The text says follow-up is true because an observation exists."),
-            ]
-        ),
-    ).run(PATIENT_CASE)
+    prose = "The text says follow-up is true because an observation exists."
+    model = ScriptedModel(
+        [
+            _tool_call(),
+            AIMessage(content=prose),
+            AIMessage(content="Still no structured decision."),
+        ]
+    )
+    result = _workflow(MemoryReadClient(), model).run(PATIENT_CASE)
     assert result.follow_up_required == "unknown"
-    assert result.final_answer == "The text says follow-up is true because an observation exists."
+    assert result.final_answer == "Still no structured decision."
+    assert result.follow_up_required != "true"
+    assert isinstance(model.seen[-1][-1], HumanMessage)
+    assert model.seen[-1][-1].content == FINAL_DECISION_REQUEST
     assert result.observations
     assert result.patient is not None
 
@@ -742,7 +763,7 @@ def test_application_workflow_reads_real_hapi_with_a_fake_model():
     clear_boundary_events()
     client = HapiReadClient(base)
     sink = InMemoryAuditSink()
-    result = _workflow(client, ScriptedModel([_tool_call(), AIMessage(content=FINAL_TEXT)]), sink).run(PATIENT_CASE)
+    result = _workflow(client, ScriptedModel([_tool_call(), _final("unknown")]), sink).run(PATIENT_CASE)
     assert result.status == "finish"
     assert result.final_answer == FINAL_TEXT
     assert result.patient["id"] == stored_patient["id"] == PATIENT_ID
@@ -773,7 +794,8 @@ def test_live_application_workflow_reads_hapi_before_the_final_answer():
     assert result.final_answer
     assert result.turns >= 2
     assert result.turns <= MAX_MODEL_TURNS
-    assert result.tools_used == [FOLLOWUP_TOOL]
+    assert result.tools_used[0] == FOLLOWUP_TOOL
+    assert set(result.tools_used) <= {FOLLOWUP_TOOL, APPOINTMENTS_TOOL}
     assert result.patient["id"] == stored_patient["id"]
     assert result.patient["name"] == stored_patient["name"][0]["text"]
     found = next(item for item in result.observations if item.get("id") == stored_observation["id"])
@@ -795,7 +817,10 @@ def test_live_application_workflow_reads_hapi_before_the_final_answer():
     assert BOUNDARY_EVENTS.index(f"audit:{FOLLOWUP_TOOL}:allowed") < BOUNDARY_EVENTS.index(
         f"execute:{FOLLOWUP_TOOL}"
     )
-    assert workflow.fhir_client.calls == CASE_READS
+    assert workflow.fhir_client.calls[: len(CASE_READS)] == CASE_READS
+    assert all(
+        path.startswith(("Patient", "Observation", "Appointment")) for path in workflow.fhir_client.calls
+    )
 
 
 def _store(base: str, path: str, body: dict) -> None:
@@ -858,4 +883,18 @@ def _ensure_records(base: str) -> tuple[dict, dict]:
             },
         )
         observation = reader.get("Observation/obs-synthetic-001")
+    try:
+        appointment = reader.get(f"Appointment/{APPOINTMENT_ID}")
+    except Exception:
+        appointment = None
+    participants = appointment.get("participant") if isinstance(appointment, dict) else None
+    expected = f"Patient/{PATIENT_ID}"
+    linked = isinstance(participants, list) and any(
+        isinstance(item, dict)
+        and isinstance(item.get("actor"), dict)
+        and item["actor"].get("reference") == expected
+        for item in participants
+    )
+    if not linked:
+        _store(base, f"Appointment/{APPOINTMENT_ID}", synthetic_followup_appointment())
     return patient, observation

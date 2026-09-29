@@ -12,19 +12,20 @@ followup_service
 FollowUpWorkflow.run()
         |
         v
-Gemini #1  (AutomaticFunctionCallingConfig disable=True, tool declarada)
+Gemini  (AutomaticFunctionCallingConfig disable=True)
         |
         v
-evaluate_tool_policy
+evaluate_tool_policy   (default deny; dos tools de lectura)
         |
         v
-record_policy_audit   (log followup_tool_policy_audit, mismo run_id)
+record_policy_audit    (una línea por tool, mismo run_id)
         |
         v
-ToolNode              (ejecuta; no autoriza)
+ToolNode               (ejecuta; no autoriza)
         |
         v
 get_patient_followup_context
+get_upcoming_appointments
         |
         v
 FollowUpFHIRAdapter
@@ -33,23 +34,23 @@ FollowUpFHIRAdapter
 ClientFHIRTransport
         |
         v
-HapiReadClient        (solo GET)
+HapiReadClient         (solo GET)
         |
         v
 HAPI FHIR
         |
         v
-Gemini #2  (AFC desactivado, sin tools, objeto answer + follow_up_required)
+el modelo decide: otra tool, o la decisión final
         |
         v
 FollowUpEndpointResponse
 ```
 
-`caseId` no es `Patient.id`. Se busca `Patient.identifier` con system `https://lab.local/followup-case` y value igual al caso, y después se leen ese Patient y sus Observation. `MAX_MODEL_TURNS` es 4. `thought_signature` se reinyecta en el `Part` del segundo request y no sale en el log ni en el HTTP. No hay memoria persistente, RAG, checkpointing ni human-in-the-loop.
+`caseId` no es `Patient.id`. Se busca `Patient.identifier` con system `https://lab.local/followup-case` y value igual al caso. La tool de contexto lee ese Patient y sus Observation. La tool de citas usa el mismo identificador y después `Appointment?patient=Patient/{id}`. El modelo elige si llama a la segunda tool; el grafo no encadena las dos. Si el mensaje ya trae `follow_up_required` estructurado (`true`, `false` o `unknown`), el workflow termina. Si el modelo deja de pedir tools después de una lectura y no trae ese token, el nodo `close` hace un solo request posterior: pide el JSON y no declara tools. `close` no elige una tool. El texto libre no decide el campo. `MAX_MODEL_TURNS` es 4. `thought_signature` se reinyecta en el `Part` del siguiente request y no sale en el log ni en el HTTP. No hay memoria persistente, RAG, checkpointing ni human-in-the-loop. FHIR sigue siendo la fuente de verdad y el workflow no escribe.
 
 Un `generateContent` y un GET de HAPI reintentan solo fallos transitorios: HTTP 408, 429, 500, 502, 503 y 504, y la pérdida de transporte. El máximo es 3 intentos, contando el primero. La espera es 0.25 s y después 0.5 s, con tope de 1 s. No se reintentan 400, 401, 404 ni un caso sin Patient. El retry del SDK queda en un intento, así que no se suma al de la aplicación. El `run_id` no cambia. El retry no vuelve a auditar ni reejecuta una tool que ya tuvo éxito. Si los intentos se agotan, Gemini sigue siendo HTTP 502 y un 5xx de HAPI sigue siendo `unavailable`. El contrato HTTP no cambia. Ese retry está cubierto por tests deterministas; no hay una validación live de esta recuperación.
 
-Una llamada live de `SYN-FOLLOWUP-001` terminó en HTTP 200, `status` `completed` y `followUpRequired` `unknown`. Confirmó los dos turnos, la tool, la auditoría y las lecturas HAPI. No inspeccionó el payload estructurado interno de Gemini, así que `unknown` sigue siendo un resultado válido. El texto libre no decide ese campo.
+`followUpRequired` es ese token estructurado. `unknown` sigue siendo un resultado válido. El texto libre no lo decide.
 
 La versión instalada es `langgraph==1.2.12`.
 

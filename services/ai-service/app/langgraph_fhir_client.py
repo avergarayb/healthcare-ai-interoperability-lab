@@ -25,7 +25,9 @@ DENIAL_ANSWER = "Tool denied by policy"
 POLICY_VERSION = "policy-v1"
 DEFAULT_TIMESTAMP = "1970-01-01T00:00:00Z"
 FOLLOWUP_TOOL = "get_patient_followup_context"
-ALLOWED_READ_TOOLS = frozenset({FOLLOWUP_TOOL})
+APPOINTMENTS_TOOL = "get_upcoming_appointments"
+APPOINTMENT_ID = "appointment-synthetic-001"
+ALLOWED_READ_TOOLS = frozenset({FOLLOWUP_TOOL, APPOINTMENTS_TOOL})
 SAFE_AUDIT_FIELDS = (
     "sequence",
     "timestamp",
@@ -95,6 +97,24 @@ def _bundle(observation: dict[str, object]) -> dict[str, object]:
     return {"resourceType": "Bundle", "type": "searchset", "entry": [{"resource": observation}]}
 
 
+def synthetic_followup_appointment() -> dict[str, object]:
+    """One future synthetic visit for the follow-up patient. Not a record of another patient."""
+    return {
+        "resourceType": "Appointment",
+        "id": APPOINTMENT_ID,
+        "status": "booked",
+        "description": "Synthetic follow-up visit",
+        "start": "2027-03-15T15:00:00Z",
+        "end": "2027-03-15T15:30:00Z",
+        "participant": [
+            {
+                "actor": {"reference": f"Patient/{PATIENT_ID}"},
+                "status": "accepted",
+            }
+        ],
+    }
+
+
 class PreparedReadClient:
     """In-memory responses for one patient and one observation. No network."""
 
@@ -103,9 +123,13 @@ class PreparedReadClient:
         *,
         observation_id: str = "obs-synthetic-001",
         observation_value: str = "Synthetic observation result",
+        appointments: list[dict[str, object]] | None = None,
     ) -> None:
         self.observation_id = observation_id
         self.observation_value = observation_value
+        self.appointments = (
+            [synthetic_followup_appointment()] if appointments is None else [dict(item) for item in appointments]
+        )
         self.calls: list[str] = []
 
     def get(self, path: str) -> dict:
@@ -122,6 +146,12 @@ class PreparedReadClient:
             return _patient_resource(PATIENT_ID)
         if path == f"Observation?subject=Patient/{PATIENT_ID}":
             return _bundle(_observation_resource(self.observation_id, PATIENT_ID, self.observation_value))
+        if path == f"Appointment?patient=Patient/{PATIENT_ID}":
+            return {
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "entry": [{"resource": dict(item)} for item in self.appointments],
+            }
         raise ReadClientError("unknown prepared path")
 
 

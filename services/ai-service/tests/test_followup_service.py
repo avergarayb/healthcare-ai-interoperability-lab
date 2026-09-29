@@ -285,7 +285,10 @@ def test_http_run_id_matches_the_policy_audit_log(monkeypatch, caplog):
                 }
             ],
         ),
-        AIMessage(content="Context received from the model."),
+        AIMessage(
+            content="Context received from the model.",
+            additional_kwargs={"follow_up_required": "unknown"},
+        ),
     ]
 
     def factory(run_id: str) -> FollowUpWorkflow:
@@ -359,7 +362,7 @@ class _DecisionResponse:
         ]
 
 
-def _post_real_workflow(monkeypatch, final: AIMessage):
+def _post_real_workflow(monkeypatch, final: AIMessage, extra: list[AIMessage] | None = None):
     replies = [
         AIMessage(
             content="",
@@ -373,6 +376,7 @@ def _post_real_workflow(monkeypatch, final: AIMessage):
             ],
         ),
         final,
+        *(extra or []),
     ]
 
     def factory(run_id: str) -> FollowUpWorkflow:
@@ -409,12 +413,66 @@ def test_http_projects_a_structured_follow_up_required(monkeypatch, token, answe
 
 def test_http_keeps_follow_up_required_unknown_when_the_model_omits_it(monkeypatch):
     prose = "The text says follow-up is true because an observation exists."
-    response = _post_real_workflow(monkeypatch, AIMessage(content=prose))
+    response = _post_real_workflow(
+        monkeypatch,
+        AIMessage(content=prose),
+        [AIMessage(content="Still no structured decision.")],
+    )
     body = response.json()
     assert response.status_code == 200
     assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
     assert body["followUpRequired"] == "unknown"
-    assert body["answer"] == prose
+    assert body["answer"] == "Still no structured decision."
+    assert body["followUpRequired"] != "true"
+
+
+def _tool_reply(name: str, call_id: str) -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": name,
+                "args": {"case_id": CASE},
+                "id": call_id,
+                "type": "tool_call",
+            }
+        ],
+    )
+
+
+def test_http_evidence_lists_resources_from_each_read_tool(monkeypatch):
+    sink = InMemoryAuditSink()
+    replies = [
+        _tool_reply("get_patient_followup_context", "call-1"),
+        _tool_reply("get_upcoming_appointments", "call-2"),
+        AIMessage(content="A visit is booked.", additional_kwargs={"follow_up_required": "false"}),
+    ]
+
+    def factory(run_id: str) -> FollowUpWorkflow:
+        return FollowUpWorkflow(
+            model=lambda _messages: replies.pop(0),
+            sink=sink,
+            fhir_client=PreparedReadClient(),
+            clock=lambda: "2026-09-25T00:00:03Z",
+            run_id=run_id,
+        )
+
+    monkeypatch.setattr("app.followup_service.build_followup_workflow", factory)
+    app.dependency_overrides[get_settings] = lambda: _settings()
+    response = _post(TestClient(app), {"caseId": CASE}, headers=_auth_headers())
+    body = response.json()
+    assert response.status_code == 200
+    assert body["followUpRequired"] == "false"
+    assert body["evidence"] == [
+        {"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"},
+        {"tool": "get_patient_followup_context", "id": "Observation/obs-synthetic-001"},
+        {"tool": "get_upcoming_appointments", "id": "Appointment/appointment-synthetic-001"},
+    ]
+    assert [event.tool_name for event in sink.events] == [
+        "get_patient_followup_context",
+        "get_upcoming_appointments",
+    ]
+    assert {event.run_id for event in sink.events} == {body["runId"]}
 
 
 def test_http_response_does_not_include_a_trace(monkeypatch):

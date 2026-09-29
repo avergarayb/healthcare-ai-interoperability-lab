@@ -167,7 +167,7 @@ A workflow result uses HTTP 200. Internal statuses map as `finish` → `complete
 }
 ```
 
-The application creates one `runId` and passes it into the workflow. Evidence lists FHIR references for `get_patient_followup_context`. The body does not include the patient, the observation, prompts, completions, or signatures. An unexpected workflow failure, including a Gemini or transport error the workflow does not map to `unavailable`, returns HTTP 502 `{"detail": "Follow-up workflow failed"}` and does not echo the exception.
+The application creates one `runId` and passes it into the workflow. Evidence lists FHIR references actually read. Each reference keeps the name of the tool that read it. The body does not include the patient, the observation, the appointment, prompts, completions, or signatures. An unexpected workflow failure, including a Gemini or transport error the workflow does not map to `unavailable`, returns HTTP 502 `{"detail": "Follow-up workflow failed"}` and does not echo the exception.
 
 This surface uses synthetic laboratory data only. It does not diagnose, prescribe, or write clinical records. `/health` stays open and does not read this flag.
 
@@ -210,6 +210,7 @@ LangGraph
                 |
                 v
         get_patient_followup_context
+        get_upcoming_appointments
                 |
                 v
         FollowUpFHIRAdapter
@@ -224,19 +225,19 @@ LangGraph
         HAPI FHIR
 ```
 
-Policy and audit stay outside the graph. `evaluate_tool_policy` runs before `ToolNode`. `ToolNode` executes an allowed tool. It does not authorize. A denied or unknown tool is audited and does not reach `ToolNode`. `MAX_MODEL_TURNS` is 4. LangGraph `recursion_limit` is not the product limit.
+Policy and audit stay outside the graph. `evaluate_tool_policy` runs before `ToolNode`. `ToolNode` executes an allowed tool. It does not authorize. The allowlist is `get_patient_followup_context` and `get_upcoming_appointments`. Anything else, including `send_message`, is denied. A denied or unknown tool is audited and does not reach `ToolNode`. Each proposed tool gets its own audit line and the same `run_id`. `MAX_MODEL_TURNS` is 4. LangGraph `recursion_limit` is not the product limit.
 
-Automatic function calling is disabled on both Gemini requests (`AutomaticFunctionCallingConfig(disable=True)`). The first request can propose `get_patient_followup_context`. The second request does not declare tools. It asks only for a JSON object with `answer` and `follow_up_required` (`true`, `false`, or `unknown`). The workflow copies that field. It does not read the answer text. `thought_signature` from the function-call part is sent back on the next request and is not logged or returned.
+The model chooses the tools. After `get_patient_followup_context` it can answer, or it can call `get_upcoming_appointments` with the same case id. The application does not force that second call. Automatic function calling is disabled on every Gemini request (`AutomaticFunctionCallingConfig(disable=True)`). While the model may still call a tool, both read tools are declared and no JSON schema is set. A model message that already carries structured `follow_up_required` (`true`, `false`, or `unknown`) finishes. If the model stops after a clinical read without that token, the `close` node makes one later request. That request asks only for the JSON object `answer` plus `follow_up_required` and declares no tools. `close` does not choose a tool. The workflow copies the structured field. It does not read the answer text. `thought_signature` from a function-call part is sent back on the next request and is not logged or returned.
 
 A Gemini call retries only transient failures: HTTP 408, 429, 500, 502, 503, 504, plus `httpx` connect and timeout errors. The limit is 3 attempts, including the first call. The wait is 0.25 seconds and then 0.5 seconds, capped at 1 second. HTTP 400, 401, and other permanent statuses are not retried. The SDK retry is fixed at one attempt, so the application retry is the only retry. The same `run_id` is kept. A retry does not call policy again and does not run a tool that already succeeded. A HAPI GET uses the same attempt limit for transport loss and those same HTTP statuses. HTTP 404 and a case with no patient are not retried. After the attempts are exhausted, Gemini still becomes HTTP 502 and a HAPI 5xx still becomes `unavailable`. The HTTP body is unchanged. This retry behavior is covered by deterministic tests, not by a live Gemini call.
 
-`record_policy_audit` writes one `followup_tool_policy_audit` line on the `ai-service` logger. That line uses the same `run_id` as the HTTP `runId` and the workflow, plus `case_id`, `tool_name`, `decision`, `policy_version`, and `reason`. It does not include prompts, signatures, Patient, or Observation.
+`record_policy_audit` writes one `followup_tool_policy_audit` line on the `ai-service` logger for each proposed tool. That line uses the same `run_id` as the HTTP `runId` and the workflow, plus `case_id`, `tool_name`, `decision`, `policy_version`, and `reason`. It does not include prompts, signatures, Patient, Observation, or Appointment.
 
-The case id is not a `Patient.id`. The adapter searches `Patient.identifier` (`system` `https://lab.local/followup-case`, `value` equal to the case id), then reads that Patient and the Observations whose subject is that Patient. The laboratory Patient `SYN-PATIENT-001` carries this identifier for `SYN-FOLLOWUP-001`. A case with no matching identifier is `unavailable`. Other accepted case ids have no FHIR patient yet. This path only reads HAPI.
+The case id is not a `Patient.id`. The adapter searches `Patient.identifier` (`system` `https://lab.local/followup-case`, `value` equal to the case id). `get_patient_followup_context` then reads that Patient and the Observations whose subject is that Patient. `get_upcoming_appointments` uses the same identifier lookup and then reads `Appointment?patient=Patient/{id}`. It does not accept a patient id or a FHIR query from the model. An empty search adds no Appointment evidence. The laboratory Patient `SYN-PATIENT-001` carries the identifier for `SYN-FOLLOWUP-001` and the synthetic Appointment `appointment-synthetic-001`. A case with no matching identifier is `unavailable`. Other accepted case ids have no FHIR patient yet. This path only reads HAPI. FHIR remains the source of truth.
 
-This follow-up has no persistent memory, RAG, checkpointing, or human-in-the-loop interrupt.
+This follow-up has no persistent memory, RAG, checkpointing, or human-in-the-loop interrupt. It does not write FHIR resources.
 
-A live call for `SYN-FOLLOWUP-001` returned HTTP 200 with `status` `completed` and `followUpRequired` `unknown`. That run confirmed the two Gemini calls, the tool, the audit, and the HAPI reads. It did not inspect Gemini's internal structured payload, so `unknown` stays a valid result when that field is absent or was not observed. The service does not infer it from the answer text.
+`followUpRequired` is the structured token `true`, `false`, or `unknown`. The service does not infer it from the answer text. `unknown` stays valid when the model returns that token.
 
 Gemini settings come from `Settings` (`GEMINI_API_KEY`, `GEMINI_MODEL`). `config.py` was not changed. `GeminiProvider` still serves the experimental summary.
 

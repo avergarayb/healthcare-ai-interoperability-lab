@@ -9,11 +9,14 @@ with system https://lab.local/followup-case. It is not Patient.id.
 
 from __future__ import annotations
 
+import re
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 from langchain_core.tools import tool
 
 from app.langgraph_fhir_client import (
+    APPOINTMENTS_TOOL,
     BOUNDARY_EVENTS,
     CASE_IDENTIFIER_SYSTEM,
     FOLLOWUP_TOOL,
@@ -23,6 +26,8 @@ from app.langgraph_fhir_client import (
 
 
 UNAVAILABLE_ANSWER = "stopped: clinical context unavailable"
+_PATIENT_ID_TOKEN = re.compile(r"[A-Za-z0-9\-]+")
+_UPCOMING_STATUS = frozenset({"proposed", "pending", "booked"})
 
 
 def _mark(event: str) -> None:
@@ -146,6 +151,91 @@ class FollowUpFHIRAdapter:
                 raise ReadClientError("observation has no id")
         return observations
 
+    def get_upcoming_appointments(self, patient_id: str) -> list[dict]:
+        """Read upcoming appointments for the resolved patient. An empty search is an empty list."""
+        _mark("adapter:get_upcoming_appointments")
+        self.calls.append(("get_upcoming_appointments", patient_id))
+        payload = self.transport.get(appointment_search_path(patient_id))
+        return _upcoming_appointments(payload, patient_id)
+
+
+def appointment_search_path(patient_id: str) -> str:
+    """Search Appointment by patient. The patient id is resolved by the application, not by the model."""
+    if not isinstance(patient_id, str) or _PATIENT_ID_TOKEN.fullmatch(patient_id) is None:
+        raise ReadClientError("patient id is not usable")
+    return f"Appointment?patient=Patient/{patient_id}"
+
+
+def _actor_is_patient(reference: object, patient_id: str) -> bool:
+    if not isinstance(reference, str) or not reference:
+        return False
+    expected = f"Patient/{patient_id}"
+    return reference == expected or reference.endswith(f"/{expected}")
+
+
+def _starts_in_the_future(resource: dict, now: datetime) -> bool:
+    raw = resource.get("start")
+    if not isinstance(raw, str) or not raw.strip():
+        return False
+    try:
+        start = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start >= now
+
+
+def _upcoming_appointment(resource: dict, patient_id: str, now: datetime) -> dict | None:
+    """Keep a visit that belongs to this patient and is still upcoming. Other patients are omitted."""
+    if resource.get("status") not in _UPCOMING_STATUS:
+        return None
+    participants = resource.get("participant")
+    if not isinstance(participants, list):
+        return None
+    matched = False
+    for item in participants:
+        actor = item.get("actor") if isinstance(item, dict) else None
+        reference = actor.get("reference") if isinstance(actor, dict) else None
+        if _actor_is_patient(reference, patient_id):
+            matched = True
+            break
+    if not matched or not _starts_in_the_future(resource, now):
+        return None
+    appointment_id = resource.get("id")
+    if not isinstance(appointment_id, str) or not appointment_id:
+        raise ReadClientError("appointment has no id")
+    view = {
+        "resourceType": "Appointment",
+        "id": appointment_id,
+        "status": resource.get("status"),
+        "patient": f"Patient/{patient_id}",
+    }
+    start = resource.get("start")
+    if isinstance(start, str) and start.strip():
+        view["start"] = start.strip()
+    return view
+
+
+def _upcoming_appointments(payload: dict, patient_id: str) -> list[dict]:
+    if payload.get("resourceType") != "Bundle":
+        raise ReadClientError("appointment response must be a bundle")
+    entries = payload.get("entry") or []
+    if not isinstance(entries, list):
+        raise ReadClientError("appointment bundle entries must be a list")
+    now = datetime.now(timezone.utc)
+    appointments: list[dict] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ReadClientError("bundle entry must be an object")
+        resource = entry.get("resource")
+        if not isinstance(resource, dict) or resource.get("resourceType") != "Appointment":
+            raise ReadClientError("bundle entry must contain an appointment")
+        view = _upcoming_appointment(resource, patient_id, now)
+        if view is not None:
+            appointments.append(view)
+    return appointments
+
 
 def make_followup_tool(adapter: FollowUpFHIRAdapter):
     """Build the follow-up read. The tool sees the adapter and the case id."""
@@ -163,6 +253,22 @@ def make_followup_tool(adapter: FollowUpFHIRAdapter):
     return get_patient_followup_context
 
 
+def make_appointments_tool(adapter: FollowUpFHIRAdapter):
+    """Build the appointment read. The model supplies a case id. The adapter resolves the patient."""
+
+    @tool
+    def get_upcoming_appointments(case_id: str) -> dict[str, object]:
+        """Read upcoming appointments for the patient linked to one follow-up case."""
+        _mark(f"execute:{APPOINTMENTS_TOOL}")
+        patient_id = adapter.patient_id_for_case(case_id)
+        return {
+            "patientId": patient_id,
+            "appointments": adapter.get_upcoming_appointments(patient_id),
+        }
+
+    return get_upcoming_appointments
+
+
 def _resource_refs(patient: dict, observations: list[dict]) -> list[str]:
     patient_id = patient.get("id")
     if not isinstance(patient_id, str) or not patient_id:
@@ -173,4 +279,14 @@ def _resource_refs(patient: dict, observations: list[dict]) -> list[str]:
         if not isinstance(observation_id, str) or not observation_id:
             raise ReadClientError("observation has no id")
         refs.append(f"Observation/{observation_id}")
+    return refs
+
+
+def _appointment_refs(appointments: list[dict]) -> list[str]:
+    refs: list[str] = []
+    for resource in appointments:
+        appointment_id = resource.get("id")
+        if not isinstance(appointment_id, str) or not appointment_id:
+            raise ReadClientError("appointment has no id")
+        refs.append(f"Appointment/{appointment_id}")
     return refs
