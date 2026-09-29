@@ -679,15 +679,20 @@ class GeminiFhirFollowUp:
         return graph.compile()
 
     def invoke(self, case_id: str = PATIENT_CASE) -> GeminiFollowUpState:
+        if self.adapter.is_bound_to(case_id):
+            return self._invoke_bound(case_id)
         with self.adapter.bind_read(case_id):
-            try:
-                state = dict(self.graph.invoke(initial_state(case_id)))
-            except Exception as exc:
-                found = _find_read_error(exc)
-                if found is None or str(found) == "transport failed":
-                    raise
-                state = dict(_unavailable(case_id, self.adapter.preserved_reads()))
-            return _attach_read_snapshot(state, self.adapter.ledger)
+            return self._invoke_bound(case_id)
+
+    def _invoke_bound(self, case_id: str) -> GeminiFollowUpState:
+        try:
+            state = dict(self.graph.invoke(initial_state(case_id)))
+        except Exception as exc:
+            found = _find_read_error(exc)
+            if found is None or str(found) == "transport failed":
+                raise
+            state = dict(_unavailable(case_id, self.adapter.preserved_reads()))
+        return _attach_read_snapshot(state, self.adapter.ledger)
 
 
 def _proposed_case_id(call: dict[str, Any]) -> object | None:

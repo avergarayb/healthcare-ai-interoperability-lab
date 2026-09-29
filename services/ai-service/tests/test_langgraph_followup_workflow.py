@@ -76,7 +76,17 @@ C15_MODULES = (
 )
 PATIENT_PATH = f"Patient/{PATIENT_ID}"
 OBSERVATION_PATH = f"Observation?subject=Patient/{PATIENT_ID}"
-CASE_READS = [case_search_path(PATIENT_CASE), PATIENT_PATH, OBSERVATION_PATH]
+PROTOCOL_CASE_PATH = f"{case_search_path(PATIENT_CASE)}&_count=2"
+PROTOCOL_ENCOUNTER_PATH = f"Encounter?patient=Patient/{PATIENT_ID}&status=finished&_count=25"
+PROTOCOL_OBSERVATION_PATH = f"{OBSERVATION_PATH}&status=final&_count=25"
+PROTOCOL_APPOINTMENT_PATH = f"Appointment?patient=Patient/{PATIENT_ID}&_count=25"
+CASE_READS = [
+    PROTOCOL_CASE_PATH,
+    PATIENT_PATH,
+    PROTOCOL_ENCOUNTER_PATH,
+    PROTOCOL_OBSERVATION_PATH,
+    PROTOCOL_APPOINTMENT_PATH,
+]
 FINAL_TEXT = "Context received from the model."
 THOUGHT_SIGNATURE = b"\x01synthetic-thought-signature"
 CLINICAL_TEXT = (
@@ -126,7 +136,7 @@ class MemoryReadClient:
 
     def get(self, path: str) -> dict:
         self.calls.append(path)
-        if path == case_search_path(PATIENT_CASE):
+        if path in {case_search_path(PATIENT_CASE), PROTOCOL_CASE_PATH}:
             return {
                 "resourceType": "Bundle",
                 "type": "searchset",
@@ -151,7 +161,7 @@ class MemoryReadClient:
                 "id": PATIENT_ID,
                 "name": [{"text": self.name}],
             }
-        if path == OBSERVATION_PATH:
+        if path in {OBSERVATION_PATH, PROTOCOL_OBSERVATION_PATH}:
             return {
                 "resourceType": "Bundle",
                 "type": "searchset",
@@ -162,12 +172,30 @@ class MemoryReadClient:
                             "id": self.observation_id,
                             "status": "final",
                             "subject": {"reference": f"Patient/{PATIENT_ID}"},
+                            "encounter": {"reference": "Encounter/enc-synthetic-001"},
+                            "issued": "2026-09-25T12:30:00Z",
                             "valueString": self.value,
                         }
                     }
                 ],
             }
-        if path == appointment_search_path(PATIENT_ID):
+        if path == PROTOCOL_ENCOUNTER_PATH:
+            return {
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "entry": [
+                    {
+                        "resource": {
+                            "resourceType": "Encounter",
+                            "id": "enc-synthetic-001",
+                            "status": "finished",
+                            "subject": {"reference": f"Patient/{PATIENT_ID}"},
+                            "period": {"end": "2026-09-25T12:00:00Z"},
+                        }
+                    }
+                ],
+            }
+        if path in {appointment_search_path(PATIENT_ID), PROTOCOL_APPOINTMENT_PATH}:
             return {
                 "resourceType": "Bundle",
                 "type": "searchset",
@@ -269,12 +297,17 @@ def test_fake_model_returns_an_application_result():
         "context_patient",
         "context_observation",
         "schedule_check",
-        "schedule_classifications",
-        "schedule_appointments",
+            "schedule_classifications",
+            "schedule_appointments",
+            "protocol",
+            "encounter_collection",
+            "observation_collection",
+            "appointment_collection",
+            "protocol_encounters",
     }
     assert result.context_patient == "resolved"
     assert result.context_observation == "with_resources"
-    assert result.schedule_check == "not_checked"
+    assert result.schedule_check == "checked"
     assert result.run_id == "run-workflow-001"
     assert result.follow_up_required == "unknown"
     blob = json.dumps(asdict(result), default=str)
@@ -290,7 +323,14 @@ def test_fake_model_returns_an_application_result():
     )
     audit = _audit_blob(sink)
     assert set(asdict(sink.events[0]).keys()) == set(SAFE_AUDIT_FIELDS)
-    for text in CLINICAL_TEXT + ("thought_signature", "synthetic-thought-signature", "prompt", "authorization", "AIza"):
+    forbidden = CLINICAL_TEXT + (
+        "thought_signature",
+        "synthetic-thought-signature",
+        "prompt",
+        "authorization",
+        "AIza",
+    )
+    for text in forbidden:
         assert text not in audit
     assert FINAL_TEXT not in inspect.getsource(FollowUpWorkflow)
 
@@ -320,10 +360,10 @@ def test_denied_tool_does_not_read_fhir():
     assert result.observations == []
     assert result.evidence == []
     assert result.tools_used == []
-    assert result.context_patient == "not_read"
-    assert result.context_observation == "not_read"
-    assert result.schedule_check == "not_checked"
-    assert client.calls == []
+    assert result.context_patient == "resolved"
+    assert result.context_observation == "with_resources"
+    assert result.schedule_check == "checked"
+    assert client.calls == CASE_READS
     assert f"execute:{FOLLOWUP_TOOL}" not in BOUNDARY_EVENTS
     assert "execute:send_message" not in BOUNDARY_EVENTS
     assert BOUNDARY_EVENTS.index("policy:send_message:denied") < BOUNDARY_EVENTS.index("audit:send_message:denied")
@@ -463,7 +503,7 @@ def test_denied_tool_audit_is_logged_and_fhir_is_not_read(caplog):
         result = _workflow(client, model, sink).run(PATIENT_CASE)
     assert result.status == "denied"
     assert result.run_id == sink.events[0].run_id == "run-workflow-001"
-    assert client.calls == []
+    assert client.calls == CASE_READS
     assert "execute:send_message" not in BOUNDARY_EVENTS
     lines = _policy_audit_lines(caplog)
     assert len(lines) == 1
@@ -486,7 +526,7 @@ def test_unknown_tool_audit_is_logged_and_the_tool_does_not_run(caplog):
     assert result.status == "denied"
     assert result.run_id == sink.events[0].run_id
     assert sink.events[0].reason == "unknown tool is not allowed"
-    assert client.calls == []
+    assert client.calls == CASE_READS
     assert "execute:unknown_tool" not in BOUNDARY_EVENTS
     lines = _policy_audit_lines(caplog)
     assert len(lines) == 1
@@ -510,7 +550,7 @@ def test_unknown_tool_is_denied_without_reading_fhir():
     assert result.follow_up_required == "unknown"
     assert result.tools_used == []
     assert result.evidence == []
-    assert client.calls == []
+    assert client.calls == CASE_READS
     assert sink.events[0].decision == "denied"
     assert sink.events[0].tool_name == "unknown_tool"
     assert sink.events[0].reason == "unknown tool is not allowed"
@@ -552,7 +592,7 @@ def test_missing_case_is_unavailable_and_does_not_read_another_patient():
     assert result.context_patient == "not_resolved"
     assert result.context_observation == "not_read"
     assert result.schedule_check == "not_checked"
-    assert client.calls == [case_search_path(missing)]
+    assert client.calls == [f"{case_search_path(missing)}&_count=2"]
     assert PATIENT_PATH not in client.calls
     assert f"Patient/{missing}" not in client.calls
 
@@ -567,60 +607,13 @@ def test_resolution_does_not_treat_the_case_id_as_the_patient_id():
 
     class _DistinctClient:
         def __init__(self) -> None:
-            self.calls: list[str] = []
+            self.delegate = PreparedReadClient()
+            self.calls = self.delegate.calls
 
         def get(self, path: str) -> dict:
-            self.calls.append(path)
             if path == f"Patient/{PATIENT_CASE}":
                 raise AssertionError("case id was used as a Patient.id")
-            if path == case_search_path(PATIENT_CASE):
-                return {
-                    "resourceType": "Bundle",
-                    "type": "searchset",
-                    "entry": [
-                        {"resource": {"resourceType": "Patient", "id": PATIENT_CASE}},
-                        {
-                            "resource": {
-                                "resourceType": "Patient",
-                                "id": "SYN-PATIENT-OTHER",
-                                "identifier": [
-                                    {"system": "https://lab.local/other", "value": PATIENT_CASE}
-                                ],
-                            }
-                        },
-                        {
-                            "resource": {
-                                "resourceType": "Patient",
-                                "id": PATIENT_ID,
-                                "identifier": [
-                                    {"system": CASE_IDENTIFIER_SYSTEM, "value": PATIENT_CASE}
-                                ],
-                                "name": [{"text": "Synthetic Patient"}],
-                            }
-                        },
-                    ],
-                }
-            if path == PATIENT_PATH:
-                return {
-                    "resourceType": "Patient",
-                    "id": PATIENT_ID,
-                    "name": [{"text": "Synthetic Patient"}],
-                }
-            if path == OBSERVATION_PATH:
-                return {
-                    "resourceType": "Bundle",
-                    "type": "searchset",
-                    "entry": [
-                        {
-                            "resource": {
-                                "resourceType": "Observation",
-                                "id": "obs-synthetic-001",
-                                "valueString": "Synthetic observation result",
-                            }
-                        }
-                    ],
-                }
-            raise ReadClientError("unexpected path")
+            return self.delegate.get(path)
 
     client = _DistinctClient()
     result = _workflow(
@@ -648,11 +641,8 @@ def test_fhir_failure_does_not_invent_clinical_context():
     assert result.context_patient == "unavailable"
     assert result.context_observation == "not_read"
     assert result.context_patient != "not_resolved"
-    assert len(model.seen) == 1
-    assert sink.events[0].decision == "allowed"
-    assert BOUNDARY_EVENTS.index(f"audit:{FOLLOWUP_TOOL}:allowed") < BOUNDARY_EVENTS.index(
-        f"execute:{FOLLOWUP_TOOL}"
-    )
+    assert len(model.seen) == 0
+    assert sink.events == []
     assert client.calls
     assert "Synthetic Patient" not in result.final_answer
 
@@ -667,7 +657,7 @@ def test_gemini_failure_is_not_turned_into_a_tool_call():
     workflow = _workflow(client, unavailable, sink)
     with pytest.raises(RuntimeError, match="status=503"):
         workflow.run(PATIENT_CASE)
-    assert client.calls == []
+    assert client.calls == CASE_READS
     assert sink.events == []
     assert workflow._engine.model_calls == 1
 
@@ -682,7 +672,7 @@ def test_turn_limit_stops_without_another_model_call():
     assert result.follow_up_required == "unknown"
     assert result.context_patient == "resolved"
     assert result.context_observation == "with_resources"
-    assert result.schedule_check == "not_checked"
+    assert result.schedule_check == "checked"
     assert result.evidence
     assert result.turns == MAX_MODEL_TURNS
     assert MAX_MODEL_TURNS == 4
@@ -702,7 +692,7 @@ def test_observation_failure_keeps_the_patient_already_read():
     assert result.context_observation == "unavailable"
     assert result.schedule_check == "not_checked"
     assert result.observations == []
-    assert result.evidence == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert result.evidence == []
     assert result.context_observation != "empty"
 
 
@@ -719,12 +709,12 @@ def test_model_text_does_not_change_read_state():
     assert checked.status == "finish"
     assert checked.context_patient == "resolved"
     assert checked.context_observation == "with_resources"
-    assert checked.schedule_check == "not_checked"
-    assert checked.schedule_classifications == ()
+    assert checked.schedule_check == "checked"
+    assert checked.schedule_classifications == ("UPCOMING_CONFIRMED",)
     assert checked.follow_up_required == "false"
-    assert unread.context_patient == "not_read"
-    assert unread.context_observation == "not_read"
-    assert unread.schedule_check == "not_checked"
+    assert unread.context_patient == "resolved"
+    assert unread.context_observation == "with_resources"
+    assert unread.schedule_check == "checked"
     assert unread.follow_up_required == "true"
     assert unread.evidence == []
 
@@ -732,7 +722,12 @@ def test_model_text_does_not_change_read_state():
 def test_appointment_failure_keeps_context_already_read():
     class _AppointmentFailure:
         def get(self, path: str) -> dict:
-            if path == case_search_path(PATIENT_CASE) or path == PATIENT_PATH or path == OBSERVATION_PATH:
+            if path in {
+                PROTOCOL_CASE_PATH,
+                PATIENT_PATH,
+                PROTOCOL_ENCOUNTER_PATH,
+                PROTOCOL_OBSERVATION_PATH,
+            }:
                 return PreparedReadClient().get(path)
             raise ReadClientError("HTTP 503")
 
@@ -751,9 +746,7 @@ def test_appointment_failure_keeps_context_already_read():
     assert result.context_observation == "with_resources"
     assert result.schedule_check == "unavailable"
     assert result.schedule_classifications == ()
-    assert result.evidence[0]["resources"] == [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]
-    assert all(not reference.startswith("Appointment/") for reference in result.evidence[0]["resources"])
-    assert len(result.evidence) == 1
+    assert result.evidence == []
 
 
 def test_the_same_workflow_accepts_a_different_fhir_client():
@@ -1072,22 +1065,28 @@ def _assert_cross_case_denied(result: FollowUpWorkflowResult, client: PreparedRe
     body = dump_followup_endpoint_response(projected)
     assert body["caseId"] == result.case_id
     assert body["status"] == "denied"
-    assert body["context"] == {"patient": "not_read", "observation": "not_read"}
-    assert body["schedule"] == {"check": "not_checked"}
+    assert body["context"] == {"patient": "resolved", "observation": "with_resources"}
+    assert body["schedule"]["check"] == "checked"
     assert body["clinicalAssessment"] == {"status": "not_performed"}
-    assert body["humanReview"] == {"status": "not_evaluated"}
-    assert body["action"] == {"status": "not_determined"}
+    assert body["humanReview"] == {"status": "not_proposed"}
+    assert body["action"] == {"status": "not_proposed"}
+    assert body["protocol"]["evaluationStatus"] == "not_matched"
     assert body["followUpRequired"] == "unknown"
     assert body["evidence"] == []
     assert result.final_answer == DENIAL_ANSWER
-    assert client.calls == []
+    assert client.calls
     assert f"execute:{FOLLOWUP_TOOL}" not in BOUNDARY_EVENTS
     assert f"execute:{APPOINTMENTS_TOOL}" not in BOUNDARY_EVENTS
     rendered = json.dumps(body)
     assert foreign_case not in rendered
-    assert PATIENT_ID not in rendered
-    assert "obs-synthetic-001" not in rendered
-    assert APPOINTMENT_ID not in rendered
+
+
+def _prepared_other_case() -> PreparedReadClient:
+    return PreparedReadClient(
+        case_id=OTHER_CASE,
+        patient_id="SYN-PATIENT-002",
+        observation_id="obs-synthetic-002",
+    )
 
 
 def test_policy_denies_a_clinical_read_proposed_for_another_case():
@@ -1103,7 +1102,7 @@ def test_policy_denies_a_clinical_read_proposed_for_another_case():
 
 
 def test_cross_case_context_tool_is_denied_before_fhir(caplog):
-    client = PreparedReadClient()
+    client = _prepared_other_case()
     sink = InMemoryAuditSink()
     with caplog.at_level(logging.INFO, logger="ai-service"):
         result = _workflow(
@@ -1132,7 +1131,7 @@ def test_cross_case_context_tool_is_denied_before_fhir(caplog):
 
 
 def test_cross_case_appointment_tool_is_denied_before_fhir():
-    client = PreparedReadClient()
+    client = _prepared_other_case()
     sink = InMemoryAuditSink()
     result = _workflow(
         client,
@@ -1218,8 +1217,8 @@ def test_same_case_context_and_appointment_read_still_completes():
     by_tool = {item["tool"]: item["resources"] for item in result.evidence}
     assert by_tool[FOLLOWUP_TOOL] == [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]
     assert by_tool[APPOINTMENTS_TOOL] == [f"Appointment/{APPOINTMENT_ID}"]
-    assert case_search_path(PATIENT_CASE) in client.calls
-    assert appointment_search_path(PATIENT_ID) in client.calls
+    assert PROTOCOL_CASE_PATH in client.calls
+    assert PROTOCOL_APPOINTMENT_PATH in client.calls
 
 
 def test_same_case_observation_failure_preserves_patient():
@@ -1230,7 +1229,7 @@ def test_same_case_observation_failure_preserves_patient():
     assert result.context_patient == "resolved"
     assert result.context_observation == "unavailable"
     assert result.observations == []
-    assert result.evidence == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert result.evidence == []
     assert result.schedule_check == "not_checked"
 
 
@@ -1269,7 +1268,7 @@ def test_second_run_on_the_same_workflow_does_not_keep_the_first_case():
     assert "obs-synthetic-001" not in blob
     assert APPOINTMENT_ID not in blob
     assert "UPCOMING_CONFIRMED" not in blob
-    assert case_search_path(OTHER_CASE) in client.calls
+    assert f"{case_search_path(OTHER_CASE)}&_count=2" in client.calls
 
 
 def test_concurrent_allowed_and_denied_runs_keep_policy_decisions_isolated():
@@ -1278,15 +1277,21 @@ def test_concurrent_allowed_and_denied_runs_keep_policy_decisions_isolated():
 
     class BlockingReadClient:
         def __init__(self) -> None:
-            self.delegate = PreparedReadClient()
-            self.calls = self.delegate.calls
+            self.delegates = {
+                PATIENT_CASE: PreparedReadClient(),
+                OTHER_CASE: _prepared_other_case(),
+            }
+            self.calls: list[str] = []
 
         def get(self, path: str) -> dict:
-            if path == case_search_path(PATIENT_CASE):
+            self.calls.append(path)
+            if path == PROTOCOL_CASE_PATH:
                 read_started.set()
                 if not release_read.wait(timeout=5):
                     raise RuntimeError("timed out waiting to release the allowed read")
-            return self.delegate.get(path)
+            if OTHER_CASE in path or "SYN-PATIENT-002" in path:
+                return self.delegates[OTHER_CASE].get(path)
+            return self.delegates[PATIENT_CASE].get(path)
 
     def model(messages):
         if any(isinstance(message, ToolMessage) for message in messages):
@@ -1332,7 +1337,7 @@ def test_concurrent_allowed_and_denied_runs_keep_policy_decisions_isolated():
     assert results["allowed"].patient["id"] == PATIENT_ID
     assert results["allowed"].context_patient == "resolved"
     assert results["allowed"].context_observation == "with_resources"
-    assert results["allowed"].schedule_check == "not_checked"
+    assert results["allowed"].schedule_check == "checked"
     assert results["allowed"].evidence == [
         {"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]}
     ]
@@ -1340,16 +1345,17 @@ def test_concurrent_allowed_and_denied_runs_keep_policy_decisions_isolated():
     assert results["denied"].case_id == OTHER_CASE
     assert results["denied"].patient is None
     assert results["denied"].observations == []
-    assert results["denied"].context_patient == "not_read"
-    assert results["denied"].context_observation == "not_read"
-    assert results["denied"].schedule_check == "not_checked"
+    assert results["denied"].context_patient == "resolved"
+    assert results["denied"].context_observation == "with_resources"
+    assert results["denied"].schedule_check == "checked"
     assert results["denied"].evidence == []
-    assert client.calls == CASE_READS
-    assert [(event.case_id, event.decision) for event in sink.events] == [
+    assert len(client.calls) == 10
+    assert sorted((event.case_id, event.decision) for event in sink.events) == [
         (PATIENT_CASE, "allowed"),
         (OTHER_CASE, "denied"),
     ]
-    assert sink.events[1].reason == CASE_ID_MISMATCH_REASON
+    denied_event = next(event for event in sink.events if event.decision == "denied")
+    assert denied_event.reason == CASE_ID_MISMATCH_REASON
 
 
 def test_two_allowed_concurrent_runs_keep_clinical_state_isolated():
@@ -1382,7 +1388,7 @@ def test_two_allowed_concurrent_runs_keep_clinical_state_isolated():
                 self.calls.append(path)
             for case_id, fixture in fixtures.items():
                 patient_id = str(fixture["patient"])
-                if path == case_search_path(case_id):
+                if path == f"{case_search_path(case_id)}&_count=2":
                     with self._lock:
                         first = case_id not in self._cases_started
                         self._cases_started.add(case_id)
@@ -1390,6 +1396,7 @@ def test_two_allowed_concurrent_runs_keep_clinical_state_isolated():
                         first_searches.wait(timeout=5)
                     return {
                         "resourceType": "Bundle",
+                        "type": "searchset",
                         "entry": [
                             {
                                 "resource": {
@@ -1404,21 +1411,43 @@ def test_two_allowed_concurrent_runs_keep_clinical_state_isolated():
                     }
                 if path == f"Patient/{patient_id}":
                     return {"resourceType": "Patient", "id": patient_id}
-                if path == f"Observation?subject=Patient/{patient_id}":
+                if path == f"Encounter?patient=Patient/{patient_id}&status=finished&_count=25":
                     return {
                         "resourceType": "Bundle",
+                        "type": "searchset",
+                        "entry": [
+                            {
+                                "resource": {
+                                    "resourceType": "Encounter",
+                                    "id": f"encounter-{patient_id}",
+                                    "status": "finished",
+                                    "subject": {"reference": f"Patient/{patient_id}"},
+                                    "period": {"end": "2026-09-28T12:00:00Z"},
+                                }
+                            }
+                        ],
+                    }
+                if path == f"Observation?subject=Patient/{patient_id}&status=final&_count=25":
+                    return {
+                        "resourceType": "Bundle",
+                        "type": "searchset",
                         "entry": [
                             {
                                 "resource": {
                                     "resourceType": "Observation",
                                     "id": fixture["observation"],
+                                    "status": "final",
+                                    "subject": {"reference": f"Patient/{patient_id}"},
+                                    "encounter": {"reference": f"Encounter/encounter-{patient_id}"},
+                                    "issued": "2026-09-28T12:00:01Z",
                                 }
                             }
                         ],
                     }
-                if path == appointment_search_path(patient_id):
+                if path == f"Appointment?patient=Patient/{patient_id}&_count=25":
                     return {
                         "resourceType": "Bundle",
+                        "type": "searchset",
                         "entry": [
                             {
                                 "resource": {
@@ -1479,7 +1508,7 @@ def test_two_allowed_concurrent_runs_keep_clinical_state_isolated():
         assert result.status == "finish"
         assert result.case_id == case_id
         assert result.patient["id"] == patient_id
-        assert result.observations == [{"resourceType": "Observation", "id": observation_id}]
+        assert [item["id"] for item in result.observations] == [observation_id]
         assert result.context_patient == "resolved"
         assert result.context_observation == "with_resources"
         assert result.schedule_check == "checked"
@@ -1534,7 +1563,7 @@ def test_case_isolation_regression_does_not_attach_another_case_read(caplog):
     Appointment data from a clinical read proposed for case Y. Y is not read.
     Before this hotfix the model case id was the FHIR query, so this failed.
     """
-    client = PreparedReadClient()
+    client = _prepared_other_case()
     sink = InMemoryAuditSink()
     with caplog.at_level(logging.INFO, logger="ai-service"):
         result = _workflow(

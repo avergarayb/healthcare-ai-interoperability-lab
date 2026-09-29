@@ -10,7 +10,6 @@ with system https://lab.local/followup-case. It is not Patient.id.
 from __future__ import annotations
 
 import contextvars
-import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -24,12 +23,22 @@ from app.langgraph_fhir_client import (
     CASE_IDENTIFIER_SYSTEM,
     FOLLOWUP_TOOL,
     FHIRTransport,
+    FHIR_SEARCH_PAGE_SIZE,
+    BoundedSearchResult,
+    BoundedSearchStatus,
     ReadClientError,
+    bundle_list_field,
+)
+from app.post_consultation_review import (
+    AppointmentFact,
+    CollectionState,
+    PostConsultationSnapshot,
+    parse_fhir_reference,
+    validated_fhir_id,
 )
 
 
 UNAVAILABLE_ANSWER = "stopped: clinical context unavailable"
-_PATIENT_ID_TOKEN = re.compile(r"[A-Za-z0-9\-]+")
 UPCOMING_CONFIRMED = "UPCOMING_CONFIRMED"
 UPCOMING_UNCONFIRMED = "UPCOMING_UNCONFIRMED"
 CANCELLED = "CANCELLED"
@@ -69,9 +78,11 @@ def _observations_from_bundle(payload: dict) -> list[dict]:
     """Read Observation entries. A valid bundle with no entries is an empty result."""
     if payload.get("resourceType") != "Bundle":
         raise ReadClientError("observation response must be a bundle")
-    entries = payload.get("entry") or []
-    if not isinstance(entries, list):
-        raise ReadClientError("observation bundle entries must be a list")
+    entries = bundle_list_field(
+        payload,
+        "entry",
+        "observation bundle entries must be a list",
+    )
     observations: list[dict] = []
     for entry in entries:
         if not isinstance(entry, dict):
@@ -89,6 +100,10 @@ def case_search_path(case_id: str) -> str:
     return f"Patient?identifier={token}"
 
 
+def case_resolution_search_path(case_id: str) -> str:
+    return f"{case_search_path(case_id)}&_count=2"
+
+
 def _case_identifier_matches(patient: dict, case_id: str) -> bool:
     identifiers = patient.get("identifier")
     if not isinstance(identifiers, list):
@@ -104,9 +119,7 @@ def _case_identifier_matches(patient: dict, case_id: str) -> bool:
 def _patient_id_from_case_search(payload: dict, case_id: str) -> str:
     if payload.get("resourceType") != "Bundle":
         raise ReadClientError("case search must be a bundle")
-    entries = payload.get("entry") or []
-    if not isinstance(entries, list):
-        raise ReadClientError("case search entries must be a list")
+    entries = bundle_list_field(payload, "entry", "case search entries must be a list")
     matches: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict):
@@ -116,9 +129,9 @@ def _patient_id_from_case_search(payload: dict, case_id: str) -> str:
             continue
         if not _case_identifier_matches(resource, case_id):
             continue
-        patient_id = resource.get("id")
-        if not isinstance(patient_id, str) or not patient_id:
-            raise ReadClientError("matched patient has no id")
+        patient_id = validated_fhir_id(resource.get("id"))
+        if patient_id is None:
+            raise ReadClientError("matched patient has invalid id")
         matches.append(patient_id)
     if not matches:
         raise ReadClientError("case has no patient")
@@ -138,6 +151,30 @@ class FollowUpReadLedger:
         self.schedule_check = "not_checked"
         self.classifications: tuple[str, ...] = ()
         self.appointments: tuple[tuple[str, str], ...] = ()
+        self.patient_id: str | None = None
+        self.patient_collection = CollectionState.NOT_READ
+        self.encounter_collection = CollectionState.NOT_READ
+        self.observation_collection = CollectionState.NOT_READ
+        self.appointment_collection = CollectionState.NOT_READ
+        self.encounters: list[dict] = []
+        self.protocol_appointments: tuple[AppointmentFact, ...] = ()
+        self.appointment_views: list[dict] = []
+        self.acquisition_reason_codes: tuple[str, ...] = ()
+        self.followup_tool_executed = False
+        self.appointments_tool_executed = False
+
+    def protocol_snapshot(self) -> PostConsultationSnapshot:
+        return PostConsultationSnapshot(
+            patient_id=self.patient_id,
+            patient_state=self.patient_collection,
+            encounter_state=self.encounter_collection,
+            observation_state=self.observation_collection,
+            appointment_state=self.appointment_collection,
+            encounters=tuple(dict(item) for item in self.encounters),
+            observations=tuple(dict(item) for item in (self.observations or [])),
+            appointments=self.protocol_appointments,
+            acquisition_reason_codes=self.acquisition_reason_codes,
+        )
 
 
 class _ReadScope:
@@ -173,6 +210,10 @@ class FollowUpFHIRAdapter:
         if scope is None:
             raise RuntimeError("follow-up read is not bound to a run")
         return scope
+
+    def is_bound_to(self, case_id: str) -> bool:
+        scope = _READ_SCOPE.get()
+        return scope is not None and scope.case_id == case_id
 
     def record_policy_decision(self, status: str, reason: str) -> None:
         """Keep one routing verdict in the same scope as this run's reads."""
@@ -210,10 +251,13 @@ class FollowUpFHIRAdapter:
     def record_patient_resolved(self, patient: dict) -> None:
         self.ledger.patient = "resolved"
         self.ledger.patient_resource = dict(patient)
+        self.ledger.patient_id = str(patient["id"])
+        self.ledger.patient_collection = CollectionState.COMPLETE
 
     def record_observation_failure(self) -> None:
         if self.ledger.observation == "not_read":
             self.ledger.observation = "unavailable"
+        self.ledger.observation_collection = CollectionState.UNAVAILABLE
 
     def record_observations(self, observations: list[dict]) -> None:
         self.ledger.observation = "with_resources" if observations else "empty"
@@ -222,6 +266,7 @@ class FollowUpFHIRAdapter:
     def record_schedule_failure(self) -> None:
         if self.ledger.schedule_check != "checked":
             self.ledger.schedule_check = "unavailable"
+        self.ledger.appointment_collection = CollectionState.UNAVAILABLE
 
     def record_schedule(self, facts: dict[str, object]) -> None:
         classifications = facts.get("classifications")
@@ -233,6 +278,7 @@ class FollowUpFHIRAdapter:
         self.ledger.classifications = tuple(str(item) for item in classifications)
         if classifications == [NONE]:
             self.ledger.appointments = ()
+            self.ledger.protocol_appointments = ()
             return
         rows: list[tuple[str, str]] = []
         for item in appointments:
@@ -243,6 +289,10 @@ class FollowUpFHIRAdapter:
             if isinstance(appointment_id, str) and appointment_id and isinstance(classification, str):
                 rows.append((f"Appointment/{appointment_id}", classification))
         self.ledger.appointments = tuple(rows)
+        self.ledger.protocol_appointments = tuple(
+            AppointmentFact(reference=reference, classification=classification)
+            for reference, classification in rows
+        )
 
     def preserved_reads(self) -> dict[str, object]:
         """Resources already read. A later failure does not erase them or invent the rest."""
@@ -250,13 +300,20 @@ class FollowUpFHIRAdapter:
         observations: list[dict] = []
         evidence: list[dict[str, object]] = []
         tools: list[str] = []
-        if self.ledger.patient == "resolved" and isinstance(self.ledger.patient_resource, dict):
+        if (
+            self.ledger.patient == "resolved"
+            and isinstance(self.ledger.patient_resource, dict)
+        ):
             patient = dict(self.ledger.patient_resource)
-            if self.ledger.observation in {"with_resources", "empty"} and self.ledger.observations is not None:
+            if (
+                self.ledger.observation in {"with_resources", "empty"}
+                and self.ledger.observations is not None
+            ):
                 observations = [dict(item) for item in self.ledger.observations]
+        if self.ledger.followup_tool_executed and patient is not None:
             evidence.append({"tool": FOLLOWUP_TOOL, "resources": _resource_refs(patient, observations)})
             tools.append(FOLLOWUP_TOOL)
-        if self.ledger.schedule_check == "checked":
+        if self.ledger.appointments_tool_executed and self.ledger.schedule_check == "checked":
             refs = [appointment_id for appointment_id, _classification in self.ledger.appointments]
             if refs:
                 evidence.append({"tool": APPOINTMENTS_TOOL, "resources": refs})
@@ -274,15 +331,50 @@ class FollowUpFHIRAdapter:
         if scope is None or not isinstance(case_id, str) or case_id != scope.case_id:
             raise ReadClientError("case id is not authorized for this run")
         authorized = scope.case_id
+        if self.ledger.patient_collection in {
+            CollectionState.PARTIAL,
+            CollectionState.UNAVAILABLE,
+        }:
+            raise ReadClientError("authorized patient resolution is not complete")
         _mark("adapter:patient_for_case")
         self.calls.append(("patient_for_case", authorized))
         payload = self.transport.get(case_search_path(authorized))
         return _patient_id_from_case_search(payload, authorized)
 
+    def resolve_patient_for_protocol(self, case_id: str) -> str:
+        scope = self._scope()
+        if not isinstance(case_id, str) or case_id != scope.case_id:
+            raise ReadClientError("case id is not authorized for this run")
+        _mark("adapter:protocol_patient_for_case")
+        self.calls.append(("protocol_patient_for_case", case_id))
+        result = self.transport.search(case_resolution_search_path(case_id), "Patient")
+        if result.status is BoundedSearchStatus.INCOMPLETE_LIMIT:
+            self.ledger.patient_collection = CollectionState.PARTIAL
+            self.ledger.acquisition_reason_codes = ("patient_resolution_incomplete",)
+            raise _IncompleteProtocolRead("patient resolution did not prove uniqueness")
+        if result.status is BoundedSearchStatus.FAILED:
+            self.ledger.patient_collection = CollectionState.UNAVAILABLE
+            self.ledger.acquisition_reason_codes = ("patient_resolution_unavailable",)
+            error = ReadClientError(result.reason or "patient resolution unavailable")
+            self.record_patient_search_failure(error)
+            raise error
+        payload = {
+            "resourceType": "Bundle",
+            "type": "searchset",
+            "entry": [{"resource": dict(item)} for item in result.resources],
+        }
+        try:
+            return _patient_id_from_case_search(payload, case_id)
+        except ReadClientError as exc:
+            self.ledger.patient_collection = CollectionState.UNAVAILABLE
+            self.ledger.acquisition_reason_codes = ("patient_resolution_invalid",)
+            self.record_patient_search_failure(exc)
+            raise
+
     def get_patient(self, patient_id: str) -> dict[str, str]:
         _mark("adapter:get_patient")
         self.calls.append(("get_patient", patient_id))
-        payload = self.transport.get(f"Patient/{patient_id}")
+        payload = self.transport.get(patient_resource_path(patient_id))
         if payload.get("resourceType") != "Patient" or payload.get("id") != patient_id:
             raise ReadClientError("patient response did not match")
         patient = {"resourceType": "Patient", "id": str(payload["id"])}
@@ -301,7 +393,125 @@ class FollowUpFHIRAdapter:
                 raise ReadClientError("observation has no id")
         return observations
 
-    def get_patient_appointments(self, patient_id: str, now: datetime | None = None) -> dict[str, object]:
+    def search_encounters_for_protocol(self, patient_id: str) -> None:
+        try:
+            path = encounter_search_path(patient_id)
+            _mark("adapter:protocol_encounters")
+            self.calls.append(("protocol_encounters", patient_id))
+            result = self.transport.search(path, "Encounter")
+        except ReadClientError:
+            self.ledger.encounter_collection = CollectionState.UNAVAILABLE
+            self.ledger.acquisition_reason_codes = ("encounter_acquisition_unavailable",)
+            raise
+        accepted: list[dict] = []
+        try:
+            for resource in result.resources:
+                _validate_encounter(resource, patient_id)
+                accepted.append(dict(resource))
+        except ReadClientError:
+            self.ledger.encounters = accepted
+            self.ledger.encounter_collection = CollectionState.UNAVAILABLE
+            self.ledger.acquisition_reason_codes = ("encounter_integrity_failure",)
+            raise
+        self.ledger.encounters = accepted
+        self._finish_collection("encounter", result)
+
+    def search_observations_for_protocol(self, patient_id: str) -> None:
+        try:
+            path = protocol_observation_search_path(patient_id)
+            _mark("adapter:protocol_observations")
+            self.calls.append(("protocol_observations", patient_id))
+            result = self.transport.search(path, "Observation")
+        except ReadClientError:
+            self.ledger.observation_collection = CollectionState.UNAVAILABLE
+            self.ledger.observation = "unavailable"
+            self.ledger.acquisition_reason_codes = ("observation_acquisition_unavailable",)
+            raise
+        accepted: list[dict] = []
+        try:
+            for resource in result.resources:
+                _validate_observation(resource, patient_id)
+                accepted.append(dict(resource))
+        except ReadClientError:
+            self.ledger.observations = accepted
+            self.ledger.observation = "with_resources" if accepted else "unavailable"
+            self.ledger.observation_collection = CollectionState.UNAVAILABLE
+            self.ledger.acquisition_reason_codes = ("observation_integrity_failure",)
+            raise
+        self.ledger.observations = accepted
+        self.ledger.observation = "with_resources" if accepted else "empty"
+        self._finish_collection("observation", result)
+
+    def search_appointments_for_protocol(self, patient_id: str) -> None:
+        try:
+            path = protocol_appointment_search_path(patient_id)
+            _mark("adapter:protocol_appointments")
+            self.calls.append(("protocol_appointments", patient_id))
+            result = self.transport.search(path, "Appointment")
+        except ReadClientError:
+            self.ledger.appointment_collection = CollectionState.UNAVAILABLE
+            self.ledger.schedule_check = "unavailable"
+            self.ledger.acquisition_reason_codes = ("appointment_acquisition_unavailable",)
+            raise
+        accepted: list[dict] = []
+        evaluation_time = self._now()
+        try:
+            for resource in result.resources:
+                view = _appointment_view(resource, patient_id, evaluation_time)
+                if view is None:
+                    raise ReadClientError("appointment does not belong to authorized patient")
+                accepted.append(view)
+        except ReadClientError:
+            self._record_protocol_appointment_views(accepted)
+            self.ledger.appointment_collection = CollectionState.UNAVAILABLE
+            self.ledger.schedule_check = "unavailable"
+            self.ledger.acquisition_reason_codes = ("appointment_integrity_failure",)
+            raise
+        self._record_protocol_appointment_views(accepted)
+        self._finish_collection("appointment", result)
+
+    def _record_protocol_appointment_views(self, appointments: list[dict]) -> None:
+        self.ledger.appointment_views = [dict(item) for item in appointments]
+        rows = tuple(
+            (f"Appointment/{item['id']}", str(item["classification"])) for item in appointments
+        )
+        self.ledger.appointments = rows
+        self.ledger.protocol_appointments = tuple(
+            AppointmentFact(reference=reference, classification=classification)
+            for reference, classification in rows
+        )
+
+    def _finish_collection(self, name: str, result: BoundedSearchResult) -> None:
+        state_attr = f"{name}_collection"
+        if result.status is BoundedSearchStatus.FAILED:
+            setattr(self.ledger, state_attr, CollectionState.UNAVAILABLE)
+            self.ledger.acquisition_reason_codes = (f"{name}_acquisition_unavailable",)
+            if name == "observation" and self.ledger.observation != "with_resources":
+                self.ledger.observation = "unavailable"
+            if name == "appointment":
+                self.ledger.schedule_check = "unavailable"
+            raise ReadClientError(result.reason or f"{name} acquisition unavailable")
+        if result.status is BoundedSearchStatus.INCOMPLETE_LIMIT:
+            setattr(self.ledger, state_attr, CollectionState.PARTIAL)
+            self.ledger.acquisition_reason_codes += (f"{name}_search_incomplete",)
+            return
+        setattr(self.ledger, state_attr, CollectionState.COMPLETE)
+        if name == "appointment":
+            self.ledger.schedule_check = "checked"
+            self.ledger.classifications = tuple(
+                schedule_classifications(
+                    [
+                        {"classification": fact.classification}
+                        for fact in self.ledger.protocol_appointments
+                    ]
+                )
+            )
+
+    def get_patient_appointments(
+        self,
+        patient_id: str,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
         """Read this patient's appointments and label each operational fact. An empty search is NONE."""
         _mark("adapter:get_patient_appointments")
         self.calls.append(("get_patient_appointments", patient_id))
@@ -309,18 +519,111 @@ class FollowUpFHIRAdapter:
         return appointment_facts(payload, patient_id, now or self._now())
 
 
+class _IncompleteProtocolRead(Exception):
+    pass
+
+
+class PostConsultationContextReader:
+    """Mandatory application-owned acquisition for the deterministic protocol."""
+
+    def __init__(self, adapter: FollowUpFHIRAdapter) -> None:
+        self.adapter = adapter
+
+    def read(self, case_id: str) -> PostConsultationSnapshot:
+        try:
+            patient_id = self.adapter.resolve_patient_for_protocol(case_id)
+        except _IncompleteProtocolRead:
+            return self.adapter.ledger.protocol_snapshot()
+        except ReadClientError:
+            if self.adapter.ledger.patient_collection is CollectionState.NOT_READ:
+                self.adapter.ledger.patient_collection = CollectionState.UNAVAILABLE
+                self.adapter.ledger.acquisition_reason_codes = ("patient_resolution_unavailable",)
+                self.adapter.record_patient_read_failure()
+            raise
+        try:
+            patient = self.adapter.get_patient(patient_id)
+        except ReadClientError:
+            self.adapter.ledger.patient_collection = CollectionState.UNAVAILABLE
+            self.adapter.ledger.acquisition_reason_codes = ("patient_read_unavailable",)
+            self.adapter.record_patient_read_failure()
+            raise
+        self.adapter.record_patient_resolved(patient)
+        self.adapter.search_encounters_for_protocol(patient_id)
+        self.adapter.search_observations_for_protocol(patient_id)
+        self.adapter.search_appointments_for_protocol(patient_id)
+        return self.adapter.ledger.protocol_snapshot()
+
+
 def appointment_search_path(patient_id: str) -> str:
     """Search Appointment by patient. The patient id is resolved by the application, not by the model."""
-    if not isinstance(patient_id, str) or _PATIENT_ID_TOKEN.fullmatch(patient_id) is None:
+    return f"Appointment?patient=Patient/{_require_fhir_id(patient_id)}"
+
+
+def patient_resource_path(patient_id: str) -> str:
+    return f"Patient/{_require_fhir_id(patient_id)}"
+
+
+def encounter_search_path(patient_id: str) -> str:
+    patient_id = _require_fhir_id(patient_id)
+    return (
+        f"Encounter?patient=Patient/{patient_id}&status=finished"
+        f"&_count={FHIR_SEARCH_PAGE_SIZE}"
+    )
+
+
+def protocol_observation_search_path(patient_id: str) -> str:
+    patient_id = _require_fhir_id(patient_id)
+    return (
+        f"Observation?subject=Patient/{patient_id}&status=final"
+        f"&_count={FHIR_SEARCH_PAGE_SIZE}"
+    )
+
+
+def protocol_appointment_search_path(patient_id: str) -> str:
+    patient_id = _require_fhir_id(patient_id)
+    return f"Appointment?patient=Patient/{patient_id}&_count={FHIR_SEARCH_PAGE_SIZE}"
+
+
+def _require_fhir_id(patient_id: object) -> str:
+    validated = validated_fhir_id(patient_id)
+    if validated is None:
         raise ReadClientError("patient id is not usable")
-    return f"Appointment?patient=Patient/{patient_id}"
+    return validated
 
 
 def _actor_is_patient(reference: object, patient_id: str) -> bool:
-    if not isinstance(reference, str) or not reference:
-        return False
-    expected = f"Patient/{patient_id}"
-    return reference == expected or reference.endswith(f"/{expected}")
+    return parse_fhir_reference(reference, "Patient") == patient_id
+
+
+def _validate_encounter(resource: dict, patient_id: str) -> None:
+    if resource.get("resourceType") != "Encounter":
+        raise ReadClientError("encounter resource type did not match")
+    if validated_fhir_id(resource.get("id")) is None:
+        raise ReadClientError("encounter has no id")
+    if resource.get("status") != "finished":
+        raise ReadClientError("encounter status did not match narrowed search")
+    subject = resource.get("subject")
+    reference = subject.get("reference") if isinstance(subject, dict) else None
+    if not _actor_is_patient(reference, patient_id):
+        raise ReadClientError("encounter does not belong to authorized patient")
+
+
+def _validate_observation(resource: dict, patient_id: str) -> None:
+    if resource.get("resourceType") != "Observation":
+        raise ReadClientError("observation resource type did not match")
+    if validated_fhir_id(resource.get("id")) is None:
+        raise ReadClientError("observation has no id")
+    if resource.get("status") != "final":
+        raise ReadClientError("observation status did not match narrowed search")
+    subject = resource.get("subject")
+    reference = subject.get("reference") if isinstance(subject, dict) else None
+    if not _actor_is_patient(reference, patient_id):
+        raise ReadClientError("observation does not belong to authorized patient")
+    encounter = resource.get("encounter")
+    if encounter is not None:
+        encounter_reference = encounter.get("reference") if isinstance(encounter, dict) else None
+        if parse_fhir_reference(encounter_reference, "Encounter") is None:
+            raise ReadClientError("observation encounter reference is malformed")
 
 
 def _parsed_start(raw: object) -> datetime | None:
@@ -373,8 +676,8 @@ def _appointment_view(resource: dict, patient_id: str, now: datetime) -> dict | 
             break
     if not matched:
         return None
-    appointment_id = resource.get("id")
-    if not isinstance(appointment_id, str) or not appointment_id:
+    appointment_id = validated_fhir_id(resource.get("id"))
+    if appointment_id is None:
         raise ReadClientError("appointment has no id")
     view = {
         "resourceType": "Appointment",
@@ -393,9 +696,7 @@ def appointment_facts(payload: dict, patient_id: str, now: datetime) -> dict[str
     """Classify appointments returned for one patient. The query is chosen by the caller."""
     if payload.get("resourceType") != "Bundle":
         raise ReadClientError("appointment response must be a bundle")
-    entries = payload.get("entry") or []
-    if not isinstance(entries, list):
-        raise ReadClientError("appointment bundle entries must be a list")
+    entries = bundle_list_field(payload, "entry", "appointment bundle entries must be a list")
     appointments: list[dict] = []
     for entry in entries:
         if not isinstance(entry, dict):
@@ -420,6 +721,21 @@ def make_followup_tool(adapter: FollowUpFHIRAdapter):
     def get_patient_followup_context(case_id: str) -> dict[str, object]:
         """Read one case through the adapter."""
         _mark(f"execute:{FOLLOWUP_TOOL}")
+        if not adapter.is_bound_to(case_id):
+            raise ReadClientError("case id is not authorized for this run")
+        if adapter.ledger.observation_collection is CollectionState.PARTIAL:
+            raise ReadClientError("observation collection is incomplete")
+        if (
+            adapter.ledger.patient == "resolved"
+            and isinstance(adapter.ledger.patient_resource, dict)
+            and adapter.ledger.observation_collection is CollectionState.COMPLETE
+            and adapter.ledger.observations is not None
+        ):
+            adapter.ledger.followup_tool_executed = True
+            return {
+                "patient": dict(adapter.ledger.patient_resource),
+                "observations": [dict(item) for item in adapter.ledger.observations],
+            }
         try:
             patient_id = adapter.patient_id_for_case(case_id)
         except ReadClientError as exc:
@@ -437,6 +753,7 @@ def make_followup_tool(adapter: FollowUpFHIRAdapter):
             adapter.record_observation_failure()
             raise
         adapter.record_observations(observations)
+        adapter.ledger.followup_tool_executed = True
         return {"patient": patient, "observations": observations}
 
     return get_patient_followup_context
@@ -449,6 +766,17 @@ def make_appointments_tool(adapter: FollowUpFHIRAdapter):
     def get_patient_appointments(case_id: str) -> dict[str, object]:
         """Read appointment facts for the patient linked to one follow-up case."""
         _mark(f"execute:{APPOINTMENTS_TOOL}")
+        if not adapter.is_bound_to(case_id):
+            raise ReadClientError("case id is not authorized for this run")
+        if adapter.ledger.appointment_collection is CollectionState.PARTIAL:
+            raise ReadClientError("appointment collection is incomplete")
+        if adapter.ledger.appointment_collection is CollectionState.COMPLETE:
+            adapter.ledger.appointments_tool_executed = True
+            return {
+                "patientId": adapter.ledger.patient_id,
+                "classifications": list(adapter.ledger.classifications),
+                "appointments": [dict(item) for item in adapter.ledger.appointment_views],
+            }
         try:
             patient_id = adapter.patient_id_for_case(case_id)
             facts = adapter.get_patient_appointments(patient_id)
@@ -456,6 +784,7 @@ def make_appointments_tool(adapter: FollowUpFHIRAdapter):
             adapter.record_schedule_failure()
             raise
         adapter.record_schedule(facts)
+        adapter.ledger.appointments_tool_executed = True
         return facts
 
     return get_patient_appointments

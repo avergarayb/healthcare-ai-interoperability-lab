@@ -79,11 +79,14 @@ class EvaluationCase:
     expected_close_count: int
     fhir: FhirMode = "linked"
     max_model_turns: int = field(default_factory=lambda: MAX_MODEL_TURNS)
-    expected_classifications: tuple[str, ...] | None = None
+    expected_classifications: tuple[str, ...] | None = (UPCOMING_CONFIRMED,)
     appointment_records: tuple[dict[str, object], ...] | None = None
     expected_patient: str = "resolved"
     expected_observation: str = "with_resources"
-    expected_schedule: str = "not_checked"
+    expected_schedule: str = "checked"
+    expected_protocol: str = "not_matched"
+    expected_human_review: str = "not_proposed"
+    expected_action_status: str = "not_proposed"
 
 
 def _context(case_id: str = PATIENT_CASE) -> ToolReply:
@@ -111,6 +114,7 @@ def _schedule_case(
     follow_up_required: str,
 ) -> EvaluationCase:
     """One agenda fact. The scripted token is transport, not a consequence of the classification."""
+    blocked = UPCOMING_CONFIRMED in classification
     return EvaluationCase(
         id=case_name,
         case_id=PATIENT_CASE,
@@ -126,6 +130,9 @@ def _schedule_case(
         expected_classifications=classification,
         appointment_records=appointments,
         expected_schedule="checked",
+        expected_protocol="not_matched" if blocked else "matched",
+        expected_human_review="not_proposed" if blocked else "required",
+        expected_action_status="not_proposed" if blocked else "proposed",
     )
 
 
@@ -177,6 +184,9 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             fhir="no_appointments",
             expected_classifications=(NONE,),
             expected_schedule="checked",
+            expected_protocol="matched",
+            expected_human_review="required",
+            expected_action_status="proposed",
         ),
         EvaluationCase(
             id="unknown-tool",
@@ -190,8 +200,6 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_follow_up_required="unknown",
             expected_structured=False,
             expected_close_count=0,
-            expected_patient="not_read",
-            expected_observation="not_read",
         ),
         EvaluationCase(
             id="write-effect-denied",
@@ -205,8 +213,6 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_follow_up_required="unknown",
             expected_structured=False,
             expected_close_count=0,
-            expected_patient="not_read",
-            expected_observation="not_read",
         ),
         EvaluationCase(
             id="unavailable-patient",
@@ -214,7 +220,7 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             replies=(_context(MISSING_CASE),),
             expected_tools=(),
             expected_status="unavailable",
-            expected_policy=context_allowed,
+            expected_policy=(),
             expected_evidence=(),
             allowed_evidence=(),
             expected_follow_up_required="unknown",
@@ -223,6 +229,11 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             fhir="missing_patient",
             expected_patient="not_resolved",
             expected_observation="not_read",
+            expected_schedule="not_checked",
+            expected_classifications=None,
+            expected_protocol="unavailable",
+            expected_human_review="not_determined",
+            expected_action_status="not_determined",
         ),
         EvaluationCase(
             id="model-turn-limit",
@@ -284,8 +295,6 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_follow_up_required="false",
             expected_structured=True,
             expected_close_count=0,
-            expected_patient="not_read",
-            expected_observation="not_read",
         ),
         _schedule_case(
             "schedule-none",
@@ -343,21 +352,30 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_close_count=0,
             fhir="no_observations",
             expected_observation="empty",
+            expected_classifications=(NONE,),
+            expected_protocol="insufficient",
+            expected_human_review="not_determined",
+            expected_action_status="not_determined",
         ),
         EvaluationCase(
             id="observation-read-unavailable",
             case_id=PATIENT_CASE,
             replies=(_context(),),
-            expected_tools=(FOLLOWUP_TOOL,),
+            expected_tools=(),
             expected_status="unavailable",
-            expected_policy=((FOLLOWUP_TOOL, "allowed"),),
-            expected_evidence=((FOLLOWUP_TOOL, f"Patient/{PATIENT_ID}"),),
-            allowed_evidence=((FOLLOWUP_TOOL, f"Patient/{PATIENT_ID}"),),
+            expected_policy=(),
+            expected_evidence=(),
+            allowed_evidence=(),
             expected_follow_up_required="unknown",
             expected_structured=False,
             expected_close_count=0,
             fhir="observation_unavailable",
             expected_observation="unavailable",
+            expected_schedule="not_checked",
+            expected_classifications=None,
+            expected_protocol="unavailable",
+            expected_human_review="not_determined",
+            expected_action_status="not_determined",
         ),
         _schedule_case(
             "schedule-past",

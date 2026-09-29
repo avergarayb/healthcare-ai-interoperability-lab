@@ -81,6 +81,12 @@ def test_endpoint_response_serializes_the_current_contract():
         "clinicalAssessment": {"status": "not_performed"},
         "humanReview": {"status": "not_evaluated"},
         "action": {"status": "not_determined"},
+        "protocol": {
+            "id": "POST_CONSULTATION_RESULT_REVIEW_V1",
+            "evaluationStatus": "not_evaluated",
+            "reasonCodes": ["required_collection_not_read"],
+            "matchedResources": [],
+        },
         "followUpRequired": "unknown",
         "answer": "Synthetic answer.",
         "evidence": [{"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"}],
@@ -127,14 +133,23 @@ def test_decision_fields_reject_values_the_product_does_not_emit():
     with pytest.raises(ValidationError):
         HumanReview(status="not_required")
     with pytest.raises(ValidationError):
-        HumanReview(status="required")
+        HumanReview(status="optional")
     with pytest.raises(ValidationError):
         ActionState(status="no_action")
     with pytest.raises(ValidationError):
         ActionState(status="schedule")
     assert {item.value for item in ClinicalAssessmentStatus} == {"not_performed"}
-    assert {item.value for item in HumanReviewStatus} == {"not_evaluated"}
-    assert {item.value for item in ActionStatus} == {"not_determined"}
+    assert {item.value for item in HumanReviewStatus} == {
+        "not_evaluated",
+        "required",
+        "not_proposed",
+        "not_determined",
+    }
+    assert {item.value for item in ActionStatus} == {
+        "not_determined",
+        "proposed",
+        "not_proposed",
+    }
     body = dump_followup_endpoint_response(_response())
     assert "classifications" not in body["schedule"]
     assert "appointments" not in body["schedule"]

@@ -29,6 +29,7 @@ DECISION_BODY_KEYS = {
     "clinicalAssessment",
     "humanReview",
     "action",
+    "protocol",
     "followUpRequired",
     "answer",
     "evidence",
@@ -240,6 +241,7 @@ def test_completed_case_projects_the_workflow_result(monkeypatch):
     assert body["clinicalAssessment"] == {"status": "not_performed"}
     assert body["humanReview"] == {"status": "not_evaluated"}
     assert body["action"] == {"status": "not_determined"}
+    assert body["protocol"]["evaluationStatus"] == "not_evaluated"
     assert body["evidence"] == [
         {"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"},
         {"tool": "get_patient_followup_context", "id": "Observation/obs-synthetic-001"},
@@ -278,6 +280,7 @@ def test_denied_result_stays_denied(monkeypatch):
     assert body["context"] == {"patient": "not_read", "observation": "not_read"}
     assert body["schedule"] == {"check": "not_checked"}
     assert body["clinicalAssessment"] == {"status": "not_performed"}
+    assert body["humanReview"] == {"status": "not_evaluated"}
     assert body["evidence"] == []
 
 
@@ -475,9 +478,10 @@ def test_http_projects_a_structured_follow_up_required(monkeypatch, token, answe
     assert body["followUpRequired"] == token
     assert body["answer"] == answer
     assert body["context"] == {"patient": "resolved", "observation": "with_resources"}
-    assert body["schedule"] == {"check": "not_checked"}
+    assert body["schedule"]["check"] == "checked"
     assert body["clinicalAssessment"] == {"status": "not_performed"}
-    assert body["action"] == {"status": "not_determined"}
+    assert body["action"] == {"status": "not_proposed"}
+    assert body["protocol"]["evaluationStatus"] == "not_matched"
     assert "thought_signature" not in response.text
 
 
@@ -534,7 +538,9 @@ def test_http_evidence_lists_resources_from_each_read_tool(monkeypatch):
     assert response.status_code == 200
     assert body["followUpRequired"] == "false"
     assert body["clinicalAssessment"] == {"status": "not_performed"}
-    assert body["action"] == {"status": "not_determined"}
+    assert body["humanReview"] == {"status": "not_proposed"}
+    assert body["action"] == {"status": "not_proposed"}
+    assert body["protocol"]["evaluationStatus"] == "not_matched"
     assert body["context"] == {"patient": "resolved", "observation": "with_resources"}
     assert body["schedule"]["check"] == "checked"
     assert body["schedule"]["classifications"] == ["UPCOMING_CONFIRMED"]

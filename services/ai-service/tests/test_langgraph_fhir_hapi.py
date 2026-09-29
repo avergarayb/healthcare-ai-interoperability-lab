@@ -7,12 +7,14 @@ read chain without a second graph.
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 
 import httpx
 import pytest
 
 from app.langgraph_fhir_client import (
+    BoundedSearchStatus,
     CASE_IDENTIFIER_SYSTEM,
     PATIENT_CASE,
     PATIENT_ID,
@@ -47,6 +49,8 @@ SEEDED_BUNDLE = {
     "type": "searchset",
     "entry": [{"resource": SEEDED_OBSERVATION}],
 }
+PAGINATION_PATIENT_ID = "SYN-PATIENT-PAGINATION-001"
+PAGINATION_OBSERVATION_IDS = tuple(f"obs-pagination-{index:03d}" for index in range(1, 6))
 
 
 def _hapi_enabled() -> bool:
@@ -192,6 +196,52 @@ def test_local_server_returns_the_seeded_patient_and_observation():
     assert stored_patient["name"][0]["text"] == "Synthetic Patient"
     assert stored_observation["id"] == SEEDED_OBSERVATION["id"]
     assert stored_observation["valueString"] == SEEDED_OBSERVATION["valueString"]
+
+
+@pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")
+def test_local_server_real_hapi_continuation_completes_multiple_pages(caplog):
+    base = hapi_base_url()
+    _store(
+        base,
+        f"Patient/{PAGINATION_PATIENT_ID}",
+        {
+            "resourceType": "Patient",
+            "id": PAGINATION_PATIENT_ID,
+            "active": True,
+        },
+    )
+    for observation_id in PAGINATION_OBSERVATION_IDS:
+        _store(
+            base,
+            f"Observation/{observation_id}",
+            {
+                "resourceType": "Observation",
+                "id": observation_id,
+                "status": "final",
+                "code": {"text": "Synthetic pagination observation"},
+                "subject": {"reference": f"Patient/{PAGINATION_PATIENT_ID}"},
+                "issued": "2026-09-29T12:00:00Z",
+            },
+        )
+
+    client = HapiReadClient(base)
+    caplog.set_level(logging.INFO, logger="ai-service")
+    result = client.search(
+        f"Observation?subject=Patient/{PAGINATION_PATIENT_ID}&status=final&_count=2",
+        "Observation",
+    )
+
+    assert result.status is BoundedSearchStatus.COMPLETE
+    assert {resource["id"] for resource in result.resources} == set(PAGINATION_OBSERVATION_IDS)
+    assert all(
+        resource.get("subject", {}).get("reference") == f"Patient/{PAGINATION_PATIENT_ID}"
+        for resource in result.resources
+    )
+    assert len(result.resources) == len(PAGINATION_OBSERVATION_IDS)
+    assert len(client.calls) >= 3
+    assert client.calls[1] == "Observation:continuation:2"
+    assert all("_getpages" not in call for call in client.calls)
+    assert "_getpages" not in caplog.text
 
 
 @pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")

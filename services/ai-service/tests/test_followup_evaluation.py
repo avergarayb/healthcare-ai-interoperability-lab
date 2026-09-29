@@ -80,19 +80,19 @@ def test_system_scenarios_pass_without_inferring_the_token():
     assert empty_observations.status == "finish"
     assert empty_observations.follow_up_required == "unknown"
     assert empty_observations.context == ("resolved", "empty")
-    assert empty_observations.schedule_check == "not_checked"
+    assert empty_observations.schedule_check == "checked"
     assert empty_observations.evidence_ids == ((FOLLOWUP_TOOL, "Patient/SYN-PATIENT-007"),)
     assert failed_observations.status == "unavailable"
     assert failed_observations.context == ("resolved", "unavailable")
     assert failed_observations.schedule_check == "not_checked"
-    assert failed_observations.evidence_ids == ((FOLLOWUP_TOOL, "Patient/SYN-PATIENT-001"),)
+    assert failed_observations.evidence_ids == ()
     assert empty_observations.context != failed_observations.context
     assert by_id["unavailable-patient"].context == ("not_resolved", "not_read")
-    assert by_id["context-sufficient"].schedule_check == "not_checked"
+    assert by_id["context-sufficient"].schedule_check == "checked"
     assert by_id["schedule-none"].schedule_check == "checked"
     unread = by_id["structured-final-without-read"]
-    assert unread.context == ("not_read", "not_read")
-    assert unread.schedule_check == "not_checked"
+    assert unread.context == ("resolved", "with_resources")
+    assert unread.schedule_check == "checked"
     assert unread.follow_up_required == "false"
     assert unread.evidence_ids == ()
     confirmed_facts = by_id["direct-structured-final"]

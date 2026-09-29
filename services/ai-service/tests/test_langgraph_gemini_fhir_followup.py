@@ -937,7 +937,8 @@ def test_exhausted_observation_retry_is_not_an_empty_result(monkeypatch):
     assert seen["observation"] == 3
     assert failed["decision"] == "unavailable"
     assert failed["observations"] == []
-    assert failed["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert failed["evidence"] == []
+    assert failed["tools_used"] == []
     assert failed["patient"]["id"] == PATIENT_ID
     assert empty["decision"] == "finish"
     assert empty["observations"] == []
@@ -980,7 +981,8 @@ def test_same_case_retry_keeps_one_run_and_does_not_duplicate_audit(monkeypatch)
     assert result["case_id"] == PATIENT_CASE
     assert result["context_patient"] == "resolved"
     assert result["context_observation"] == "unavailable"
-    assert result["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert result["evidence"] == []
+    assert result["tools_used"] == []
 
 
 def test_invalid_observation_bundle_stays_unavailable():
@@ -996,7 +998,8 @@ def test_invalid_observation_bundle_stays_unavailable():
         http.close()
     assert result["decision"] == "unavailable"
     assert result["observations"] == []
-    assert result["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert result["evidence"] == []
+    assert result["tools_used"] == []
     assert result["patient"]["id"] == PATIENT_ID
 
 

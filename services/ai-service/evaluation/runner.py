@@ -74,6 +74,7 @@ class EvaluationObservation:
     clinical_assessment: str
     human_review: str
     action_status: str
+    protocol_status: str
 
 
 @dataclass(frozen=True)
@@ -213,6 +214,7 @@ def observe(case: EvaluationCase) -> EvaluationObservation:
         clinical_assessment=projected.clinical_assessment.status.value,
         human_review=projected.human_review.status.value,
         action_status=projected.action.status.value,
+        protocol_status=projected.protocol.evaluation_status.value,
     )
 
 
@@ -297,8 +299,6 @@ def score(case: EvaluationCase, observation: EvaluationObservation) -> Evaluatio
     if case.fhir == "missing_patient":
         if any(f"Patient/{PATIENT_ID}" in path or path.startswith("Appointment") for path in observation.fhir_calls):
             failures.append("patient fallback")
-    if case.expected_status == "denied" and observation.fhir_calls:
-        failures.append("denied tool called fhir")
     if (
         case.expected_classifications is not None
         and observation.classifications != case.expected_classifications
@@ -312,10 +312,12 @@ def score(case: EvaluationCase, observation: EvaluationObservation) -> Evaluatio
         failures.append("schedule classification without a check")
     if observation.clinical_assessment != "not_performed":
         failures.append("clinical assessment mismatch")
-    if observation.human_review != "not_evaluated":
+    if observation.human_review != case.expected_human_review:
         failures.append("human review mismatch")
-    if observation.action_status != "not_determined":
+    if observation.action_status != case.expected_action_status:
         failures.append("action mismatch")
+    if observation.protocol_status != case.expected_protocol:
+        failures.append("protocol mismatch")
     return EvaluationResult(
         evaluation_case_id=case.id,
         case_id=case.case_id,

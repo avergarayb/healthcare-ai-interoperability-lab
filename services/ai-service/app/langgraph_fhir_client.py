@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol
 from urllib.parse import unquote
 
@@ -41,6 +42,10 @@ SAFE_AUDIT_FIELDS = (
 )
 
 BOUNDARY_EVENTS: list[str] = []
+FHIR_SEARCH_PAGE_SIZE = 25
+FHIR_SEARCH_MAX_PAGES = 4
+FHIR_SEARCH_MAX_UNIQUE_RESOURCES_PER_TYPE = 100
+FHIR_NEXT_URL_MAX_LENGTH = 4096
 
 
 def clear_boundary_events() -> None:
@@ -55,18 +60,45 @@ class ReadClientError(Exception):
     """A read client could not return a response."""
 
 
+class BoundedSearchStatus(str, Enum):
+    COMPLETE = "complete"
+    INCOMPLETE_LIMIT = "incomplete_limit"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class BoundedSearchResult:
+    status: BoundedSearchStatus
+    resources: tuple[dict, ...]
+    reason: str | None = None
+
+
 class FHIRReadClient(Protocol):
     def get(self, path: str) -> dict: ...
+
+    def search(self, path: str, expected_resource_type: str) -> BoundedSearchResult: ...
 
 
 class FHIRTransport(Protocol):
     def get(self, path: str) -> dict: ...
+
+    def search(self, path: str, expected_resource_type: str) -> BoundedSearchResult: ...
 
 
 class FHIRAdapter(Protocol):
     def get_patient(self, patient_id: str) -> dict: ...
 
     def get_observations(self, patient_id: str) -> list[dict]: ...
+
+
+def bundle_list_field(payload: dict, field: str, error: str) -> list:
+    """Return an optional Bundle array without treating invalid falsy values as absent."""
+    if field not in payload:
+        return []
+    value = payload[field]
+    if not isinstance(value, list):
+        raise ReadClientError(error)
+    return value
 
 
 def _patient_resource(patient_id: str) -> dict[str, str]:
@@ -78,7 +110,8 @@ def _prepared_case_match(path: str, case_id: str = PATIENT_CASE) -> tuple[str, s
     prefix = "Patient?identifier="
     if not path.startswith(prefix):
         return None
-    system, separator, value = unquote(path[len(prefix) :]).partition("|")
+    identifier = path[len(prefix) :].split("&", 1)[0]
+    system, separator, value = unquote(identifier).partition("|")
     if separator and system and value == case_id:
         return system, value
     return None
@@ -90,6 +123,8 @@ def _observation_resource(observation_id: str, patient_id: str, value: str) -> d
         "id": observation_id,
         "status": "final",
         "subject": {"reference": f"Patient/{patient_id}"},
+        "encounter": {"reference": "Encounter/encounter-synthetic-001"},
+        "issued": "2026-09-25T12:30:00Z",
         "valueString": value,
     }
 
@@ -151,18 +186,48 @@ class PreparedReadClient:
         observation_id: str = "obs-synthetic-001",
         observation_value: str = "Synthetic observation result",
         observations: list[dict[str, object]] | None = None,
+        encounters: list[dict[str, object]] | None = None,
         appointments: list[dict[str, object]] | None = None,
         fail_observation_read: bool = False,
+        fail_encounter_read: bool = False,
+        fail_appointment_read: bool = False,
     ) -> None:
         self.case_id = case_id
         self.patient_id = patient_id
         self.fail_observation_read = fail_observation_read
+        self.fail_encounter_read = fail_encounter_read
+        self.fail_appointment_read = fail_appointment_read
         if observations is None:
             self.observations = [_observation_resource(observation_id, patient_id, observation_value)]
         else:
             self.observations = [dict(item) for item in observations]
+        self.encounters = (
+            [
+                {
+                    "resourceType": "Encounter",
+                    "id": "encounter-synthetic-001",
+                    "status": "finished",
+                    "subject": {"reference": f"Patient/{patient_id}"},
+                    "period": {
+                        "start": "2026-09-25T11:00:00Z",
+                        "end": "2026-09-25T12:00:00Z",
+                    },
+                }
+            ]
+            if encounters is None
+            else [dict(item) for item in encounters]
+        )
         self.appointments = (
-            [synthetic_followup_appointment()] if appointments is None else [dict(item) for item in appointments]
+            [
+                synthetic_appointment(
+                    appointment_id=APPOINTMENT_ID,
+                    status="booked",
+                    start="2027-03-15T15:00:00Z",
+                    patient_id=patient_id,
+                )
+            ]
+            if appointments is None
+            else [dict(item) for item in appointments]
         )
         self.calls: list[str] = []
 
@@ -178,7 +243,10 @@ class PreparedReadClient:
             return {"resourceType": "Bundle", "type": "searchset", "entry": []}
         if path == f"Patient/{self.patient_id}":
             return _patient_resource(self.patient_id)
-        if path == f"Observation?subject=Patient/{self.patient_id}":
+        if path in {
+            f"Observation?subject=Patient/{self.patient_id}",
+            f"Observation?subject=Patient/{self.patient_id}&status=final&_count=25",
+        }:
             if self.fail_observation_read:
                 raise ReadClientError("HTTP 503")
             return {
@@ -186,13 +254,34 @@ class PreparedReadClient:
                 "type": "searchset",
                 "entry": [{"resource": dict(item)} for item in self.observations],
             }
-        if path == f"Appointment?patient=Patient/{self.patient_id}":
+        if path == f"Encounter?patient=Patient/{self.patient_id}&status=finished&_count=25":
+            if self.fail_encounter_read:
+                raise ReadClientError("HTTP 503")
+            return {
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "entry": [{"resource": dict(item)} for item in self.encounters],
+            }
+        if path in {
+            f"Appointment?patient=Patient/{self.patient_id}",
+            f"Appointment?patient=Patient/{self.patient_id}&_count=25",
+        }:
+            if self.fail_appointment_read:
+                raise ReadClientError("HTTP 503")
             return {
                 "resourceType": "Bundle",
                 "type": "searchset",
                 "entry": [{"resource": dict(item)} for item in self.appointments],
             }
         raise ReadClientError("unknown prepared path")
+
+    def search(self, path: str, expected_resource_type: str) -> BoundedSearchResult:
+        try:
+            payload = self.get(path)
+            resources = _single_page_resources(payload, expected_resource_type)
+        except ReadClientError as exc:
+            return BoundedSearchResult(BoundedSearchStatus.FAILED, (), str(exc))
+        return BoundedSearchResult(BoundedSearchStatus.COMPLETE, tuple(resources))
 
 
 class FailingPreparedReadClient:
@@ -218,6 +307,62 @@ class ClientFHIRTransport:
         BOUNDARY_EVENTS.append(f"transport:{path}")
         self.calls.append(path)
         return self.client.get(path)
+
+    def search(self, path: str, expected_resource_type: str) -> BoundedSearchResult:
+        BOUNDARY_EVENTS.append(f"transport:{path}")
+        self.calls.append(path)
+        search = getattr(self.client, "search", None)
+        if callable(search):
+            return search(path, expected_resource_type)
+        try:
+            payload = self.client.get(path)
+            resources = _single_page_resources(payload, expected_resource_type)
+        except ReadClientError as exc:
+            return BoundedSearchResult(BoundedSearchStatus.FAILED, (), str(exc))
+        try:
+            links = bundle_list_field(payload, "link", "search bundle links are malformed")
+        except ReadClientError as exc:
+            return BoundedSearchResult(BoundedSearchStatus.FAILED, tuple(resources), str(exc))
+        if any(not isinstance(item, dict) for item in links):
+            return BoundedSearchResult(
+                BoundedSearchStatus.FAILED,
+                tuple(resources),
+                "search bundle links are malformed",
+            )
+        if any(item.get("relation") == "next" for item in links):
+            return BoundedSearchResult(
+                BoundedSearchStatus.FAILED,
+                tuple(resources),
+                "read client does not support bounded pagination",
+            )
+        return BoundedSearchResult(BoundedSearchStatus.COMPLETE, tuple(resources))
+
+
+def _single_page_resources(payload: dict, expected_resource_type: str) -> list[dict]:
+    if payload.get("resourceType") != "Bundle" or payload.get("type") != "searchset":
+        raise ReadClientError("search response must be a searchset bundle")
+    entries = bundle_list_field(payload, "entry", "search bundle entries must be a list")
+    resources: list[dict] = []
+    by_identity: dict[tuple[str, str], dict] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ReadClientError("bundle entry must be an object")
+        resource = entry.get("resource")
+        if not isinstance(resource, dict) or resource.get("resourceType") != expected_resource_type:
+            raise ReadClientError(f"bundle entry must contain {expected_resource_type}")
+        resource_id = resource.get("id")
+        if not isinstance(resource_id, str) or not resource_id:
+            raise ReadClientError("search resource has no id")
+        identity = (expected_resource_type, resource_id)
+        prior = by_identity.get(identity)
+        if prior is not None:
+            if prior != resource:
+                raise ReadClientError("conflicting duplicate search resource")
+            continue
+        copied = dict(resource)
+        by_identity[identity] = copied
+        resources.append(copied)
+    return resources
 
 
 @dataclass(frozen=True)

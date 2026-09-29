@@ -14,6 +14,14 @@ CASE_IDS = (
     "SYN-FOLLOWUP-004",
     "SYN-FOLLOWUP-005",
     "SYN-FOLLOWUP-006",
+    "SYN-FOLLOWUP-008",
+    "SYN-FOLLOWUP-009",
+    "SYN-FOLLOWUP-010",
+    "SYN-FOLLOWUP-011",
+    "SYN-FOLLOWUP-012",
+    "SYN-FOLLOWUP-013",
+    "SYN-FOLLOWUP-014",
+    "SYN-FOLLOWUP-015",
 )
 
 FollowUpCaseId = Literal[
@@ -23,6 +31,14 @@ FollowUpCaseId = Literal[
     "SYN-FOLLOWUP-004",
     "SYN-FOLLOWUP-005",
     "SYN-FOLLOWUP-006",
+    "SYN-FOLLOWUP-008",
+    "SYN-FOLLOWUP-009",
+    "SYN-FOLLOWUP-010",
+    "SYN-FOLLOWUP-011",
+    "SYN-FOLLOWUP-012",
+    "SYN-FOLLOWUP-013",
+    "SYN-FOLLOWUP-014",
+    "SYN-FOLLOWUP-015",
 ]
 
 
@@ -67,10 +83,23 @@ class ClinicalAssessmentStatus(str, Enum):
 
 class HumanReviewStatus(str, Enum):
     NOT_EVALUATED = "not_evaluated"
+    REQUIRED = "required"
+    NOT_PROPOSED = "not_proposed"
+    NOT_DETERMINED = "not_determined"
 
 
 class ActionStatus(str, Enum):
     NOT_DETERMINED = "not_determined"
+    PROPOSED = "proposed"
+    NOT_PROPOSED = "not_proposed"
+
+
+class ProtocolEvaluationStatus(str, Enum):
+    NOT_EVALUATED = "not_evaluated"
+    MATCHED = "matched"
+    NOT_MATCHED = "not_matched"
+    INSUFFICIENT = "insufficient"
+    UNAVAILABLE = "unavailable"
 
 
 class ContextState(BaseModel):
@@ -105,12 +134,23 @@ class HumanReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: HumanReviewStatus
+    reason: str | None = None
 
 
 class ActionState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: ActionStatus
+    type: str | None = None
+
+
+class ProtocolState(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    id: Literal["POST_CONSULTATION_RESULT_REVIEW_V1"] = "POST_CONSULTATION_RESULT_REVIEW_V1"
+    evaluation_status: ProtocolEvaluationStatus = Field(alias="evaluationStatus")
+    reason_codes: list[str] = Field(alias="reasonCodes")
+    matched_resources: list[str] = Field(alias="matchedResources")
 
 
 class FollowUpRequest(BaseModel):
@@ -146,6 +186,13 @@ class FollowUpEndpointResponse(BaseModel):
     clinical_assessment: ClinicalAssessment = Field(alias="clinicalAssessment")
     human_review: HumanReview = Field(alias="humanReview")
     action: ActionState
+    protocol: ProtocolState = Field(
+        default_factory=lambda: ProtocolState(
+            evaluationStatus=ProtocolEvaluationStatus.NOT_EVALUATED,
+            reasonCodes=["required_collection_not_read"],
+            matchedResources=[],
+        )
+    )
     follow_up_required: FollowUpRequired = Field(alias="followUpRequired")
     answer: str
     evidence: list[Evidence]
