@@ -8,6 +8,7 @@ HTTP lives in HapiReadClient.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import unquote
@@ -240,8 +241,18 @@ class PolicyAuditEvent:
 class AuditRecorder(Protocol):
     events: list[PolicyAuditEvent]
 
-    def record(self, event: PolicyAuditEvent) -> None:
-        """Append one audit event."""
+    def record(
+        self,
+        *,
+        timestamp: str,
+        run_id: str,
+        case_id: str,
+        tool_name: str,
+        decision: str,
+        reason: str,
+        policy_version: str,
+    ) -> PolicyAuditEvent:
+        """Allocate and append one audit event atomically."""
 
 
 class InMemoryAuditSink:
@@ -249,26 +260,65 @@ class InMemoryAuditSink:
 
     def __init__(self) -> None:
         self.events: list[PolicyAuditEvent] = []
+        self._lock = threading.Lock()
 
-    def record(self, event: PolicyAuditEvent) -> None:
-        expected = len(self.events) + 1
-        if event.sequence != expected:
-            raise ValueError("audit sequence must be contiguous")
-        if self.events and event.run_id != self.events[0].run_id:
-            raise ValueError("audit run_id must stay constant")
-        self.events.append(event)
+    def record(
+        self,
+        *,
+        timestamp: str,
+        run_id: str,
+        case_id: str,
+        tool_name: str,
+        decision: str,
+        reason: str,
+        policy_version: str,
+    ) -> PolicyAuditEvent:
+        with self._lock:
+            if self.events and run_id != self.events[0].run_id:
+                raise ValueError("audit run_id must stay constant")
+            event = PolicyAuditEvent(
+                sequence=len(self.events) + 1,
+                timestamp=timestamp,
+                run_id=run_id,
+                case_id=case_id,
+                tool_name=tool_name,
+                decision=decision,
+                reason=reason,
+                policy_version=policy_version,
+            )
+            self.events.append(event)
+            return event
 
 
-def evaluate_tool_policy(tool_name: str) -> PolicyDecision:
-    """Decide whether a proposed tool may run. This function has no graph types."""
+CASE_ID_MISMATCH_REASON = "case_id_mismatch"
+
+
+def evaluate_tool_policy(
+    tool_name: str,
+    *,
+    authorized_case_id: str | None = None,
+    proposed_case_id: object | None = None,
+) -> PolicyDecision:
+    """Decide whether a proposed tool may run. This function has no graph types.
+
+    A name-only call keeps the previous name check. When the caller supplies the
+    authorized case, a clinical read must propose that same case id.
+    """
     if tool_name in ALLOWED_READ_TOOLS:
-        decision = PolicyDecision("allowed", "read tool is allowed")
+        if authorized_case_id is not None and not _same_authorized_case(authorized_case_id, proposed_case_id):
+            decision = PolicyDecision("denied", CASE_ID_MISMATCH_REASON)
+        else:
+            decision = PolicyDecision("allowed", "read tool is allowed")
     elif tool_name == "send_message":
         decision = PolicyDecision("denied", "external effect is not allowed")
     else:
         decision = PolicyDecision("denied", "unknown tool is not allowed")
     BOUNDARY_EVENTS.append(f"policy:{tool_name}:{decision.status}")
     return decision
+
+
+def _same_authorized_case(authorized_case_id: str, proposed_case_id: object | None) -> bool:
+    return isinstance(proposed_case_id, str) and proposed_case_id == authorized_case_id
 
 
 def record_policy_audit(
@@ -284,8 +334,8 @@ def record_policy_audit(
     """Record one policy verdict. The event stores the operational fields only."""
     if decision not in {"allowed", "denied"}:
         raise ValueError("unknown policy decision")
-    event = PolicyAuditEvent(
-        sequence=len(sink.events) + 1,
+    BOUNDARY_EVENTS.append(f"audit:{tool_name}:{decision}")
+    event = sink.record(
         timestamp=timestamp,
         run_id=run_id,
         case_id=case_id,
@@ -294,8 +344,6 @@ def record_policy_audit(
         reason=reason,
         policy_version=POLICY_VERSION,
     )
-    BOUNDARY_EVENTS.append(f"audit:{tool_name}:{decision}")
-    sink.record(event)
     _log_policy_audit(event)
     return event
 

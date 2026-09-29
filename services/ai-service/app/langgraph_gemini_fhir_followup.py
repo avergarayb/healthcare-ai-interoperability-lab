@@ -24,14 +24,17 @@ from langgraph.prebuilt import ToolNode
 
 from app.config import Settings
 from app.langgraph_fhir_client import (
+    ALLOWED_READ_TOOLS,
     APPOINTMENTS_TOOL,
     BOUNDARY_EVENTS,
+    CASE_ID_MISMATCH_REASON,
     DENIAL_ANSWER,
     FOLLOWUP_TOOL,
     PATIENT_CASE,
     SAFE_AUDIT_FIELDS,
     ClientFHIRTransport,
     InMemoryAuditSink,
+    PolicyDecision,
     ReadClientError,
     evaluate_tool_policy,
     record_policy_audit,
@@ -493,7 +496,7 @@ class GeminiFhirFollowUp:
         *,
         clock: Callable[[], str],
         run_id: str,
-        policy: Callable[[str], Any] = evaluate_tool_policy,
+        policy: Callable[..., Any] = evaluate_tool_policy,
         audit: Callable[..., Any] = record_policy_audit,
     ) -> None:
         self.sink = sink
@@ -505,8 +508,6 @@ class GeminiFhirFollowUp:
         self.audit = audit
         self.model_calls = 0
         self.trace: list[str] = []
-        self._status = ""
-        self._reason = ""
         self.followup_tool = make_followup_tool(adapter)
         self.appointments_tool = make_appointments_tool(adapter)
         self.graph = self._compile()
@@ -549,19 +550,28 @@ class GeminiFhirFollowUp:
                 return "finish"
             return "close"
         verdict = None
+        authorized_case_id = state["case_id"]
         for call in last.tool_calls:
-            verdict = self.policy(call["name"])
+            name = str(call.get("name") or "")
+            proposed_case_id = _proposed_case_id(call)
+            verdict = self.policy(
+                name,
+                authorized_case_id=authorized_case_id,
+                proposed_case_id=proposed_case_id,
+            )
+            if verdict.status == "allowed" and not _read_identity_ok(name, authorized_case_id, proposed_case_id):
+                BOUNDARY_EVENTS.append(f"policy:{name}:denied")
+                verdict = PolicyDecision("denied", CASE_ID_MISMATCH_REASON)
             self.audit(
                 self.sink,
                 run_id=self.run_id,
-                case_id=state["case_id"],
-                tool_name=call["name"],
+                case_id=authorized_case_id,
+                tool_name=name,
                 decision=verdict.status,
                 reason=verdict.reason,
                 timestamp=self.clock(),
             )
-            self._status = verdict.status
-            self._reason = verdict.reason
+            self.adapter.record_policy_decision(verdict.status, verdict.reason)
             if verdict.status != "allowed":
                 return "denied"
         if verdict is None or verdict.status != "allowed":
@@ -571,12 +581,13 @@ class GeminiFhirFollowUp:
     def denied_node(self, state: GeminiFollowUpState) -> dict[str, str]:
         del state
         self.trace.append("denied")
-        if self._status != "denied":
+        status, reason = self.adapter.policy_decision()
+        if status != "denied":
             raise ValueError("denied path requires a denial")
         return {
             "decision": "denied",
-            "policy_decision": self._status,
-            "policy_reason": self._reason,
+            "policy_decision": status,
+            "policy_reason": reason,
         }
 
     def close_node(self, state: GeminiFollowUpState) -> dict[str, object]:
@@ -590,7 +601,8 @@ class GeminiFhirFollowUp:
 
     def update_state(self, state: GeminiFollowUpState) -> dict[str, object]:
         self.trace.append("update_state")
-        if self._status != "allowed":
+        status, reason = self.adapter.policy_decision()
+        if status != "allowed":
             raise ValueError("update_state requires an allowed tool")
         results = _trailing_tool_messages(state["messages"])
         if not results:
@@ -621,8 +633,8 @@ class GeminiFhirFollowUp:
                 raise ValueError("unknown tool result")
         update: dict[str, object] = {
             "decision": "allowed",
-            "policy_decision": self._status,
-            "policy_reason": self._reason,
+            "policy_decision": status,
+            "policy_reason": reason,
             "evidence": evidence,
             "tools_used": tools_used,
         }
@@ -667,13 +679,38 @@ class GeminiFhirFollowUp:
         return graph.compile()
 
     def invoke(self, case_id: str = PATIENT_CASE) -> GeminiFollowUpState:
-        try:
-            return self.graph.invoke(initial_state(case_id))
-        except Exception as exc:
-            found = _find_read_error(exc)
-            if found is None or str(found) == "transport failed":
-                raise
-            return _unavailable(case_id, self.adapter.preserved_reads())
+        with self.adapter.bind_read(case_id):
+            try:
+                state = dict(self.graph.invoke(initial_state(case_id)))
+            except Exception as exc:
+                found = _find_read_error(exc)
+                if found is None or str(found) == "transport failed":
+                    raise
+                state = dict(_unavailable(case_id, self.adapter.preserved_reads()))
+            return _attach_read_snapshot(state, self.adapter.ledger)
+
+
+def _proposed_case_id(call: dict[str, Any]) -> object | None:
+    args = call.get("args")
+    if not isinstance(args, dict) or "case_id" not in args:
+        return None
+    return args.get("case_id")
+
+
+def _read_identity_ok(tool_name: str, authorized_case_id: str, proposed_case_id: object | None) -> bool:
+    if tool_name not in ALLOWED_READ_TOOLS:
+        return True
+    return isinstance(proposed_case_id, str) and proposed_case_id == authorized_case_id
+
+
+def _attach_read_snapshot(state: dict[str, Any], ledger) -> dict[str, Any]:
+    """Copy this execution's ledger onto the returned state before the scope closes."""
+    state["context_patient"] = ledger.patient
+    state["context_observation"] = ledger.observation
+    state["schedule_check"] = ledger.schedule_check
+    state["schedule_classifications"] = ledger.classifications
+    state["schedule_appointments"] = ledger.appointments
+    return state
 
 
 def _trailing_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
@@ -707,7 +744,7 @@ def build_gemini_fhir_followup(
     *,
     clock: Callable[[], str],
     run_id: str,
-    policy: Callable[[str], Any] = evaluate_tool_policy,
+    policy: Callable[..., Any] = evaluate_tool_policy,
     audit: Callable[..., Any] = record_policy_audit,
     now: Callable[[], datetime] | None = None,
 ) -> GeminiFhirFollowUp:

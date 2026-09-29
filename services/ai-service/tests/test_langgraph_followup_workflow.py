@@ -9,12 +9,14 @@ import inspect
 import json
 import logging
 import os
+import threading
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.langgraph_fhir_client import (
     APPOINTMENT_ID,
@@ -27,8 +29,11 @@ from app.langgraph_fhir_client import (
     PATIENT_ID,
     POLICY_VERSION,
     SAFE_AUDIT_FIELDS,
+    CASE_ID_MISMATCH_REASON,
+    ClientFHIRTransport,
     FailingPreparedReadClient,
     InMemoryAuditSink,
+    PolicyAuditEvent,
     PreparedReadClient,
     ReadClientError,
     clear_boundary_events,
@@ -36,8 +41,11 @@ from app.langgraph_fhir_client import (
     record_policy_audit,
     synthetic_followup_appointment,
 )
+from app.followup_models import dump_followup_endpoint_response
+from app.followup_service import _project
 from app.langgraph_fhir_followup import (
     UNAVAILABLE_ANSWER,
+    FollowUpFHIRAdapter,
     appointment_search_path,
     case_search_path,
     make_followup_tool,
@@ -290,9 +298,9 @@ def test_fake_model_returns_an_application_result():
 def test_injected_policy_is_called_before_the_tool():
     seen: list[str] = []
 
-    def policy(name: str):
+    def policy(name: str, **kwargs):
         seen.append(name)
-        return evaluate_tool_policy(name)
+        return evaluate_tool_policy(name, **kwargs)
 
     client = MemoryReadClient()
     _workflow(client, ScriptedModel([_tool_call(), _final("unknown")]), policy=policy).run(PATIENT_CASE)
@@ -390,6 +398,58 @@ def test_allowed_tool_audit_is_logged_and_the_tool_still_runs(caplog):
         tool_name=FOLLOWUP_TOOL,
         decision="allowed",
         reason="read tool is allowed",
+    )
+
+
+def test_audit_sink_allocates_contiguous_sequences_for_concurrent_writes() -> None:
+    writer_count = 8
+
+    class SynchronizedSink(InMemoryAuditSink):
+        def __init__(self) -> None:
+            super().__init__()
+            self.ready = threading.Barrier(writer_count)
+
+        def record(self, *args: object, **kwargs: object) -> PolicyAuditEvent:
+            self.ready.wait(timeout=5)
+            return super().record(*args, **kwargs)
+
+    sink = SynchronizedSink()
+    returned_events: list[PolicyAuditEvent] = []
+    errors: list[BaseException] = []
+    result_lock = threading.Lock()
+
+    def write_event(index: int) -> None:
+        try:
+            event = record_policy_audit(
+                sink,
+                run_id="concurrent-audit-run",
+                case_id=PATIENT_CASE,
+                tool_name=FOLLOWUP_TOOL,
+                decision="allowed",
+                reason=f"concurrent audit write {index}",
+                timestamp=f"2026-01-01T00:00:{index:02d}+00:00",
+            )
+            with result_lock:
+                returned_events.append(event)
+        except BaseException as exc:
+            with result_lock:
+                errors.append(exc)
+
+    threads = [
+        threading.Thread(target=write_event, args=(index,))
+        for index in range(writer_count)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not [thread for thread in threads if thread.is_alive()]
+    assert errors == []
+    assert len(sink.events) == writer_count
+    assert [event.sequence for event in sink.events] == list(range(1, writer_count + 1))
+    assert sorted(event.sequence for event in returned_events) == list(
+        range(1, writer_count + 1)
     )
 
 
@@ -986,3 +1046,512 @@ def _ensure_records(base: str) -> tuple[dict, dict]:
     if not linked:
         _store(base, f"Appointment/{APPOINTMENT_ID}", synthetic_followup_appointment())
     return patient, observation
+
+
+OTHER_CASE = "SYN-FOLLOWUP-002"
+
+
+def _message_with_tools(*calls: tuple[str, str]) -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": name,
+                "args": {"case_id": case_id},
+                "id": f"call-{index}",
+                "type": "tool_call",
+            }
+            for index, (name, case_id) in enumerate(calls, start=1)
+        ],
+    )
+
+
+def _assert_cross_case_denied(result: FollowUpWorkflowResult, client: PreparedReadClient, foreign_case: str) -> None:
+    projected = _project(result)
+    assert projected is not None
+    body = dump_followup_endpoint_response(projected)
+    assert body["caseId"] == result.case_id
+    assert body["status"] == "denied"
+    assert body["context"] == {"patient": "not_read", "observation": "not_read"}
+    assert body["schedule"] == {"check": "not_checked"}
+    assert body["clinicalAssessment"] == {"status": "not_performed"}
+    assert body["humanReview"] == {"status": "not_evaluated"}
+    assert body["action"] == {"status": "not_determined"}
+    assert body["followUpRequired"] == "unknown"
+    assert body["evidence"] == []
+    assert result.final_answer == DENIAL_ANSWER
+    assert client.calls == []
+    assert f"execute:{FOLLOWUP_TOOL}" not in BOUNDARY_EVENTS
+    assert f"execute:{APPOINTMENTS_TOOL}" not in BOUNDARY_EVENTS
+    rendered = json.dumps(body)
+    assert foreign_case not in rendered
+    assert PATIENT_ID not in rendered
+    assert "obs-synthetic-001" not in rendered
+    assert APPOINTMENT_ID not in rendered
+
+
+def test_policy_denies_a_clinical_read_proposed_for_another_case():
+    decision = evaluate_tool_policy(
+        FOLLOWUP_TOOL,
+        authorized_case_id=OTHER_CASE,
+        proposed_case_id=PATIENT_CASE,
+    )
+    assert decision.status == "denied"
+    assert decision.reason == CASE_ID_MISMATCH_REASON
+    assert PATIENT_CASE not in decision.reason
+    assert evaluate_tool_policy(FOLLOWUP_TOOL).status == "allowed"
+
+
+def test_cross_case_context_tool_is_denied_before_fhir(caplog):
+    client = PreparedReadClient()
+    sink = InMemoryAuditSink()
+    with caplog.at_level(logging.INFO, logger="ai-service"):
+        result = _workflow(
+            client,
+            ScriptedModel([_tool_call(FOLLOWUP_TOOL, {"case_id": PATIENT_CASE})]),
+            sink,
+        ).run(OTHER_CASE)
+    _assert_cross_case_denied(result, client, PATIENT_CASE)
+    assert len(sink.events) == 1
+    assert sink.events[0].case_id == OTHER_CASE
+    assert sink.events[0].tool_name == FOLLOWUP_TOOL
+    assert sink.events[0].decision == "denied"
+    assert sink.events[0].reason == CASE_ID_MISMATCH_REASON
+    lines = _policy_audit_lines(caplog)
+    assert len(lines) == 1
+    _assert_policy_audit_line(
+        lines[0],
+        run_id=result.run_id,
+        case_id=OTHER_CASE,
+        tool_name=FOLLOWUP_TOOL,
+        decision="denied",
+        reason=CASE_ID_MISMATCH_REASON,
+    )
+    assert PATIENT_CASE not in lines[0]
+    assert PATIENT_CASE not in _audit_blob(sink)
+
+
+def test_cross_case_appointment_tool_is_denied_before_fhir():
+    client = PreparedReadClient()
+    sink = InMemoryAuditSink()
+    result = _workflow(
+        client,
+        ScriptedModel([_tool_call(APPOINTMENTS_TOOL, {"case_id": PATIENT_CASE})]),
+        sink,
+    ).run(OTHER_CASE)
+    _assert_cross_case_denied(result, client, PATIENT_CASE)
+    assert sink.events[0].tool_name == APPOINTMENTS_TOOL
+    assert sink.events[0].case_id == OTHER_CASE
+    assert sink.events[0].reason == CASE_ID_MISMATCH_REASON
+    assert APPOINTMENT_ID not in _audit_blob(sink)
+
+
+def test_mixed_message_denies_same_case_context_and_foreign_appointments_before_fhir():
+    client = PreparedReadClient()
+    sink = InMemoryAuditSink()
+    result = _workflow(
+        client,
+        ScriptedModel(
+            [_message_with_tools((FOLLOWUP_TOOL, PATIENT_CASE), (APPOINTMENTS_TOOL, OTHER_CASE))]
+        ),
+        sink,
+    ).run(PATIENT_CASE)
+    _assert_cross_case_denied(result, client, OTHER_CASE)
+    assert [event.tool_name for event in sink.events] == [FOLLOWUP_TOOL, APPOINTMENTS_TOOL]
+    assert [event.decision for event in sink.events] == ["allowed", "denied"]
+    assert sink.events[1].reason == CASE_ID_MISMATCH_REASON
+    assert all(event.case_id == PATIENT_CASE for event in sink.events)
+    assert OTHER_CASE not in _audit_blob(sink)
+
+
+def test_mixed_message_denies_foreign_context_and_same_case_appointments_before_fhir():
+    client = PreparedReadClient()
+    sink = InMemoryAuditSink()
+    result = _workflow(
+        client,
+        ScriptedModel(
+            [_message_with_tools((FOLLOWUP_TOOL, OTHER_CASE), (APPOINTMENTS_TOOL, PATIENT_CASE))]
+        ),
+        sink,
+    ).run(PATIENT_CASE)
+    _assert_cross_case_denied(result, client, OTHER_CASE)
+    assert len(sink.events) == 1
+    assert sink.events[0].tool_name == FOLLOWUP_TOOL
+    assert sink.events[0].decision == "denied"
+    assert sink.events[0].reason == CASE_ID_MISMATCH_REASON
+    assert sink.events[0].case_id == PATIENT_CASE
+    assert OTHER_CASE not in _audit_blob(sink)
+
+
+def test_same_case_context_read_still_completes():
+    client = PreparedReadClient()
+    result = _workflow(client, ScriptedModel([_tool_call(), _final("unknown")])).run(PATIENT_CASE)
+    assert result.status == "finish"
+    assert result.case_id == PATIENT_CASE
+    assert result.context_patient == "resolved"
+    assert result.context_observation == "with_resources"
+    assert result.patient["id"] == PATIENT_ID
+    assert result.evidence == [
+        {"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]}
+    ]
+    assert client.calls == CASE_READS
+
+
+def test_same_case_context_and_appointment_read_still_completes():
+    client = PreparedReadClient()
+    result = _workflow(
+        client,
+        ScriptedModel(
+            [
+                _message_with_tools((FOLLOWUP_TOOL, PATIENT_CASE), (APPOINTMENTS_TOOL, PATIENT_CASE)),
+                _final("false"),
+            ]
+        ),
+        now=lambda: datetime(2026, 9, 28, tzinfo=timezone.utc),
+    ).run(PATIENT_CASE)
+    assert result.status == "finish"
+    assert result.case_id == PATIENT_CASE
+    assert result.context_patient == "resolved"
+    assert result.context_observation == "with_resources"
+    assert result.schedule_check == "checked"
+    assert result.schedule_classifications == ("UPCOMING_CONFIRMED",)
+    by_tool = {item["tool"]: item["resources"] for item in result.evidence}
+    assert by_tool[FOLLOWUP_TOOL] == [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]
+    assert by_tool[APPOINTMENTS_TOOL] == [f"Appointment/{APPOINTMENT_ID}"]
+    assert case_search_path(PATIENT_CASE) in client.calls
+    assert appointment_search_path(PATIENT_ID) in client.calls
+
+
+def test_same_case_observation_failure_preserves_patient():
+    client = PreparedReadClient(fail_observation_read=True)
+    result = _workflow(client, ScriptedModel([_tool_call(), _final("false")])).run(PATIENT_CASE)
+    assert result.status == "unavailable"
+    assert result.case_id == PATIENT_CASE
+    assert result.context_patient == "resolved"
+    assert result.context_observation == "unavailable"
+    assert result.observations == []
+    assert result.evidence == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert result.schedule_check == "not_checked"
+
+
+def test_second_run_on_the_same_workflow_does_not_keep_the_first_case():
+    client = PreparedReadClient()
+    workflow = _workflow(
+        client,
+        ScriptedModel(
+            [
+                _tool_call(),
+                _tool_call(APPOINTMENTS_TOOL, {"case_id": PATIENT_CASE}, "call-2"),
+                _final("false"),
+            ]
+        ),
+    )
+    first = workflow.run(PATIENT_CASE)
+    assert first.context_patient == "resolved"
+    assert first.schedule_check == "checked"
+    assert first.evidence
+    workflow._engine.model = ScriptedModel(
+        [_tool_call(FOLLOWUP_TOOL, {"case_id": OTHER_CASE}), _final("unknown")]
+    )
+    second = workflow.run(OTHER_CASE)
+    assert second.case_id == OTHER_CASE
+    assert second.status == "unavailable"
+    assert second.context_patient == "not_resolved"
+    assert second.context_observation == "not_read"
+    assert second.schedule_check == "not_checked"
+    assert second.schedule_classifications == ()
+    assert second.schedule_appointments == ()
+    assert second.evidence == []
+    assert second.patient is None
+    assert second.observations == []
+    blob = json.dumps(asdict(second), default=str)
+    assert PATIENT_ID not in blob
+    assert "obs-synthetic-001" not in blob
+    assert APPOINTMENT_ID not in blob
+    assert "UPCOMING_CONFIRMED" not in blob
+    assert case_search_path(OTHER_CASE) in client.calls
+
+
+def test_concurrent_allowed_and_denied_runs_keep_policy_decisions_isolated():
+    read_started = threading.Event()
+    release_read = threading.Event()
+
+    class BlockingReadClient:
+        def __init__(self) -> None:
+            self.delegate = PreparedReadClient()
+            self.calls = self.delegate.calls
+
+        def get(self, path: str) -> dict:
+            if path == case_search_path(PATIENT_CASE):
+                read_started.set()
+                if not release_read.wait(timeout=5):
+                    raise RuntimeError("timed out waiting to release the allowed read")
+            return self.delegate.get(path)
+
+    def model(messages):
+        if any(isinstance(message, ToolMessage) for message in messages):
+            return _final("unknown")
+        request_text = str(messages[0].content)
+        requested_case = OTHER_CASE if OTHER_CASE in request_text else PATIENT_CASE
+        return _tool_call(
+            FOLLOWUP_TOOL,
+            {"case_id": PATIENT_CASE},
+            f"call-{requested_case}",
+        )
+
+    client = BlockingReadClient()
+    sink = InMemoryAuditSink()
+    workflow = _workflow(client, model, sink)
+    results: dict[str, FollowUpWorkflowResult] = {}
+    errors: dict[str, Exception] = {}
+
+    def run(label: str, case_id: str) -> None:
+        try:
+            results[label] = workflow.run(case_id)
+        except Exception as exc:  # pragma: no cover - asserted below
+            errors[label] = exc
+
+    allowed = threading.Thread(target=run, args=("allowed", PATIENT_CASE))
+    denied = threading.Thread(target=run, args=("denied", OTHER_CASE))
+    allowed.start()
+    try:
+        assert read_started.wait(timeout=5)
+        denied.start()
+        denied.join(timeout=5)
+        assert not denied.is_alive()
+    finally:
+        release_read.set()
+        allowed.join(timeout=5)
+        if denied.ident is not None:
+            denied.join(timeout=5)
+
+    assert not allowed.is_alive()
+    assert errors == {}
+    assert results["allowed"].status == "finish"
+    assert results["allowed"].case_id == PATIENT_CASE
+    assert results["allowed"].patient["id"] == PATIENT_ID
+    assert results["allowed"].context_patient == "resolved"
+    assert results["allowed"].context_observation == "with_resources"
+    assert results["allowed"].schedule_check == "not_checked"
+    assert results["allowed"].evidence == [
+        {"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]}
+    ]
+    assert results["denied"].status == "denied"
+    assert results["denied"].case_id == OTHER_CASE
+    assert results["denied"].patient is None
+    assert results["denied"].observations == []
+    assert results["denied"].context_patient == "not_read"
+    assert results["denied"].context_observation == "not_read"
+    assert results["denied"].schedule_check == "not_checked"
+    assert results["denied"].evidence == []
+    assert client.calls == CASE_READS
+    assert [(event.case_id, event.decision) for event in sink.events] == [
+        (PATIENT_CASE, "allowed"),
+        (OTHER_CASE, "denied"),
+    ]
+    assert sink.events[1].reason == CASE_ID_MISMATCH_REASON
+
+
+def test_two_allowed_concurrent_runs_keep_clinical_state_isolated():
+    fixtures = {
+        PATIENT_CASE: {
+            "patient": PATIENT_ID,
+            "observation": "obs-synthetic-001",
+            "appointment": APPOINTMENT_ID,
+            "appointment_status": "booked",
+            "classification": "UPCOMING_CONFIRMED",
+        },
+        OTHER_CASE: {
+            "patient": "SYN-PATIENT-002",
+            "observation": "obs-synthetic-002",
+            "appointment": "appointment-synthetic-002",
+            "appointment_status": "cancelled",
+            "classification": "CANCELLED",
+        },
+    }
+    first_searches = threading.Barrier(2)
+
+    class ConcurrentReadClient:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self._lock = threading.Lock()
+            self._cases_started: set[str] = set()
+
+        def get(self, path: str) -> dict:
+            with self._lock:
+                self.calls.append(path)
+            for case_id, fixture in fixtures.items():
+                patient_id = str(fixture["patient"])
+                if path == case_search_path(case_id):
+                    with self._lock:
+                        first = case_id not in self._cases_started
+                        self._cases_started.add(case_id)
+                    if first:
+                        first_searches.wait(timeout=5)
+                    return {
+                        "resourceType": "Bundle",
+                        "entry": [
+                            {
+                                "resource": {
+                                    "resourceType": "Patient",
+                                    "id": patient_id,
+                                    "identifier": [
+                                        {"system": CASE_IDENTIFIER_SYSTEM, "value": case_id}
+                                    ],
+                                }
+                            }
+                        ],
+                    }
+                if path == f"Patient/{patient_id}":
+                    return {"resourceType": "Patient", "id": patient_id}
+                if path == f"Observation?subject=Patient/{patient_id}":
+                    return {
+                        "resourceType": "Bundle",
+                        "entry": [
+                            {
+                                "resource": {
+                                    "resourceType": "Observation",
+                                    "id": fixture["observation"],
+                                }
+                            }
+                        ],
+                    }
+                if path == appointment_search_path(patient_id):
+                    return {
+                        "resourceType": "Bundle",
+                        "entry": [
+                            {
+                                "resource": {
+                                    "resourceType": "Appointment",
+                                    "id": fixture["appointment"],
+                                    "status": fixture["appointment_status"],
+                                    "start": "2027-03-15T15:00:00Z",
+                                    "participant": [
+                                        {
+                                            "actor": {"reference": f"Patient/{patient_id}"},
+                                            "status": "accepted",
+                                        }
+                                    ],
+                                }
+                            }
+                        ],
+                    }
+            raise ReadClientError("unknown concurrent path")
+
+    def model(messages):
+        request_text = str(messages[0].content)
+        case_id = OTHER_CASE if OTHER_CASE in request_text else PATIENT_CASE
+        tool_results = sum(isinstance(message, ToolMessage) for message in messages)
+        if tool_results == 0:
+            return _tool_call(FOLLOWUP_TOOL, {"case_id": case_id}, f"context-{case_id}")
+        if tool_results == 1:
+            return _tool_call(APPOINTMENTS_TOOL, {"case_id": case_id}, f"schedule-{case_id}")
+        return _final("unknown", f"Completed {case_id}")
+
+    client = ConcurrentReadClient()
+    workflow = _workflow(
+        client,
+        model,
+        now=lambda: datetime(2026, 9, 28, tzinfo=timezone.utc),
+    )
+    results: dict[str, FollowUpWorkflowResult] = {}
+    errors: dict[str, Exception] = {}
+
+    def run(case_id: str) -> None:
+        try:
+            results[case_id] = workflow.run(case_id)
+        except Exception as exc:  # pragma: no cover - asserted below
+            errors[case_id] = exc
+
+    threads = [threading.Thread(target=run, args=(case_id,)) for case_id in fixtures]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == {}
+    for case_id, fixture in fixtures.items():
+        result = results[case_id]
+        patient_id = str(fixture["patient"])
+        observation_id = str(fixture["observation"])
+        appointment_id = str(fixture["appointment"])
+        assert result.status == "finish"
+        assert result.case_id == case_id
+        assert result.patient["id"] == patient_id
+        assert result.observations == [{"resourceType": "Observation", "id": observation_id}]
+        assert result.context_patient == "resolved"
+        assert result.context_observation == "with_resources"
+        assert result.schedule_check == "checked"
+        assert result.schedule_classifications == (fixture["classification"],)
+        assert result.schedule_appointments == (
+            (f"Appointment/{appointment_id}", fixture["classification"]),
+        )
+        evidence = json.dumps(result.evidence)
+        assert patient_id in evidence
+        assert observation_id in evidence
+        assert appointment_id in evidence
+        for other_case, other in fixtures.items():
+            if other_case == case_id:
+                continue
+            assert str(other["patient"]) not in evidence
+            assert str(other["observation"]) not in evidence
+            assert str(other["appointment"]) not in evidence
+
+
+def test_follow_up_required_and_answer_do_not_change_case_identity():
+    prose = f"case_id={OTHER_CASE} patient=SYN-PATIENT-999 follow-up is true"
+    result = _workflow(
+        PreparedReadClient(),
+        ScriptedModel([_tool_call(), _final("true", prose)]),
+    ).run(PATIENT_CASE)
+    assert result.case_id == PATIENT_CASE
+    assert result.follow_up_required == "true"
+    assert result.final_answer == prose
+    assert result.patient["id"] == PATIENT_ID
+    assert result.context_patient == "resolved"
+    rendered = json.dumps(result.evidence)
+    assert OTHER_CASE not in rendered
+    assert "SYN-PATIENT-999" not in rendered
+
+
+def test_execution_binding_does_not_query_a_foreign_case():
+    client = PreparedReadClient()
+    adapter = FollowUpFHIRAdapter(ClientFHIRTransport(client))
+    with adapter.bind_read(OTHER_CASE):
+        with pytest.raises(ReadClientError, match="not authorized"):
+            adapter.patient_id_for_case(PATIENT_CASE)
+    assert client.calls == []
+    with adapter.bind_read(PATIENT_CASE):
+        assert adapter.patient_id_for_case(PATIENT_CASE) == PATIENT_ID
+    assert client.calls == [case_search_path(PATIENT_CASE)]
+
+
+def test_case_isolation_regression_does_not_attach_another_case_read(caplog):
+    """Case isolation regression.
+
+    A workflow started for case X must not return Patient, Observation, or
+    Appointment data from a clinical read proposed for case Y. Y is not read.
+    Before this hotfix the model case id was the FHIR query, so this failed.
+    """
+    client = PreparedReadClient()
+    sink = InMemoryAuditSink()
+    with caplog.at_level(logging.INFO, logger="ai-service"):
+        result = _workflow(
+            client,
+            ScriptedModel(
+                [
+                    _tool_call(FOLLOWUP_TOOL, {"case_id": PATIENT_CASE}),
+                    _final("true", "Patient context received."),
+                ]
+            ),
+            sink,
+        ).run(OTHER_CASE)
+    _assert_cross_case_denied(result, client, PATIENT_CASE)
+    assert result.case_id == OTHER_CASE
+    assert len(sink.events) == 1
+    assert sink.events[0].reason == CASE_ID_MISMATCH_REASON
+    assert PATIENT_CASE not in _policy_audit_lines(caplog)[0]
+    assert "Patient" not in _policy_audit_lines(caplog)[0]
+    assert "Observation" not in _policy_audit_lines(caplog)[0]
+    assert "Appointment" not in _policy_audit_lines(caplog)[0]

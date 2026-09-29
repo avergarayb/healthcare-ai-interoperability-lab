@@ -113,7 +113,7 @@ class FollowUpWorkflow:
         model: Callable[..., Any],
         sink,
         fhir_client,
-        policy: Callable[[str], Any] = evaluate_tool_policy,
+        policy: Callable[..., Any] = evaluate_tool_policy,
         audit: Callable[..., Any] = record_policy_audit,
         clock: Callable[[], str],
         run_id: str,
@@ -141,7 +141,6 @@ class FollowUpWorkflow:
         """Execute one case and return the application result."""
         state = self._engine.invoke(case_id)
         patient = state["patient"]
-        ledger = self._engine.adapter.ledger
         return FollowUpWorkflowResult(
             case_id=state["case_id"],
             status=state["decision"],
@@ -153,11 +152,11 @@ class FollowUpWorkflow:
             turns=int(state["turn"]),
             run_id=self.run_id,
             follow_up_required=_explicit_follow_up_required(state),
-            context_patient=ledger.patient,
-            context_observation=ledger.observation,
-            schedule_check=ledger.schedule_check,
-            schedule_classifications=ledger.classifications,
-            schedule_appointments=ledger.appointments,
+            context_patient=state["context_patient"],
+            context_observation=state["context_observation"],
+            schedule_check=state["schedule_check"],
+            schedule_classifications=state["schedule_classifications"],
+            schedule_appointments=state["schedule_appointments"],
         )
 
 
@@ -167,7 +166,7 @@ def build_live_followup_workflow(
     clock: Callable[[], str],
     run_id: str,
     base_url: str | None = None,
-    policy: Callable[[str], Any] = evaluate_tool_policy,
+    policy: Callable[..., Any] = evaluate_tool_policy,
     audit: Callable[..., Any] = record_policy_audit,
 ) -> FollowUpWorkflow:
     """Compose the live model and the live read client outside the workflow class."""

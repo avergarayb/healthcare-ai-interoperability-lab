@@ -675,10 +675,12 @@ def test_appointment_tool_does_not_fall_back_to_patient_001():
         result = _workflow(client, model).invoke()
     finally:
         http.close()
-    assert result["decision"] == "unavailable"
+    assert result["decision"] == "denied"
+    assert result["case_id"] == PATIENT_CASE
     assert result["evidence"] == []
-    assert all(not path.startswith("Appointment") for path in client.calls)
-    assert "Appointment?patient=Patient/patient-001" not in client.calls
+    assert result["schedule_check"] == "not_checked"
+    assert client.calls == []
+    assert "patient-001" not in json.dumps(result["evidence"])
 
 
 def test_appointment_read_retries_503_without_a_second_audit(monkeypatch):
@@ -940,6 +942,45 @@ def test_exhausted_observation_retry_is_not_an_empty_result(monkeypatch):
     assert empty["decision"] == "finish"
     assert empty["observations"] == []
     assert empty["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+
+
+def test_same_case_retry_keeps_one_run_and_does_not_duplicate_audit(monkeypatch):
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", lambda _delay: None)
+    seen = {"observation": 0, "searches": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        patient = _patient("Synthetic Patient")
+        path = request.url.path.rstrip("/")
+        if path.endswith("/Patient") and "identifier=" in str(request.url.query):
+            seen["searches"].append(str(request.url.query))
+            return httpx.Response(
+                200,
+                json={"resourceType": "Bundle", "type": "searchset", "entry": [{"resource": patient}]},
+            )
+        if request.url.path.endswith(f"/{PATIENT_PATH}"):
+            return httpx.Response(200, json=patient)
+        if path.endswith("/Observation"):
+            seen["observation"] += 1
+            return httpx.Response(503, json={"resourceType": "OperationOutcome"})
+        return httpx.Response(404, json={"resourceType": "OperationOutcome"})
+
+    sink = InMemoryAuditSink()
+    client, http = _client(handler)
+    try:
+        result = _workflow(client, ScriptedModel([_tool_call(), _answer()]), sink).invoke()
+    finally:
+        http.close()
+    assert seen["observation"] == 3
+    assert seen["searches"]
+    assert all(PATIENT_CASE in query for query in seen["searches"])
+    assert len(sink.events) == 1
+    assert sink.events[0].run_id == "run-gemini-followup-001"
+    assert sink.events[0].case_id == PATIENT_CASE
+    assert sink.events[0].decision == "allowed"
+    assert result["case_id"] == PATIENT_CASE
+    assert result["context_patient"] == "resolved"
+    assert result["context_observation"] == "unavailable"
+    assert result["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
 
 
 def test_invalid_observation_bundle_stays_unavailable():

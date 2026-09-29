@@ -9,8 +9,10 @@ with system https://lab.local/followup-case. It is not Patient.id.
 
 from __future__ import annotations
 
+import contextvars
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -138,14 +140,59 @@ class FollowUpReadLedger:
         self.appointments: tuple[tuple[str, str], ...] = ()
 
 
+class _ReadScope:
+    """Clinical reads and authorization state for one invoke."""
+
+    def __init__(self, case_id: str) -> None:
+        self.case_id = case_id
+        self.ledger = FollowUpReadLedger()
+        self.policy_status = ""
+        self.policy_reason = ""
+
+
+_READ_SCOPE: contextvars.ContextVar[_ReadScope | None] = contextvars.ContextVar(
+    "followup_read_scope",
+    default=None,
+)
+
+
 class FollowUpFHIRAdapter:
     """Map a patient and that patient's observations. This class does not open HTTP."""
 
     def __init__(self, transport: FHIRTransport, now: Callable[[], datetime] | None = None) -> None:
         self.transport = transport
         self.calls: list[tuple[str, str]] = []
-        self.ledger = FollowUpReadLedger()
         self._now = now or (lambda: datetime.now(timezone.utc))
+
+    @property
+    def ledger(self) -> FollowUpReadLedger:
+        return self._scope().ledger
+
+    def _scope(self) -> _ReadScope:
+        scope = _READ_SCOPE.get()
+        if scope is None:
+            raise RuntimeError("follow-up read is not bound to a run")
+        return scope
+
+    def record_policy_decision(self, status: str, reason: str) -> None:
+        """Keep one routing verdict in the same scope as this run's reads."""
+        scope = self._scope()
+        scope.policy_status = status
+        scope.policy_reason = reason
+
+    def policy_decision(self) -> tuple[str, str]:
+        """Return only the routing verdict owned by the current invoke."""
+        scope = self._scope()
+        return scope.policy_status, scope.policy_reason
+
+    @contextmanager
+    def bind_read(self, case_id: str) -> Iterator[None]:
+        """Bind this execution's case and a new ledger. Tool threads copy this context."""
+        token = _READ_SCOPE.set(_ReadScope(case_id))
+        try:
+            yield
+        finally:
+            _READ_SCOPE.reset(token)
 
     def record_patient_search_failure(self, exc: ReadClientError) -> None:
         """A context search ended without a Patient resource. A resolved Patient stays."""
@@ -222,11 +269,15 @@ class FollowUpFHIRAdapter:
         }
 
     def patient_id_for_case(self, case_id: str) -> str:
-        """Resolve one case through Patient.identifier. This does not read Patient/{case_id}."""
+        """Resolve the authorized case. A different case id does not build a query."""
+        scope = _READ_SCOPE.get()
+        if scope is None or not isinstance(case_id, str) or case_id != scope.case_id:
+            raise ReadClientError("case id is not authorized for this run")
+        authorized = scope.case_id
         _mark("adapter:patient_for_case")
-        self.calls.append(("patient_for_case", case_id))
-        payload = self.transport.get(case_search_path(case_id))
-        return _patient_id_from_case_search(payload, case_id)
+        self.calls.append(("patient_for_case", authorized))
+        payload = self.transport.get(case_search_path(authorized))
+        return _patient_id_from_case_search(payload, authorized)
 
     def get_patient(self, patient_id: str) -> dict[str, str]:
         _mark("adapter:get_patient")
