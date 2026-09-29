@@ -97,6 +97,11 @@ class FollowUpWorkflowResult:
     turns: int
     run_id: str
     follow_up_required: FollowUpDecision
+    context_patient: str = "not_read"
+    context_observation: str = "not_read"
+    schedule_check: str = "not_checked"
+    schedule_classifications: tuple[str, ...] = ()
+    schedule_appointments: tuple[tuple[str, str], ...] = ()
 
 
 class FollowUpWorkflow:
@@ -136,6 +141,7 @@ class FollowUpWorkflow:
         """Execute one case and return the application result."""
         state = self._engine.invoke(case_id)
         patient = state["patient"]
+        ledger = self._engine.adapter.ledger
         return FollowUpWorkflowResult(
             case_id=state["case_id"],
             status=state["decision"],
@@ -147,6 +153,11 @@ class FollowUpWorkflow:
             turns=int(state["turn"]),
             run_id=self.run_id,
             follow_up_required=_explicit_follow_up_required(state),
+            context_patient=ledger.patient,
+            context_observation=ledger.observation,
+            schedule_check=ledger.schedule_check,
+            schedule_classifications=ledger.classifications,
+            schedule_appointments=ledger.appointments,
         )
 
 

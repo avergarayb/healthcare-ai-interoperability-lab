@@ -81,6 +81,9 @@ class EvaluationCase:
     max_model_turns: int = field(default_factory=lambda: MAX_MODEL_TURNS)
     expected_classifications: tuple[str, ...] | None = None
     appointment_records: tuple[dict[str, object], ...] | None = None
+    expected_patient: str = "resolved"
+    expected_observation: str = "with_resources"
+    expected_schedule: str = "not_checked"
 
 
 def _context(case_id: str = PATIENT_CASE) -> ToolReply:
@@ -122,6 +125,7 @@ def _schedule_case(
         expected_close_count=0,
         expected_classifications=classification,
         appointment_records=appointments,
+        expected_schedule="checked",
     )
 
 
@@ -156,6 +160,7 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_structured=True,
             expected_close_count=0,
             expected_classifications=(UPCOMING_CONFIRMED,),
+            expected_schedule="checked",
         ),
         EvaluationCase(
             id="empty-appointment-search",
@@ -171,6 +176,7 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_close_count=0,
             fhir="no_appointments",
             expected_classifications=(NONE,),
+            expected_schedule="checked",
         ),
         EvaluationCase(
             id="unknown-tool",
@@ -184,6 +190,8 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_follow_up_required="unknown",
             expected_structured=False,
             expected_close_count=0,
+            expected_patient="not_read",
+            expected_observation="not_read",
         ),
         EvaluationCase(
             id="write-effect-denied",
@@ -197,6 +205,8 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_follow_up_required="unknown",
             expected_structured=False,
             expected_close_count=0,
+            expected_patient="not_read",
+            expected_observation="not_read",
         ),
         EvaluationCase(
             id="unavailable-patient",
@@ -211,6 +221,8 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_structured=False,
             expected_close_count=0,
             fhir="missing_patient",
+            expected_patient="not_resolved",
+            expected_observation="not_read",
         ),
         EvaluationCase(
             id="model-turn-limit",
@@ -243,6 +255,7 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_structured=True,
             expected_close_count=1,
             expected_classifications=(UPCOMING_CONFIRMED,),
+            expected_schedule="checked",
         ),
         EvaluationCase(
             id="direct-structured-final",
@@ -257,6 +270,22 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_structured=True,
             expected_close_count=0,
             expected_classifications=(UPCOMING_CONFIRMED,),
+            expected_schedule="checked",
+        ),
+        EvaluationCase(
+            id="structured-final-without-read",
+            case_id=PATIENT_CASE,
+            replies=(FinalReply("false"),),
+            expected_tools=(),
+            expected_status="finish",
+            expected_policy=(),
+            expected_evidence=(),
+            allowed_evidence=(),
+            expected_follow_up_required="false",
+            expected_structured=True,
+            expected_close_count=0,
+            expected_patient="not_read",
+            expected_observation="not_read",
         ),
         _schedule_case(
             "schedule-none",
@@ -313,20 +342,22 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             expected_structured=True,
             expected_close_count=0,
             fhir="no_observations",
+            expected_observation="empty",
         ),
         EvaluationCase(
             id="observation-read-unavailable",
             case_id=PATIENT_CASE,
             replies=(_context(),),
-            expected_tools=(),
+            expected_tools=(FOLLOWUP_TOOL,),
             expected_status="unavailable",
             expected_policy=((FOLLOWUP_TOOL, "allowed"),),
-            expected_evidence=(),
-            allowed_evidence=(),
+            expected_evidence=((FOLLOWUP_TOOL, f"Patient/{PATIENT_ID}"),),
+            allowed_evidence=((FOLLOWUP_TOOL, f"Patient/{PATIENT_ID}"),),
             expected_follow_up_required="unknown",
             expected_structured=False,
             expected_close_count=0,
             fhir="observation_unavailable",
+            expected_observation="unavailable",
         ),
         _schedule_case(
             "schedule-past",

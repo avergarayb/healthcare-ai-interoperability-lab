@@ -125,14 +125,101 @@ def _patient_id_from_case_search(payload: dict, case_id: str) -> str:
     return matches[0]
 
 
+class FollowUpReadLedger:
+    """Provenance for one run. A status is never inferred from a missing list."""
+
+    def __init__(self) -> None:
+        self.patient = "not_read"
+        self.observation = "not_read"
+        self.patient_resource: dict | None = None
+        self.observations: list[dict] | None = None
+        self.schedule_check = "not_checked"
+        self.classifications: tuple[str, ...] = ()
+        self.appointments: tuple[tuple[str, str], ...] = ()
+
+
 class FollowUpFHIRAdapter:
     """Map a patient and that patient's observations. This class does not open HTTP."""
 
     def __init__(self, transport: FHIRTransport, now: Callable[[], datetime] | None = None) -> None:
         self.transport = transport
         self.calls: list[tuple[str, str]] = []
-        self.appointment_classifications: tuple[str, ...] = ()
+        self.ledger = FollowUpReadLedger()
         self._now = now or (lambda: datetime.now(timezone.utc))
+
+    def record_patient_search_failure(self, exc: ReadClientError) -> None:
+        """A context search ended without a Patient resource. A resolved Patient stays."""
+        if self.ledger.patient == "resolved":
+            return
+        if str(exc) == "case has no patient":
+            self.ledger.patient = "not_resolved"
+            return
+        self.ledger.patient = "unavailable"
+
+    def record_patient_read_failure(self) -> None:
+        if self.ledger.patient != "resolved":
+            self.ledger.patient = "unavailable"
+
+    def record_patient_resolved(self, patient: dict) -> None:
+        self.ledger.patient = "resolved"
+        self.ledger.patient_resource = dict(patient)
+
+    def record_observation_failure(self) -> None:
+        if self.ledger.observation == "not_read":
+            self.ledger.observation = "unavailable"
+
+    def record_observations(self, observations: list[dict]) -> None:
+        self.ledger.observation = "with_resources" if observations else "empty"
+        self.ledger.observations = [dict(item) for item in observations]
+
+    def record_schedule_failure(self) -> None:
+        if self.ledger.schedule_check != "checked":
+            self.ledger.schedule_check = "unavailable"
+
+    def record_schedule(self, facts: dict[str, object]) -> None:
+        classifications = facts.get("classifications")
+        appointments = facts.get("appointments")
+        if not isinstance(classifications, list) or not isinstance(appointments, list):
+            self.record_schedule_failure()
+            return
+        self.ledger.schedule_check = "checked"
+        self.ledger.classifications = tuple(str(item) for item in classifications)
+        if classifications == [NONE]:
+            self.ledger.appointments = ()
+            return
+        rows: list[tuple[str, str]] = []
+        for item in appointments:
+            if not isinstance(item, dict):
+                continue
+            appointment_id = item.get("id")
+            classification = item.get("classification")
+            if isinstance(appointment_id, str) and appointment_id and isinstance(classification, str):
+                rows.append((f"Appointment/{appointment_id}", classification))
+        self.ledger.appointments = tuple(rows)
+
+    def preserved_reads(self) -> dict[str, object]:
+        """Resources already read. A later failure does not erase them or invent the rest."""
+        patient = None
+        observations: list[dict] = []
+        evidence: list[dict[str, object]] = []
+        tools: list[str] = []
+        if self.ledger.patient == "resolved" and isinstance(self.ledger.patient_resource, dict):
+            patient = dict(self.ledger.patient_resource)
+            if self.ledger.observation in {"with_resources", "empty"} and self.ledger.observations is not None:
+                observations = [dict(item) for item in self.ledger.observations]
+            evidence.append({"tool": FOLLOWUP_TOOL, "resources": _resource_refs(patient, observations)})
+            tools.append(FOLLOWUP_TOOL)
+        if self.ledger.schedule_check == "checked":
+            refs = [appointment_id for appointment_id, _classification in self.ledger.appointments]
+            if refs:
+                evidence.append({"tool": APPOINTMENTS_TOOL, "resources": refs})
+            tools.append(APPOINTMENTS_TOOL)
+        return {
+            "patient": patient,
+            "observations": observations,
+            "evidence": evidence,
+            "tools_used": tools,
+        }
 
     def patient_id_for_case(self, case_id: str) -> str:
         """Resolve one case through Patient.identifier. This does not read Patient/{case_id}."""
@@ -168,10 +255,7 @@ class FollowUpFHIRAdapter:
         _mark("adapter:get_patient_appointments")
         self.calls.append(("get_patient_appointments", patient_id))
         payload = self.transport.get(appointment_search_path(patient_id))
-        facts = appointment_facts(payload, patient_id, now or self._now())
-        classifications = facts["classifications"]
-        self.appointment_classifications = tuple(classifications) if isinstance(classifications, list) else ()
-        return facts
+        return appointment_facts(payload, patient_id, now or self._now())
 
 
 def appointment_search_path(patient_id: str) -> str:
@@ -285,11 +369,24 @@ def make_followup_tool(adapter: FollowUpFHIRAdapter):
     def get_patient_followup_context(case_id: str) -> dict[str, object]:
         """Read one case through the adapter."""
         _mark(f"execute:{FOLLOWUP_TOOL}")
-        patient_id = adapter.patient_id_for_case(case_id)
-        return {
-            "patient": adapter.get_patient(patient_id),
-            "observations": adapter.get_observations(patient_id),
-        }
+        try:
+            patient_id = adapter.patient_id_for_case(case_id)
+        except ReadClientError as exc:
+            adapter.record_patient_search_failure(exc)
+            raise
+        try:
+            patient = adapter.get_patient(patient_id)
+        except ReadClientError:
+            adapter.record_patient_read_failure()
+            raise
+        adapter.record_patient_resolved(patient)
+        try:
+            observations = adapter.get_observations(patient_id)
+        except ReadClientError:
+            adapter.record_observation_failure()
+            raise
+        adapter.record_observations(observations)
+        return {"patient": patient, "observations": observations}
 
     return get_patient_followup_context
 
@@ -301,8 +398,14 @@ def make_appointments_tool(adapter: FollowUpFHIRAdapter):
     def get_patient_appointments(case_id: str) -> dict[str, object]:
         """Read appointment facts for the patient linked to one follow-up case."""
         _mark(f"execute:{APPOINTMENTS_TOOL}")
-        patient_id = adapter.patient_id_for_case(case_id)
-        return adapter.get_patient_appointments(patient_id)
+        try:
+            patient_id = adapter.patient_id_for_case(case_id)
+            facts = adapter.get_patient_appointments(patient_id)
+        except ReadClientError:
+            adapter.record_schedule_failure()
+            raise
+        adapter.record_schedule(facts)
+        return facts
 
     return get_patient_appointments
 

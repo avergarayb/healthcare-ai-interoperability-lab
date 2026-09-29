@@ -934,7 +934,9 @@ def test_exhausted_observation_retry_is_not_an_empty_result(monkeypatch):
         empty_http.close()
     assert seen["observation"] == 3
     assert failed["decision"] == "unavailable"
-    assert failed["evidence"] == []
+    assert failed["observations"] == []
+    assert failed["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert failed["patient"]["id"] == PATIENT_ID
     assert empty["decision"] == "finish"
     assert empty["observations"] == []
     assert empty["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
@@ -952,8 +954,9 @@ def test_invalid_observation_bundle_stays_unavailable():
     finally:
         http.close()
     assert result["decision"] == "unavailable"
-    assert result["evidence"] == []
     assert result["observations"] == []
+    assert result["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert result["patient"]["id"] == PATIENT_ID
 
 
 def test_provider_unavailable_is_not_a_tool_call():

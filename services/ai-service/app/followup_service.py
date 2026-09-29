@@ -14,11 +14,20 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.followup_models import (
+    ActionState,
+    ActionStatus,
+    ClinicalAssessment,
+    ClinicalAssessmentStatus,
+    ContextState,
     Evidence,
     FollowUpEndpointResponse,
     FollowUpEndpointStatus,
     FollowUpRequest,
     FollowUpRequired,
+    HumanReview,
+    HumanReviewStatus,
+    ScheduleAppointment,
+    ScheduleState,
     dump_followup_endpoint_response,
 )
 from app.langgraph_fhir_client import InMemoryAuditSink, default_clock
@@ -94,13 +103,35 @@ def _project(result: FollowUpWorkflowResult) -> FollowUpEndpointResponse | None:
     allowed = {item.value for item in FollowUpRequired}
     if status is None or result.run_id == "" or result.follow_up_required not in allowed:
         return None
-    return FollowUpEndpointResponse(
-        runId=result.run_id,
-        caseId=result.case_id,
-        status=status,
-        followUpRequired=FollowUpRequired(result.follow_up_required),
-        answer=result.final_answer,
-        evidence=_evidence(result.evidence),
+    try:
+        return FollowUpEndpointResponse(
+            runId=result.run_id,
+            caseId=result.case_id,
+            status=status,
+            context=ContextState(patient=result.context_patient, observation=result.context_observation),
+            schedule=_schedule(result),
+            clinicalAssessment=ClinicalAssessment(status=ClinicalAssessmentStatus.NOT_PERFORMED),
+            humanReview=HumanReview(status=HumanReviewStatus.NOT_EVALUATED),
+            action=ActionState(status=ActionStatus.NOT_DETERMINED),
+            followUpRequired=FollowUpRequired(result.follow_up_required),
+            answer=result.final_answer,
+            evidence=_evidence(result.evidence),
+        )
+    except ValidationError:
+        return None
+
+
+def _schedule(result: FollowUpWorkflowResult) -> ScheduleState:
+    if result.schedule_check != "checked":
+        return ScheduleState(check=result.schedule_check)
+    appointments = [
+        ScheduleAppointment(id=appointment_id, classification=classification)
+        for appointment_id, classification in result.schedule_appointments
+    ]
+    return ScheduleState(
+        check="checked",
+        classifications=list(result.schedule_classifications),
+        appointments=appointments or None,
     )
 
 

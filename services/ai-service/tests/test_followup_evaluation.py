@@ -20,9 +20,9 @@ def test_system_scenarios_pass_without_inferring_the_token():
     results = run_suite()
     by_id = {result.evaluation_case_id: result for result in results}
     report = format_report(results)
-    assert len(results) == 16
+    assert len(results) == 17
     assert all(result.passed for result in results)
-    assert report.splitlines()[2:5] == ["16 cases", "16 passed", "0 failed"]
+    assert report.splitlines()[2:5] == ["17 cases", "17 passed", "0 failed"]
     context = by_id["context-sufficient"]
     assert context.tool_sequence == (FOLLOWUP_TOOL,)
     assert APPOINTMENTS_TOOL not in context.tool_sequence
@@ -79,10 +79,26 @@ def test_system_scenarios_pass_without_inferring_the_token():
     failed_observations = by_id["observation-read-unavailable"]
     assert empty_observations.status == "finish"
     assert empty_observations.follow_up_required == "unknown"
+    assert empty_observations.context == ("resolved", "empty")
+    assert empty_observations.schedule_check == "not_checked"
     assert empty_observations.evidence_ids == ((FOLLOWUP_TOOL, "Patient/SYN-PATIENT-007"),)
     assert failed_observations.status == "unavailable"
-    assert failed_observations.evidence_ids == ()
-    assert empty_observations.status != failed_observations.status
+    assert failed_observations.context == ("resolved", "unavailable")
+    assert failed_observations.schedule_check == "not_checked"
+    assert failed_observations.evidence_ids == ((FOLLOWUP_TOOL, "Patient/SYN-PATIENT-001"),)
+    assert empty_observations.context != failed_observations.context
+    assert by_id["unavailable-patient"].context == ("not_resolved", "not_read")
+    assert by_id["context-sufficient"].schedule_check == "not_checked"
+    assert by_id["schedule-none"].schedule_check == "checked"
+    unread = by_id["structured-final-without-read"]
+    assert unread.context == ("not_read", "not_read")
+    assert unread.schedule_check == "not_checked"
+    assert unread.follow_up_required == "false"
+    assert unread.evidence_ids == ()
+    confirmed_facts = by_id["direct-structured-final"]
+    assert by_id["appointment-required"].context == confirmed_facts.context
+    assert by_id["appointment-required"].schedule_check == confirmed_facts.schedule_check
+    assert by_id["appointment-required"].follow_up_required != confirmed_facts.follow_up_required
     assert by_id["appointment-required"].follow_up_required == "false"
     assert by_id["schedule-cancelled"].follow_up_required == "unknown"
     assert by_id["schedule-past"].follow_up_required == "unknown"

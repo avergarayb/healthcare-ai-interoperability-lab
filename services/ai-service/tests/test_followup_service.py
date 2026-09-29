@@ -20,6 +20,19 @@ from app.main import app, get_settings
 
 
 CASE = "SYN-FOLLOWUP-001"
+DECISION_BODY_KEYS = {
+    "runId",
+    "caseId",
+    "status",
+    "context",
+    "schedule",
+    "clinicalAssessment",
+    "humanReview",
+    "action",
+    "followUpRequired",
+    "answer",
+    "evidence",
+}
 FORBIDDEN_BODY_KEYS = {
     "agent",
     "agentVersion",
@@ -79,6 +92,11 @@ class _ScriptedWorkflow:
             turns=self.result.turns,
             run_id=self.run_id,
             follow_up_required=self.result.follow_up_required,
+            context_patient=self.result.context_patient,
+            context_observation=self.result.context_observation,
+            schedule_check=self.result.schedule_check,
+            schedule_classifications=self.result.schedule_classifications,
+            schedule_appointments=self.result.schedule_appointments,
         )
 
 
@@ -99,6 +117,9 @@ def _result(status: str, answer: str, **overrides) -> FollowUpWorkflowResult:
         "turns": 2,
         "run_id": "ignored-by-the-script",
         "follow_up_required": "unknown",
+        "context_patient": "resolved",
+        "context_observation": "with_resources",
+        "schedule_check": "not_checked",
     }
     values.update(overrides)
     return FollowUpWorkflowResult(**values)
@@ -214,6 +235,11 @@ def test_completed_case_projects_the_workflow_result(monkeypatch):
     assert body["runId"]
     assert body["followUpRequired"] == "true"
     assert body["answer"] == "Synthetic answer."
+    assert body["context"] == {"patient": "resolved", "observation": "with_resources"}
+    assert body["schedule"] == {"check": "not_checked"}
+    assert body["clinicalAssessment"] == {"status": "not_performed"}
+    assert body["humanReview"] == {"status": "not_evaluated"}
+    assert body["action"] == {"status": "not_determined"}
     assert body["evidence"] == [
         {"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"},
         {"tool": "get_patient_followup_context", "id": "Observation/obs-synthetic-001"},
@@ -230,13 +256,28 @@ def test_denied_result_stays_denied(monkeypatch):
     client, _seen = _client(
         monkeypatch,
         _settings(),
-        _result("denied", "Tool denied by policy", evidence=[], follow_up_required="unknown"),
+        _result(
+            "denied",
+            "Tool denied by policy",
+            evidence=[],
+            follow_up_required="unknown",
+            patient=None,
+            observations=[],
+            tools_used=[],
+            context_patient="not_read",
+            context_observation="not_read",
+            schedule_check="not_checked",
+        ),
     )
     response = _post(client, {"caseId": CASE}, headers=_auth_headers())
     body = response.json()
     assert response.status_code == 200
     assert body["status"] == "denied"
     assert body["answer"] == "Tool denied by policy"
+    assert body["followUpRequired"] == "unknown"
+    assert body["context"] == {"patient": "not_read", "observation": "not_read"}
+    assert body["schedule"] == {"check": "not_checked"}
+    assert body["clinicalAssessment"] == {"status": "not_performed"}
     assert body["evidence"] == []
 
 
@@ -244,24 +285,44 @@ def test_unavailable_result_is_not_completed(monkeypatch):
     client, _seen = _client(
         monkeypatch,
         _settings(),
-        _result("unavailable", "stopped: clinical context unavailable", evidence=[]),
+        _result(
+            "unavailable",
+            "stopped: clinical context unavailable",
+            observations=[],
+            evidence=[
+                {"tool": "get_patient_followup_context", "resources": ["Patient/SYN-PATIENT-001"]},
+            ],
+            context_patient="resolved",
+            context_observation="unavailable",
+            schedule_check="not_checked",
+        ),
     )
     response = _post(client, {"caseId": CASE}, headers=_auth_headers())
     body = response.json()
     assert response.status_code == 200
     assert body["status"] == "unavailable"
     assert body["status"] != "completed"
+    assert body["context"] == {"patient": "resolved", "observation": "unavailable"}
+    assert body["schedule"] == {"check": "not_checked"}
+    assert body["evidence"] == [
+        {"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"},
+    ]
+    assert body["followUpRequired"] == "unknown"
 
 
 def test_limit_result_stays_limit(monkeypatch):
     client, _seen = _client(
         monkeypatch,
         _settings(),
-        _result("limit", "stopped: model turn limit reached", evidence=[]),
+        _result("limit", "stopped: model turn limit reached"),
     )
     response = _post(client, {"caseId": CASE}, headers=_auth_headers())
+    body = response.json()
     assert response.status_code == 200
-    assert response.json()["status"] == "limit"
+    assert body["status"] == "limit"
+    assert body["context"] == {"patient": "resolved", "observation": "with_resources"}
+    assert body["schedule"] == {"check": "not_checked"}
+    assert body["evidence"]
 
 
 def test_http_run_id_is_the_workflow_run_id(monkeypatch):
@@ -311,7 +372,7 @@ def test_http_run_id_matches_the_policy_audit_log(monkeypatch, caplog):
         response = _post(TestClient(app), {"caseId": CASE}, headers=_auth_headers())
     body = response.json()
     assert response.status_code == 200
-    assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
+    assert set(body) == DECISION_BODY_KEYS
     assert body["runId"] == "12345678-1234-5678-1234-567812345678"
     assert body["caseId"] == CASE
     assert body["status"] == "completed"
@@ -409,10 +470,14 @@ def test_http_projects_a_structured_follow_up_required(monkeypatch, token, answe
     response = _post_real_workflow(monkeypatch, message)
     body = response.json()
     assert response.status_code == 200
-    assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
+    assert set(body) == DECISION_BODY_KEYS
     assert body["status"] == "completed"
     assert body["followUpRequired"] == token
     assert body["answer"] == answer
+    assert body["context"] == {"patient": "resolved", "observation": "with_resources"}
+    assert body["schedule"] == {"check": "not_checked"}
+    assert body["clinicalAssessment"] == {"status": "not_performed"}
+    assert body["action"] == {"status": "not_determined"}
     assert "thought_signature" not in response.text
 
 
@@ -425,7 +490,7 @@ def test_http_keeps_follow_up_required_unknown_when_the_model_omits_it(monkeypat
     )
     body = response.json()
     assert response.status_code == 200
-    assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
+    assert set(body) == DECISION_BODY_KEYS
     assert body["followUpRequired"] == "unknown"
     assert body["answer"] == "Still no structured decision."
     assert body["followUpRequired"] != "true"
@@ -468,6 +533,14 @@ def test_http_evidence_lists_resources_from_each_read_tool(monkeypatch):
     body = response.json()
     assert response.status_code == 200
     assert body["followUpRequired"] == "false"
+    assert body["clinicalAssessment"] == {"status": "not_performed"}
+    assert body["action"] == {"status": "not_determined"}
+    assert body["context"] == {"patient": "resolved", "observation": "with_resources"}
+    assert body["schedule"]["check"] == "checked"
+    assert body["schedule"]["classifications"] == ["UPCOMING_CONFIRMED"]
+    assert body["schedule"]["appointments"] == [
+        {"id": "Appointment/appointment-synthetic-001", "classification": "UPCOMING_CONFIRMED"},
+    ]
     assert body["evidence"] == [
         {"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"},
         {"tool": "get_patient_followup_context", "id": "Observation/obs-synthetic-001"},
@@ -610,7 +683,7 @@ def test_http_contract_stays_the_same_when_gemini_retries(monkeypatch, caplog):
         app.dependency_overrides.clear()
     body = response.json()
     assert response.status_code == 200
-    assert set(body) == {"runId", "caseId", "status", "followUpRequired", "answer", "evidence"}
+    assert set(body) == DECISION_BODY_KEYS
     assert body["status"] == "completed"
     assert body["followUpRequired"] == "true"
     assert body["answer"] == "Context received."

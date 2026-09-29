@@ -32,6 +32,87 @@ class FollowUpRequired(str, Enum):
     UNKNOWN = "unknown"
 
 
+class PatientRead(str, Enum):
+    NOT_READ = "not_read"
+    RESOLVED = "resolved"
+    NOT_RESOLVED = "not_resolved"
+    UNAVAILABLE = "unavailable"
+
+
+class ObservationRead(str, Enum):
+    NOT_READ = "not_read"
+    WITH_RESOURCES = "with_resources"
+    EMPTY = "empty"
+    UNAVAILABLE = "unavailable"
+
+
+class ScheduleCheck(str, Enum):
+    NOT_CHECKED = "not_checked"
+    CHECKED = "checked"
+    UNAVAILABLE = "unavailable"
+
+
+class AppointmentClassification(str, Enum):
+    UPCOMING_CONFIRMED = "UPCOMING_CONFIRMED"
+    UPCOMING_UNCONFIRMED = "UPCOMING_UNCONFIRMED"
+    CANCELLED = "CANCELLED"
+    PAST = "PAST"
+    OTHER = "OTHER"
+    NONE = "NONE"
+
+
+class ClinicalAssessmentStatus(str, Enum):
+    NOT_PERFORMED = "not_performed"
+
+
+class HumanReviewStatus(str, Enum):
+    NOT_EVALUATED = "not_evaluated"
+
+
+class ActionStatus(str, Enum):
+    NOT_DETERMINED = "not_determined"
+
+
+class ContextState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    patient: PatientRead
+    observation: ObservationRead
+
+
+class ScheduleAppointment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    classification: AppointmentClassification
+
+
+class ScheduleState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    check: ScheduleCheck
+    classifications: list[AppointmentClassification] | None = None
+    appointments: list[ScheduleAppointment] | None = None
+
+
+class ClinicalAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: ClinicalAssessmentStatus
+
+
+class HumanReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: HumanReviewStatus
+
+
+class ActionState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: ActionStatus
+
+
 class FollowUpRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -60,10 +141,15 @@ class FollowUpEndpointResponse(BaseModel):
     run_id: str = Field(alias="runId")
     case_id: str = Field(alias="caseId")
     status: FollowUpEndpointStatus
+    context: ContextState
+    schedule: ScheduleState
+    clinical_assessment: ClinicalAssessment = Field(alias="clinicalAssessment")
+    human_review: HumanReview = Field(alias="humanReview")
+    action: ActionState
     follow_up_required: FollowUpRequired = Field(alias="followUpRequired")
     answer: str
     evidence: list[Evidence]
 
 
 def dump_followup_endpoint_response(response: FollowUpEndpointResponse) -> dict:
-    return response.model_dump(by_alias=True, mode="json")
+    return response.model_dump(by_alias=True, mode="json", exclude_none=True)

@@ -5,11 +5,21 @@ from pydantic import ValidationError
 
 from app.followup_models import (
     CASE_IDS,
+    ActionState,
+    ActionStatus,
+    ClinicalAssessment,
+    ClinicalAssessmentStatus,
+    ContextState,
     Evidence,
     FollowUpEndpointResponse,
     FollowUpEndpointStatus,
     FollowUpRequest,
     FollowUpRequired,
+    HumanReview,
+    HumanReviewStatus,
+    ObservationRead,
+    PatientRead,
+    ScheduleState,
     dump_followup_endpoint_response,
 )
 
@@ -19,6 +29,11 @@ def _response(**overrides) -> FollowUpEndpointResponse:
         "runId": "00000000-0000-0000-0000-000000000001",
         "caseId": "SYN-FOLLOWUP-001",
         "status": FollowUpEndpointStatus.COMPLETED,
+        "context": ContextState(patient=PatientRead.RESOLVED, observation=ObservationRead.WITH_RESOURCES),
+        "schedule": ScheduleState(check="not_checked"),
+        "clinicalAssessment": ClinicalAssessment(status=ClinicalAssessmentStatus.NOT_PERFORMED),
+        "humanReview": HumanReview(status=HumanReviewStatus.NOT_EVALUATED),
+        "action": ActionState(status=ActionStatus.NOT_DETERMINED),
         "followUpRequired": FollowUpRequired.UNKNOWN,
         "answer": "Synthetic answer.",
         "evidence": [Evidence(tool="get_patient_followup_context", id="Patient/SYN-PATIENT-001")],
@@ -61,6 +76,11 @@ def test_endpoint_response_serializes_the_current_contract():
         "runId": "00000000-0000-0000-0000-000000000001",
         "caseId": "SYN-FOLLOWUP-001",
         "status": "completed",
+        "context": {"patient": "resolved", "observation": "with_resources"},
+        "schedule": {"check": "not_checked"},
+        "clinicalAssessment": {"status": "not_performed"},
+        "humanReview": {"status": "not_evaluated"},
+        "action": {"status": "not_determined"},
         "followUpRequired": "unknown",
         "answer": "Synthetic answer.",
         "evidence": [{"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"}],
@@ -97,6 +117,28 @@ def test_evidence_requires_tool_and_id():
         Evidence.model_validate(
             {"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001", "resourceType": "Patient"}
         )
+
+
+def test_decision_fields_reject_values_the_product_does_not_emit():
+    with pytest.raises(ValidationError):
+        ClinicalAssessment(status="assessed")
+    with pytest.raises(ValidationError):
+        ClinicalAssessment(status="insufficient_criteria")
+    with pytest.raises(ValidationError):
+        HumanReview(status="not_required")
+    with pytest.raises(ValidationError):
+        HumanReview(status="required")
+    with pytest.raises(ValidationError):
+        ActionState(status="no_action")
+    with pytest.raises(ValidationError):
+        ActionState(status="schedule")
+    assert {item.value for item in ClinicalAssessmentStatus} == {"not_performed"}
+    assert {item.value for item in HumanReviewStatus} == {"not_evaluated"}
+    assert {item.value for item in ActionStatus} == {"not_determined"}
+    body = dump_followup_endpoint_response(_response())
+    assert "classifications" not in body["schedule"]
+    assert "appointments" not in body["schedule"]
+    assert None not in body["schedule"].values()
 
 
 def test_endpoint_status_values():

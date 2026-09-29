@@ -673,7 +673,7 @@ class GeminiFhirFollowUp:
             found = _find_read_error(exc)
             if found is None or str(found) == "transport failed":
                 raise
-            return _unavailable(case_id)
+            return _unavailable(case_id, self.adapter.preserved_reads())
 
 
 def _trailing_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
@@ -686,10 +686,17 @@ def _trailing_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
     return found
 
 
-def _unavailable(case_id: str) -> GeminiFollowUpState:
+def _unavailable(case_id: str, preserved: dict[str, object]) -> GeminiFollowUpState:
+    """Stop the run and keep reads that already succeeded."""
     stopped = initial_state(case_id)
     stopped["decision"] = "unavailable"
     stopped["final_answer"] = UNAVAILABLE_ANSWER
+    patient = preserved["patient"]
+    if isinstance(patient, dict):
+        stopped["patient"] = patient
+    stopped["observations"] = list(preserved["observations"])
+    stopped["evidence"] = list(preserved["evidence"])
+    stopped["tools_used"] = list(preserved["tools_used"])
     return stopped
 
 

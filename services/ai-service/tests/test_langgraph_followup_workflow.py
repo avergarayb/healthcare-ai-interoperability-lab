@@ -29,6 +29,7 @@ from app.langgraph_fhir_client import (
     SAFE_AUDIT_FIELDS,
     FailingPreparedReadClient,
     InMemoryAuditSink,
+    PreparedReadClient,
     ReadClientError,
     clear_boundary_events,
     evaluate_tool_policy,
@@ -257,7 +258,15 @@ def test_fake_model_returns_an_application_result():
         "turns",
         "run_id",
         "follow_up_required",
+        "context_patient",
+        "context_observation",
+        "schedule_check",
+        "schedule_classifications",
+        "schedule_appointments",
     }
+    assert result.context_patient == "resolved"
+    assert result.context_observation == "with_resources"
+    assert result.schedule_check == "not_checked"
     assert result.run_id == "run-workflow-001"
     assert result.follow_up_required == "unknown"
     blob = json.dumps(asdict(result), default=str)
@@ -303,6 +312,9 @@ def test_denied_tool_does_not_read_fhir():
     assert result.observations == []
     assert result.evidence == []
     assert result.tools_used == []
+    assert result.context_patient == "not_read"
+    assert result.context_observation == "not_read"
+    assert result.schedule_check == "not_checked"
     assert client.calls == []
     assert f"execute:{FOLLOWUP_TOOL}" not in BOUNDARY_EVENTS
     assert "execute:send_message" not in BOUNDARY_EVENTS
@@ -477,6 +489,9 @@ def test_missing_case_is_unavailable_and_does_not_read_another_patient():
     assert result.observations == []
     assert result.evidence == []
     assert result.tools_used == []
+    assert result.context_patient == "not_resolved"
+    assert result.context_observation == "not_read"
+    assert result.schedule_check == "not_checked"
     assert client.calls == [case_search_path(missing)]
     assert PATIENT_PATH not in client.calls
     assert f"Patient/{missing}" not in client.calls
@@ -570,6 +585,9 @@ def test_fhir_failure_does_not_invent_clinical_context():
     assert result.observations == []
     assert result.evidence == []
     assert result.tools_used == []
+    assert result.context_patient == "unavailable"
+    assert result.context_observation == "not_read"
+    assert result.context_patient != "not_resolved"
     assert len(model.seen) == 1
     assert sink.events[0].decision == "allowed"
     assert BOUNDARY_EVENTS.index(f"audit:{FOLLOWUP_TOOL}:allowed") < BOUNDARY_EVENTS.index(
@@ -602,10 +620,80 @@ def test_turn_limit_stops_without_another_model_call():
     assert result.status == "limit"
     assert result.final_answer == MODEL_LIMIT_ANSWER
     assert result.follow_up_required == "unknown"
+    assert result.context_patient == "resolved"
+    assert result.context_observation == "with_resources"
+    assert result.schedule_check == "not_checked"
+    assert result.evidence
     assert result.turns == MAX_MODEL_TURNS
     assert MAX_MODEL_TURNS == 4
     assert model.replies[0].content == "this reply must not be requested"
     assert BOUNDARY_EVENTS.count(f"execute:{FOLLOWUP_TOOL}") == MAX_MODEL_TURNS
+
+
+def test_observation_failure_keeps_the_patient_already_read():
+    result = _workflow(
+        PreparedReadClient(fail_observation_read=True),
+        ScriptedModel([_tool_call(), _final("false", "observations=[] follow-up is false")]),
+    ).run(PATIENT_CASE)
+    assert result.status == "unavailable"
+    assert result.final_answer == UNAVAILABLE_ANSWER
+    assert result.follow_up_required == "unknown"
+    assert result.context_patient == "resolved"
+    assert result.context_observation == "unavailable"
+    assert result.schedule_check == "not_checked"
+    assert result.observations == []
+    assert result.evidence == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+    assert result.context_observation != "empty"
+
+
+def test_model_text_does_not_change_read_state():
+    prose = "patient=unavailable observation=empty schedule=NONE follow-up is false"
+    checked = _workflow(
+        PreparedReadClient(),
+        ScriptedModel([_tool_call(), _final("false", prose)]),
+    ).run(PATIENT_CASE)
+    unread = _workflow(
+        PreparedReadClient(),
+        ScriptedModel([_final("true", "patient=resolved observation=with_resources")]),
+    ).run(PATIENT_CASE)
+    assert checked.status == "finish"
+    assert checked.context_patient == "resolved"
+    assert checked.context_observation == "with_resources"
+    assert checked.schedule_check == "not_checked"
+    assert checked.schedule_classifications == ()
+    assert checked.follow_up_required == "false"
+    assert unread.context_patient == "not_read"
+    assert unread.context_observation == "not_read"
+    assert unread.schedule_check == "not_checked"
+    assert unread.follow_up_required == "true"
+    assert unread.evidence == []
+
+
+def test_appointment_failure_keeps_context_already_read():
+    class _AppointmentFailure:
+        def get(self, path: str) -> dict:
+            if path == case_search_path(PATIENT_CASE) or path == PATIENT_PATH or path == OBSERVATION_PATH:
+                return PreparedReadClient().get(path)
+            raise ReadClientError("HTTP 503")
+
+    result = _workflow(
+        _AppointmentFailure(),
+        ScriptedModel(
+            [
+                _tool_call(),
+                _tool_call(APPOINTMENTS_TOOL, {"case_id": PATIENT_CASE}, "call-2"),
+                _final("unknown"),
+            ]
+        ),
+    ).run(PATIENT_CASE)
+    assert result.status == "unavailable"
+    assert result.context_patient == "resolved"
+    assert result.context_observation == "with_resources"
+    assert result.schedule_check == "unavailable"
+    assert result.schedule_classifications == ()
+    assert result.evidence[0]["resources"] == [f"Patient/{PATIENT_ID}", "Observation/obs-synthetic-001"]
+    assert all(not reference.startswith("Appointment/") for reference in result.evidence[0]["resources"])
+    assert len(result.evidence) == 1
 
 
 def test_the_same_workflow_accepts_a_different_fhir_client():

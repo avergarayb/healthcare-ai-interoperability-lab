@@ -15,6 +15,7 @@ from app.langgraph_fhir_client import (
     PreparedReadClient,
     clear_boundary_events,
 )
+from app.followup_service import _project
 from app.langgraph_followup_workflow import FollowUpWorkflow
 from evaluation.cases import (
     NO_OBSERVATION_PATIENT,
@@ -68,6 +69,11 @@ class EvaluationObservation:
     fhir_calls: tuple[str, ...]
     executed_effects: tuple[str, ...]
     classifications: tuple[str, ...]
+    context: tuple[str, str]
+    schedule_check: str
+    clinical_assessment: str
+    human_review: str
+    action_status: str
 
 
 @dataclass(frozen=True)
@@ -84,6 +90,8 @@ class EvaluationResult:
     model_turns: int
     close_used: bool
     classifications: tuple[str, ...]
+    context: tuple[str, str]
+    schedule_check: str
     failures: tuple[str, ...]
     metrics: EvaluationMetrics
 
@@ -180,6 +188,10 @@ def observe(case: EvaluationCase) -> EvaluationObservation:
         now=lambda: datetime(2026, 9, 28, tzinfo=timezone.utc),
     )
     result = workflow.run(case.case_id)
+    projected = _project(result)
+    if projected is None:
+        raise RuntimeError("workflow result did not project")
+    schedule_labels = projected.schedule.classifications or []
     executed = tuple(
         event.removeprefix("execute:") for event in BOUNDARY_EVENTS if event.startswith("execute:")
     )
@@ -188,14 +200,19 @@ def observe(case: EvaluationCase) -> EvaluationObservation:
         tool_sequence=tuple(result.tools_used),
         policy=tuple((event.tool_name, event.decision) for event in sink.events),
         evidence=_flatten_evidence(result.evidence),
-        follow_up_required=result.follow_up_required,
+        follow_up_required=projected.follow_up_required.value,
         structured_decision_present=_structured_present(model.produced),
         status=result.status,
         model_turns=workflow._engine.model_calls,
         close_count=workflow._engine.trace.count("close"),
         fhir_calls=tuple(client.calls),
         executed_effects=executed,
-        classifications=tuple(workflow._engine.adapter.appointment_classifications),
+        classifications=tuple(item.value for item in schedule_labels),
+        context=(projected.context.patient.value, projected.context.observation.value),
+        schedule_check=projected.schedule.check.value,
+        clinical_assessment=projected.clinical_assessment.status.value,
+        human_review=projected.human_review.status.value,
+        action_status=projected.action.status.value,
     )
 
 
@@ -287,6 +304,18 @@ def score(case: EvaluationCase, observation: EvaluationObservation) -> Evaluatio
         and observation.classifications != case.expected_classifications
     ):
         failures.append("appointment classification mismatch")
+    if observation.context != (case.expected_patient, case.expected_observation):
+        failures.append("context mismatch")
+    if observation.schedule_check != case.expected_schedule:
+        failures.append("schedule mismatch")
+    if case.expected_schedule != "checked" and observation.classifications:
+        failures.append("schedule classification without a check")
+    if observation.clinical_assessment != "not_performed":
+        failures.append("clinical assessment mismatch")
+    if observation.human_review != "not_evaluated":
+        failures.append("human review mismatch")
+    if observation.action_status != "not_determined":
+        failures.append("action mismatch")
     return EvaluationResult(
         evaluation_case_id=case.id,
         case_id=case.case_id,
@@ -300,6 +329,8 @@ def score(case: EvaluationCase, observation: EvaluationObservation) -> Evaluatio
         model_turns=observation.model_turns,
         close_used=observation.close_count > 0,
         classifications=observation.classifications,
+        context=observation.context,
+        schedule_check=observation.schedule_check,
         failures=tuple(failures),
         metrics=metrics,
     )
