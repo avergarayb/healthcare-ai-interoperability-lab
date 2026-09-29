@@ -72,13 +72,13 @@ def _patient_resource(patient_id: str) -> dict[str, str]:
     return {"resourceType": "Patient", "id": patient_id}
 
 
-def _prepared_case_match(path: str) -> tuple[str, str] | None:
-    """The one prepared record is addressed by its case identifier, not by Patient.id."""
+def _prepared_case_match(path: str, case_id: str = PATIENT_CASE) -> tuple[str, str] | None:
+    """A prepared record is addressed by its case identifier, not by Patient.id."""
     prefix = "Patient?identifier="
     if not path.startswith(prefix):
         return None
     system, separator, value = unquote(path[len(prefix) :]).partition("|")
-    if separator and system and value == PATIENT_CASE:
+    if separator and system and value == case_id:
         return system, value
     return None
 
@@ -140,17 +140,26 @@ def synthetic_appointment(
 
 
 class PreparedReadClient:
-    """In-memory responses for one patient and one observation. No network."""
+    """In-memory FHIR reads for one prepared case. No network."""
 
     def __init__(
         self,
         *,
+        case_id: str = PATIENT_CASE,
+        patient_id: str = PATIENT_ID,
         observation_id: str = "obs-synthetic-001",
         observation_value: str = "Synthetic observation result",
+        observations: list[dict[str, object]] | None = None,
         appointments: list[dict[str, object]] | None = None,
+        fail_observation_read: bool = False,
     ) -> None:
-        self.observation_id = observation_id
-        self.observation_value = observation_value
+        self.case_id = case_id
+        self.patient_id = patient_id
+        self.fail_observation_read = fail_observation_read
+        if observations is None:
+            self.observations = [_observation_resource(observation_id, patient_id, observation_value)]
+        else:
+            self.observations = [dict(item) for item in observations]
         self.appointments = (
             [synthetic_followup_appointment()] if appointments is None else [dict(item) for item in appointments]
         )
@@ -159,18 +168,24 @@ class PreparedReadClient:
     def get(self, path: str) -> dict:
         BOUNDARY_EVENTS.append(f"client:{path}")
         self.calls.append(path)
-        matched = _prepared_case_match(path)
+        matched = _prepared_case_match(path, self.case_id)
         if matched is not None:
-            patient = _patient_resource(PATIENT_ID)
+            patient = _patient_resource(self.patient_id)
             patient["identifier"] = [{"system": matched[0], "value": matched[1]}]
             return {"resourceType": "Bundle", "type": "searchset", "entry": [{"resource": patient}]}
         if path.startswith("Patient?identifier="):
             return {"resourceType": "Bundle", "type": "searchset", "entry": []}
-        if path == f"Patient/{PATIENT_ID}":
-            return _patient_resource(PATIENT_ID)
-        if path == f"Observation?subject=Patient/{PATIENT_ID}":
-            return _bundle(_observation_resource(self.observation_id, PATIENT_ID, self.observation_value))
-        if path == f"Appointment?patient=Patient/{PATIENT_ID}":
+        if path == f"Patient/{self.patient_id}":
+            return _patient_resource(self.patient_id)
+        if path == f"Observation?subject=Patient/{self.patient_id}":
+            if self.fail_observation_read:
+                raise ReadClientError("HTTP 503")
+            return {
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "entry": [{"resource": dict(item)} for item in self.observations],
+            }
+        if path == f"Appointment?patient=Patient/{self.patient_id}":
             return {
                 "resourceType": "Bundle",
                 "type": "searchset",

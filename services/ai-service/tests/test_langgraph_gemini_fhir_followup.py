@@ -860,6 +860,102 @@ def test_fhir_client_error_does_not_invent_evidence():
     assert "Name From Server" not in result["final_answer"]
 
 
+def _patient_then_observation(observation_response: httpx.Response) -> object:
+    patient = _patient("Synthetic Patient")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path.rstrip("/")
+        if path.endswith("/Patient") and "identifier=" in str(request.url.query):
+            return httpx.Response(
+                200,
+                json={"resourceType": "Bundle", "type": "searchset", "entry": [{"resource": patient}]},
+            )
+        if request.url.path.endswith(f"/{PATIENT_PATH}"):
+            return httpx.Response(200, json=patient)
+        if path.endswith("/Observation"):
+            return observation_response
+        return httpx.Response(404, json={"resourceType": "OperationOutcome"})
+
+    return handler
+
+
+def test_empty_observation_search_finishes_with_patient_evidence_only():
+    model = ScriptedModel([_tool_call(), _answer("No observation was returned.", "unknown")])
+    client, http = _client(
+        _patient_then_observation(
+            httpx.Response(200, json={"resourceType": "Bundle", "type": "searchset", "total": 0})
+        )
+    )
+    try:
+        result = _workflow(client, model).invoke()
+    finally:
+        http.close()
+    assert result["decision"] == "finish"
+    assert result["observations"] == []
+    assert result["patient"]["id"] == PATIENT_ID
+    assert result["tools_used"] == [FOLLOWUP_TOOL]
+    assert result["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+
+
+def test_exhausted_observation_retry_is_not_an_empty_result(monkeypatch):
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", lambda _delay: None)
+    seen = {"observation": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        patient = _patient("Synthetic Patient")
+        path = request.url.path.rstrip("/")
+        if path.endswith("/Patient") and "identifier=" in str(request.url.query):
+            return httpx.Response(
+                200,
+                json={"resourceType": "Bundle", "type": "searchset", "entry": [{"resource": patient}]},
+            )
+        if request.url.path.endswith(f"/{PATIENT_PATH}"):
+            return httpx.Response(200, json=patient)
+        if path.endswith("/Observation"):
+            seen["observation"] += 1
+            return httpx.Response(503, json={"resourceType": "OperationOutcome"})
+        return httpx.Response(404, json={"resourceType": "OperationOutcome"})
+
+    model = ScriptedModel([_tool_call(), _answer()])
+    client, http = _client(handler)
+    try:
+        failed = _workflow(client, model).invoke()
+    finally:
+        http.close()
+    empty_model = ScriptedModel([_tool_call(), _answer("No observation was returned.", "unknown")])
+    empty_client, empty_http = _client(
+        _patient_then_observation(
+            httpx.Response(200, json={"resourceType": "Bundle", "type": "searchset", "entry": []})
+        )
+    )
+    try:
+        empty = _workflow(empty_client, empty_model).invoke()
+    finally:
+        empty_http.close()
+    assert seen["observation"] == 3
+    assert failed["decision"] == "unavailable"
+    assert failed["evidence"] == []
+    assert empty["decision"] == "finish"
+    assert empty["observations"] == []
+    assert empty["evidence"] == [{"tool": FOLLOWUP_TOOL, "resources": [f"Patient/{PATIENT_ID}"]}]
+
+
+def test_invalid_observation_bundle_stays_unavailable():
+    model = ScriptedModel([_tool_call(), _answer()])
+    client, http = _client(
+        _patient_then_observation(
+            httpx.Response(200, json={"resourceType": "Bundle", "type": "searchset", "entry": "not-a-list"})
+        )
+    )
+    try:
+        result = _workflow(client, model).invoke()
+    finally:
+        http.close()
+    assert result["decision"] == "unavailable"
+    assert result["evidence"] == []
+    assert result["observations"] == []
+
+
 def test_provider_unavailable_is_not_a_tool_call():
     def unavailable(messages):
         raise RuntimeError("gemini follow-up request failed status=503")
@@ -1061,6 +1157,54 @@ def test_scripted_model_reads_real_hapi_records():
     assert client.calls == CASE_READS
     assert stored_patient["name"][0]["text"] not in _audit_blob(sink)
     assert stored_observation.get("valueString", "missing-value") not in _audit_blob(sink)
+
+
+@pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")
+def test_hapi_empty_observation_search_is_not_unavailable():
+    base = hapi_base_url()
+    patient_id = "SYN-PATIENT-007"
+    case_id = "SYN-FOLLOWUP-007"
+    reader = HapiReadClient(base)
+    try:
+        stored = reader.get(f"Patient/{patient_id}")
+    except Exception:
+        stored = None
+    identifiers = stored.get("identifier") if isinstance(stored, dict) else None
+    linked = isinstance(identifiers, list) and any(
+        isinstance(item, dict)
+        and item.get("system") == CASE_IDENTIFIER_SYSTEM
+        and item.get("value") == case_id
+        for item in identifiers
+    )
+    if not linked:
+        _store(
+            base,
+            f"Patient/{patient_id}",
+            {
+                "resourceType": "Patient",
+                "id": patient_id,
+                "active": True,
+                "identifier": [{"system": CASE_IDENTIFIER_SYSTEM, "value": case_id}],
+                "name": [{"text": "Synthetic Follow-Up Patient 007"}],
+            },
+        )
+    search = HapiReadClient(base).get(f"Observation?subject=Patient/{patient_id}")
+    assert search.get("resourceType") == "Bundle"
+    assert search.get("entry") in (None, [])
+    clear_boundary_events()
+    model = ScriptedModel(
+        [
+            _tool_call(arguments={"case_id": case_id}),
+            _answer("No observation was returned.", "unknown"),
+        ]
+    )
+    result = _workflow(HapiReadClient(base), model, InMemoryAuditSink()).invoke(case_id)
+    assert result["decision"] == "finish"
+    assert result["observations"] == []
+    assert result["patient"]["id"] == patient_id
+    refs = [reference for item in result["evidence"] for reference in item["resources"]]
+    assert f"Patient/{patient_id}" in refs
+    assert not any(reference.startswith("Observation/") for reference in refs)
 
 
 @pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")

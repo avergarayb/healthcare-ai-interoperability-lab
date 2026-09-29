@@ -24,8 +24,16 @@ from app.langgraph_gemini_fhir_followup import MAX_MODEL_TURNS
 
 
 MISSING_CASE = "SYN-FOLLOWUP-005"
+NO_OBSERVATION_CASE = "SYN-FOLLOWUP-007"
+NO_OBSERVATION_PATIENT = "SYN-PATIENT-007"
 OBSERVATION_ID = "obs-synthetic-001"
-FhirMode = Literal["linked", "no_appointments", "missing_patient"]
+FhirMode = Literal[
+    "linked",
+    "no_appointments",
+    "missing_patient",
+    "no_observations",
+    "observation_unavailable",
+]
 
 
 @dataclass(frozen=True)
@@ -291,6 +299,34 @@ def system_scenarios() -> tuple[EvaluationCase, ...]:
             classification=(CANCELLED,),
             evidence=((APPOINTMENTS_TOOL, "Appointment/appointment-synthetic-cancelled-001"),),
             follow_up_required="unknown",
+        ),
+        EvaluationCase(
+            id="context-no-observations",
+            case_id=NO_OBSERVATION_CASE,
+            replies=(_context(NO_OBSERVATION_CASE), FinalReply("unknown")),
+            expected_tools=(FOLLOWUP_TOOL,),
+            expected_status="finish",
+            expected_policy=((FOLLOWUP_TOOL, "allowed"),),
+            expected_evidence=((FOLLOWUP_TOOL, f"Patient/{NO_OBSERVATION_PATIENT}"),),
+            allowed_evidence=((FOLLOWUP_TOOL, f"Patient/{NO_OBSERVATION_PATIENT}"),),
+            expected_follow_up_required="unknown",
+            expected_structured=True,
+            expected_close_count=0,
+            fhir="no_observations",
+        ),
+        EvaluationCase(
+            id="observation-read-unavailable",
+            case_id=PATIENT_CASE,
+            replies=(_context(),),
+            expected_tools=(),
+            expected_status="unavailable",
+            expected_policy=((FOLLOWUP_TOOL, "allowed"),),
+            expected_evidence=(),
+            allowed_evidence=(),
+            expected_follow_up_required="unknown",
+            expected_structured=False,
+            expected_close_count=0,
+            fhir="observation_unavailable",
         ),
         _schedule_case(
             "schedule-past",

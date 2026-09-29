@@ -605,7 +605,7 @@ class GeminiFhirFollowUp:
             if name == FOLLOWUP_TOOL:
                 patient = payload.get("patient")
                 observations = payload.get("observations")
-                if not isinstance(patient, dict) or not isinstance(observations, list) or not observations:
+                if not isinstance(patient, dict) or not isinstance(observations, list):
                     raise ValueError("tool result must include patient and observations")
                 evidence.append({"tool": FOLLOWUP_TOOL, "resources": _resource_refs(patient, observations)})
                 tools_used.append(FOLLOWUP_TOOL)

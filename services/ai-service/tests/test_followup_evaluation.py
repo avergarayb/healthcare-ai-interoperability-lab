@@ -20,9 +20,9 @@ def test_system_scenarios_pass_without_inferring_the_token():
     results = run_suite()
     by_id = {result.evaluation_case_id: result for result in results}
     report = format_report(results)
-    assert len(results) == 14
+    assert len(results) == 16
     assert all(result.passed for result in results)
-    assert report.splitlines()[2:5] == ["14 cases", "14 passed", "0 failed"]
+    assert report.splitlines()[2:5] == ["16 cases", "16 passed", "0 failed"]
     context = by_id["context-sufficient"]
     assert context.tool_sequence == (FOLLOWUP_TOOL,)
     assert APPOINTMENTS_TOOL not in context.tool_sequence
@@ -75,6 +75,14 @@ def test_system_scenarios_pass_without_inferring_the_token():
     assert by_id["schedule-unconfirmed"].classifications == (UPCOMING_UNCONFIRMED,)
     assert by_id["schedule-cancelled"].classifications == (CANCELLED,)
     assert by_id["schedule-past"].classifications == (PAST,)
+    empty_observations = by_id["context-no-observations"]
+    failed_observations = by_id["observation-read-unavailable"]
+    assert empty_observations.status == "finish"
+    assert empty_observations.follow_up_required == "unknown"
+    assert empty_observations.evidence_ids == ((FOLLOWUP_TOOL, "Patient/SYN-PATIENT-007"),)
+    assert failed_observations.status == "unavailable"
+    assert failed_observations.evidence_ids == ()
+    assert empty_observations.status != failed_observations.status
     assert by_id["appointment-required"].follow_up_required == "false"
     assert by_id["schedule-cancelled"].follow_up_required == "unknown"
     assert by_id["schedule-past"].follow_up_required == "unknown"

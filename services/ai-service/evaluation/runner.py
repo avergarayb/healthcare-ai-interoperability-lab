@@ -16,7 +16,14 @@ from app.langgraph_fhir_client import (
     clear_boundary_events,
 )
 from app.langgraph_followup_workflow import FollowUpWorkflow
-from evaluation.cases import EvaluationCase, FinalReply, Reply, ToolReply, UnstructuredReply
+from evaluation.cases import (
+    NO_OBSERVATION_PATIENT,
+    EvaluationCase,
+    FinalReply,
+    Reply,
+    ToolReply,
+    UnstructuredReply,
+)
 
 
 _VALID_DECISIONS = frozenset({"true", "false", "unknown"})
@@ -152,7 +159,17 @@ def observe(case: EvaluationCase) -> EvaluationObservation:
         appointment_records = []
     else:
         appointment_records = None
-    client = PreparedReadClient(appointments=appointment_records)
+    if case.fhir == "no_observations":
+        client = PreparedReadClient(
+            case_id=case.case_id,
+            patient_id=NO_OBSERVATION_PATIENT,
+            observations=[],
+            appointments=[],
+        )
+    elif case.fhir == "observation_unavailable":
+        client = PreparedReadClient(fail_observation_read=True)
+    else:
+        client = PreparedReadClient(appointments=appointment_records)
     sink = InMemoryAuditSink()
     workflow = FollowUpWorkflow(
         model=model,

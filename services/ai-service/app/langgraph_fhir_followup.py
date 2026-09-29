@@ -64,11 +64,12 @@ def _name_text(payload: dict) -> str | None:
 
 
 def _observations_from_bundle(payload: dict) -> list[dict]:
+    """Read Observation entries. A valid bundle with no entries is an empty result."""
     if payload.get("resourceType") != "Bundle":
         raise ReadClientError("observation response must be a bundle")
-    entries = payload.get("entry")
-    if not isinstance(entries, list) or not entries:
-        raise ReadClientError("observation bundle has no entries")
+    entries = payload.get("entry") or []
+    if not isinstance(entries, list):
+        raise ReadClientError("observation bundle entries must be a list")
     observations: list[dict] = []
     for entry in entries:
         if not isinstance(entry, dict):
