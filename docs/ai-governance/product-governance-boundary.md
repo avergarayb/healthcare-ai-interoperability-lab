@@ -2,664 +2,224 @@
 
 **Healthcare AI & Interoperability Platform**
 
-**Snapshot date:** 20 September 2026
-
+**Snapshot date:** 29 September 2026
 **Document type:** product / engineering governance boundary
 
-**Related documents:**
-
-- `docs/ai-governance/regulatory-context.md`
-- `docs/ai-governance/laboratory-state.md`
-- `docs/ai-governance/llm-boundary-threats-and-controls.md`
-- `docs/adr/ADR-076-controlled-gemini-integration.md`
-- `docs/fhir/model-boundary-contract-v1.md`
-
----
+This document is not legal advice, regulatory or compliance certification, clinical validation, SIHCE accreditation or RENHICE authorization. Technical controls do not by themselves establish legal authorization or production readiness.
 
 ## 1. Purpose
 
-This document defines the current product and governance boundary for the **Healthcare AI & Interoperability Platform**.
+This document defines the current product units, implemented data paths, model authority, human-review meaning and change-control boundary.
 
-Its purpose is to establish:
-
-- what the product is;
-- what capabilities currently exist;
-- what data paths currently exist;
-- what the current AI boundary is;
-- what capabilities are explicitly outside the current scope;
-- how future commercial scenarios should be evaluated before becoming part of the product;
-- and which transitions require a new product, technical, governance, or regulatory assessment.
-
-This document is a product and engineering governance artifact.
-
-It does not constitute:
-
-- legal advice;
-- legal opinion;
-- regulatory certification;
-- compliance certification;
-- healthcare certification;
-- SIHCE accreditation;
-- RENHICE authorization;
-- clinical validation.
-
-A technical capability described here must not be interpreted as legal authorization or regulatory compliance.
-
----
+The authoritative Clinical Follow-up Review rules are in [`../contracts/post-consultation-result-review-v1.md`](../contracts/post-consultation-result-review-v1.md). Architecture decisions are indexed in [`../architecture/README.md`](../architecture/README.md).
 
 ## 2. Product identity
 
-The product is:
+The umbrella product direction is **Healthcare AI & Interoperability Platform**. It contains two product/deployment units:
 
-**Healthcare AI & Interoperability Platform**
+1. **Healthcare Interoperability** — Java / Spring Boot.
+2. **Healthcare AI** — Python / FastAPI / LangGraph.
 
-It is **one product** with **two technical surfaces**:
+They are independently deployable and may be composed or eventually commercialized together or independently. Pricing, packaging and final commercial SKUs have not been decided.
 
-1. **Java interoperability surface**
-2. **Python AI surface**
+“Product A” and “Product B” are optional architectural shorthand, not settled commercial names.
 
-These surfaces are intentionally separated in the current architecture. They are not two commercial products.
+## 3. Current product state
 
-The product is intended to evolve toward controlled integration between healthcare information systems, interoperability standards, and AI capabilities.
+### 3.1 Healthcare Interoperability
 
-The current implementation is a **development baseline**. It is not a production healthcare platform.
+Implemented development capabilities include:
 
-Historical wording in `laboratory-state.md` records the post-077 technical baseline. It does not override this product identity.
+- Java 21 / Spring Boot;
+- FHIR R4 client behavior;
+- local HAPI FHIR connectivity;
+- SMART Authorization Code + PKCE foundations;
+- Epic and Oracle sandbox profiles;
+- bounded routing, resilience, audit and observability;
+- controlled snapshots, allowlists and projections;
+- Model Boundary Contract v1 and service-token protection.
 
----
+This unit is not a product FHIR server, customer EHR, SIHCE or RENHICE participant.
 
-## 3. Product objective
+### 3.2 Healthcare AI
 
-The long-term product objective is to provide a controlled technical platform through which healthcare organizations can integrate:
+Implemented development capabilities include:
 
-- healthcare information systems;
-- FHIR-based interoperability;
-- controlled clinical-data projections;
-- AI capabilities;
-- governance controls;
-- and, where appropriate, human oversight.
+- FastAPI internal endpoints on the Python service;
+- authenticated Model Boundary v1 consumption without model invocation;
+- a separate gated Gemini summary restricted to fixture `SYN-076-001`;
+- Clinical Follow-up Review through `POST /internal/agent/follow-up`;
+- application-owned, case-bound, GET-only FHIR acquisition for Patient, Encounter, Observation and Appointment;
+- bounded and completeness-aware search traversal;
+- deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` evaluation before LangGraph;
+- a separately authorized LangGraph/Gemini narrative subflow;
+- response-level human-review and proposed-action projection.
 
-The product should not assume that every AI capability requires access to clinical data.
+Direct FHIR acquisition is an intentional stable capability for explicitly authorized contracts. It is not permission for arbitrary FHIR access.
 
-The current architecture therefore treats:
+## 4. Current data flows
 
-**interoperability data access**
-
-and
-
-**AI model invocation**
-
-as separate capabilities.
-
-A future product decision may connect them only after an explicit new assessment.
-
----
-
-## 4. Current product state
-
-### 4.1 Java interoperability surface
-
-Current role (verified in `services/fhir-integration-service`):
-
-- Java 21 / Spring Boot (`pom.xml` `java.version` 21; `application.yml` port **8081**);
-- FHIR R4 client (HAPI; the application is not a FHIR server);
-- SMART Authorization Code + PKCE (`SmartAuthorizationCoordinator`, `AuthorizationCodeClient`);
-- Epic sandbox integration;
-- Oracle sandbox integration;
-- HAPI FHIR interaction in the local development/sandbox environment, where applicable;
-- clinical snapshot;
-- Task 042 allowlist (`ClinicalProjectionMapper`);
-- RetentionCeiling N=5 (`RetentionCeiling.DEFAULT_LIMIT`);
-- Model Boundary Contract v1 (`ModelBoundaryContract`, `ModelBoundaryMapper`);
-- service authentication on `GET /api/model-boundary/v1` (`X-Service-Token`, `ModelBoundaryServiceAuthFilter`).
-
-The Java surface is currently the FHIR boundary.
-
-Python does not directly query Epic, Oracle, or HAPI FHIR.
-
-### 4.2 Python AI surface
-
-Current role (verified in `services/ai-service`):
-
-- FastAPI service (port **8090**);
-- consumer of Model Boundary v1 without model invocation (`app/consumer.py`, `GET /internal/agent-context`, `modelCalled=false`);
-- controlled experimental Gemini endpoint (`app/experimental_service.py`, `POST /internal/experimental-summary`);
-- `LLMProvider` / `GeminiProvider` / `FakeLLMProvider`;
-- synthetic fixture `SYN-076-001` (`app/experimental_fixture.py`);
-- feature gate `LLM_EXPERIMENTAL_ENABLED` default `false`;
-- default model `gemini-flash-latest` (Task 077; override via `GEMINI_MODEL`; no fallback);
-- timeout 30 s (`PROVIDER_TIMEOUT_SECONDS`);
-- summary limit `MAX_SUMMARY_CHARS` = 2000;
-- `requiresHumanReview=true` (application-owned);
-- `modelCalled` true only after provider invocation starts;
-- minimized application audit logging (`emit_audit`).
-
-The Python AI surface does not currently receive FHIR-derived context as model input.
-
----
-
-## 5. Current data-flow boundary
-
-### 5.1 Interoperability path
+### 4.1 Model Boundary v1 consumer
 
 ```text
-EHR / FHIR sandbox
-(Epic / Oracle / local HAPI FHIR)
-        |
-        v
-Java FHIR client
-        |
-        v
-Clinical snapshot
-        |
-        v
-Task 042 allowlist
-        |
-        v
-RetentionCeiling N=5
-        |
-        v
-Model Boundary Contract v1
-        |
-        v
-GET /api/model-boundary/v1
-        |
-        v
-Python consumer
-GET /internal/agent-context
-        |
-        v
-modelCalled=false
+FHIR destination
+        -> Healthcare Interoperability
+        -> controlled projection / Model Boundary v1
+        -> GET /internal/agent-context
+        -> modelCalled=false
 ```
 
-This path does not currently invoke Gemini.
+This path does not call Gemini and does not automatically authorize v1 as model input.
 
-### 5.2 Experimental AI path
+### 4.2 Synthetic experimental summary
 
 ```text
 SYN-076-001
-(synthetic fixture)
-        |
-        v
-POST /internal/experimental-summary
-        |
-        v
-LLMProvider
-        |
-        v
-GeminiProvider
-        |
-        v
-Google Gemini API
+        -> POST /internal/experimental-summary
+        -> GeminiProvider
+        -> Google Gemini API
 ```
 
-This path does not currently read Model Boundary v1, FHIR resources, Epic data, Oracle data, or HAPI FHIR data.
+This historical experiment remains disabled by default and separate from Clinical Follow-up Review.
 
-### 5.3 Explicit separation
+### 4.3 Clinical Follow-up Review
 
 ```text
-FHIR / EHR
-     |
-     v
-Java interoperability boundary
-     |
-     v
-Model Boundary v1
-     |
-     X
-     |
-     X-----> Gemini
-
-
-Synthetic fixture
-     |
-     v
-Experimental AI endpoint
-     |
-     v
-Gemini
+POST /internal/agent/follow-up
+        -> service authentication and feature gate
+        -> authorized case scope
+        -> configured authorized FHIR endpoint
+        -> mandatory Patient / Encounter / Observation / Appointment reads
+        -> deterministic POST_CONSULTATION_RESULT_REVIEW_V1
+        -> authorized narrative LangGraph/Gemini subflow when allowed
+        -> application-owned HTTP projection
 ```
 
-The absence of a FHIR-to-Gemini path is a **current governance boundary**, not merely an accidental implementation detail.
+FHIR-derived payloads may reach Gemini only through the explicitly authorized narrative tool/data contracts. A FHIR endpoint, Patient match or paging token is not general authorization to expose other resources or context to the model.
 
----
+## 5. Decision and model authority
 
-## 6. Current AI boundary
+The application owns:
 
-The only current model invocation path is the experimental Gemini integration.
+- mandatory acquisition;
+- case scope and resource validation;
+- collection completeness;
+- protocol evaluation and reason codes;
+- `clinicalAssessment`;
+- `humanReview`;
+- `action`.
 
-Its current input is restricted to the canonical synthetic fixture `SYN-076-001`.
+Gemini may own legacy narrative output:
 
-The current experimental prompt (`app/llm_provider.py` `build_experimental_prompt`) instructs: informational summary only; do not diagnose; do not recommend treatment or medication; do not make clinical decisions.
+- `answer`;
+- `followUpRequired`.
 
-These application-level restrictions are **technical controls**. They do not constitute a legal classification of the system or its future use.
+Legacy model output does not control or override deterministic product authority. `followUpRequired` is not the protocol decision.
 
-The current AI path therefore represents **controlled AI experimentation with synthetic input**, not clinical AI using production patient data.
+The protocol does not interpret normality, diagnosis, severity, urgency or treatment. `clinicalAssessment.status` remains `not_performed`.
 
----
+## 6. Human review and actions
 
-## 7. Current capabilities
+For a protocol match:
 
-These describe the current repository. They do not imply production readiness or regulatory authorization.
+- `humanReview.status=required` means the case should be presented for human review;
+- `action.status=proposed` with `type=review_follow_up_case` is a proposal.
 
-| Capability | Current status | Evidence |
+Neither field proves a durable queue, assignment, acknowledgement, disposition or external execution. The current capability performs no FHIR write, autonomous message, prescription or treatment action.
+
+## 7. Data classification boundary
+
+The repository distinguishes:
+
+- **synthetic fixture data** — generated test/experimental data such as `SYN-076-001`;
+- **local or sandbox FHIR data** — used to validate integration and workflow behavior;
+- **real production patient data** — not established as an approved production processing capability.
+
+Synthetic, sandbox and real patient data are not interchangeable governance categories. Technical ability to process FHIR-derived context does not authorize production use or external-model processing of real clinical data.
+
+Before a deployment sends real clinical data to an external model, the responsible parties must resolve purpose, minimization, authorization, provider terms, logging/retention, security, human oversight, deployment model and regulatory applicability.
+
+## 8. Current governance controls
+
+| Control | Current status |
+|---|---|
+| Service-token authentication on internal product endpoints | Implemented development control; not enterprise IAM |
+| Follow-up feature gate | Implemented; disabled by default |
+| Authorized case binding | Implemented |
+| Patient uniqueness and path-safe FHIR ids | Implemented |
+| Resource/reference case isolation | Implemented |
+| Bounded, completeness-aware collection reads | Implemented |
+| HAPI continuation validation and redirects disabled | Implemented |
+| Mandatory acquisition before LangGraph | Implemented |
+| Deterministic protocol outside model authority | Implemented |
+| Model tool allowlist and policy audit | Implemented |
+| No FHIR writes from Clinical Follow-up Review | Implemented |
+| Operational human-review workflow | Not implemented |
+| Enterprise IAM/RBAC, tenancy and durable audit | Not implemented |
+| Production network and secret-management architecture | Not implemented |
+| Production real-data external-model approval | Not established |
+
+Application logging restrictions do not establish provider-side retention, training, location or contractual behavior.
+
+## 9. Use-case and risk boundary
+
+| Level | Meaning | Current position |
 |---|---|---|
-| FHIR R4 client | Implemented | Java HAPI client |
-| SMART Authorization Code + PKCE | Implemented for sandbox integrations | `SmartAuthorizationCoordinator` |
-| Epic sandbox interaction | Implemented | Epic vendor packages |
-| Oracle sandbox interaction | Implemented | Oracle vendor packages |
-| Clinical projection | Implemented | `ClinicalProjectionAssembler` / mapper |
-| Task 042 allowlist | Implemented | `ClinicalProjectionMapper`; Task 042 spec |
-| RetentionCeiling N=5 | Implemented | `RetentionCeiling.DEFAULT_LIMIT` |
-| Model Boundary v1 | Implemented | `ModelBoundaryContract` |
-| X-Service-Token on v1 | Implemented | `ModelBoundaryServiceAuthFilter` |
-| Python Model Boundary consumer | Implemented | `GET /internal/agent-context` |
-| Experimental Gemini provider | Implemented | `GeminiProvider` |
-| Synthetic fixture restriction | Implemented | `SYN-076-001` exact equality |
-| LLM feature gate | Implemented | default `false` |
-| 30-second provider timeout | Implemented | `PROVIDER_TIMEOUT_SECONDS` |
-| Summary output limit | Implemented | `MAX_SUMMARY_CHARS` = 2000 |
-| `requiresHumanReview=true` | Implemented as application control | Java `AiBoundaryDecision`; Python validators |
-| `modelCalled` semantics | Implemented | 074 always false; 076 true only after invoke starts |
-| Minimized experimental logs | Implemented | `emit_audit` |
-| Threat model T1–T9 | Documented | `llm-boundary-threats-and-controls.md` |
+| Interoperability | Retrieve, validate, transform and exchange healthcare data without requiring a model. | Implemented development capabilities in Healthcare Interoperability. |
+| Deterministic healthcare workflow | Application-owned rules over authorized healthcare facts, without clinical interpretation. | Clinical Follow-up Review V1 implemented. |
+| Narrative AI assistance | Model-generated text or legacy structured narrative output under explicit contracts. | Implemented in controlled development paths. |
+| AI with real clinical context | External model receives real patient-specific clinical information. | Production authorization/governance not established. |
+| Clinical decision support | Output may influence diagnosis, treatment, medication, prognosis, prioritization or access to care. | Not implemented or authorized. |
 
----
+The existence of a deterministic follow-up rule or human-review projection must not be marketed as clinical decision support or operational human oversight.
 
-## 8. Capabilities explicitly not established
+## 10. Deployment boundary
 
-The following are **not** current product capabilities and must not be represented externally as if they were:
+Potential SaaS, customer-hosted and hybrid deployments remain future product choices. The current repository does not provide a production estate for any of them.
 
-- production EHR integration;
-- production patient-data processing;
-- production clinical AI;
-- clinical decision support;
-- autonomous clinical decision making;
-- SIHCE accreditation;
-- RENHICE participation;
-- FHIR Perú profile accreditation;
-- operational human-in-the-loop workflow;
-- enterprise IAM;
-- enterprise RBAC;
-- production tenancy;
-- production DLP;
-- production SIEM;
-- production clinical audit infrastructure;
-- legal retention/erasure workflow;
-- production provider contractual assessment;
-- FHIR-derived context sent to Gemini.
+Healthcare Interoperability and Healthcare AI have separate runtime and security concerns. Local HAPI, its PostgreSQL database, `lab-oauth` and the local gateway are a support stack rather than mandatory product infrastructure.
 
----
+Customer-hosted deployment would not automatically remove privacy, security, contractual or regulatory obligations. In every model, the material question is which data crosses each trust boundary.
 
-## 9. Data classification boundary
+## 11. Capabilities not established
 
-The product currently distinguishes three materially different data situations.
+Do not represent the repository as providing:
 
-**synthetic ≠ sandbox ≠ real patient data**
+- production EHR or production patient-data processing;
+- production clinical AI or clinical decision support;
+- autonomous clinical decisions or actions;
+- SIHCE accreditation, RENHICE participation or regulatory certification;
+- enterprise IAM/RBAC, tenant isolation, DLP or SIEM;
+- a durable human-review system;
+- legal retention/erasure or data-subject-rights workflows;
+- provider-side no-training/no-retention guarantees;
+- arbitrary FHIR-to-Gemini access;
+- a provider-neutral continuation contract;
+- finalized commercial packaging.
 
-**sandbox SMART success ≠ authorization for production clinical-data reuse**
+## 12. Change-control gates
 
-### 9.1 Synthetic data
+A new assessment and explicit contract/decision are required before:
 
-Example: `SYN-076-001`.
+- adding a FHIR resource type or materially broader query;
+- sending a new category of FHIR-derived data to a model;
+- using real production clinical data with an external model;
+- adding writes, messages or external action execution;
+- changing the protocol's clinical or temporal meaning;
+- treating model output as deterministic authority;
+- introducing a production deployment, tenant or identity model;
+- positioning the product as clinical decision support.
 
-Generated for controlled experimentation. Canonical experimental fixture. Current Gemini input. This is the current AI experimentation boundary.
+Technical capability alone is not authorization to cross a governance gate.
 
-### 9.2 Sandbox EHR data
+## 13. Historical scope
 
-Examples: Epic sandbox; Oracle sandbox.
+`laboratory-state.md`, `llm-boundary-threats-and-controls.md`, ADR-076 through ADR-084 and `docs/tasks/` retain their original wording and dates. Current decisions supersede only the portions explicitly identified by later ADRs; history is not rewritten.
 
-Accessed through the Java interoperability surface. Used to validate SMART/FHIR integration. Subject to the current projection and allowlist controls.
+## 14. Related documents
 
-Sandbox data must not automatically be treated as equivalent to production patient data.
-
-### 9.3 Real patient data
-
-Not currently established as a production product capability.
-
-Introducing real patient data would be a **material product evolution** requiring a new assessment of: data inventory; purpose; roles; security; retention; access; deployment model; provider relationships; regulatory applicability; operational governance.
-
----
-
-## 10. AI data boundary
-
-Current AI boundary:
-
-```text
-Synthetic data
-      |
-      v
-AI experimentation
-```
-
-Explicitly **not** part of the current baseline:
-
-```text
-FHIR
-  |
-  v
-Model Boundary v1
-  |
-  v
-Gemini
-```
-
-Any future decision to introduce such a path must be treated as a **material product change**. It must not be enabled merely by modifying an endpoint or changing the prompt.
-
-That decision would require a new evaluation of: data minimization; purpose; authorization; privacy; security; provider processing; model risk; human oversight; deployment model; operational controls; and applicable regulatory requirements (see `regulatory-context.md` — applicability questions, not a compliance result).
-
----
-
-## 11. Product deployment models
-
-The long-term product **may** support three models. They are **future product considerations**. None is implemented as a production estate.
-
-### 11.1 SaaS
-
-The product provider operates the platform. Potential future characteristics: provider-managed infrastructure; customer data processed by the service; multi-tenant or isolated customer environments; external AI provider integration where applicable.
-
-None of these production characteristics are currently implemented.
-
-### 11.2 Customer-hosted
-
-The healthcare organization operates the software in infrastructure under its control. Potential future characteristics: customer-managed infrastructure, credentials, and network; possibly a customer-controlled AI provider account.
-
-Customer-hosted deployment does **not** automatically eliminate regulatory or contractual responsibilities.
-
-### 11.3 Hybrid
-
-Some components operate in the customer environment and others are externally managed.
-
-The defining governance question is: **what data crosses each trust boundary?**
-
-```text
-Customer environment
-        |
-        | data crossing
-        v
-Product provider
-        |
-        | data crossing
-        v
-External AI provider
-```
-
-The current repository does not implement a production hybrid deployment.
-
----
-
-## 12. Use-case boundary
-
-Progressively more sensitive use cases. These are **not** Tasks.
-
-| Level | Name | Meaning |
-|---|---|---|
-| **U0** | Interoperability | Retrieve FHIR resources; normalize; project controlled fields; exchange between systems. No AI model invocation is inherently required. |
-| **U1** | Healthcare data processing | Transformation; controlled projection; validation; synchronization; operational workflows. Healthcare data does not automatically mean an AI system is involved. |
-| **U2** | AI assistance | Summarization; administrative or document assistance; non-clinical workflow support. Actual data and purpose determine applicable governance. |
-| **U3** | Clinical-context AI | AI receives information derived from clinical records or other patient-specific healthcare information. Material increase in sensitivity. The current synthetic Gemini path must not simply be replaced with FHIR-derived context. **Not implemented.** |
-| **U4** | Clinical decision support | Output may influence diagnosis, treatment, medication, prognosis, prioritization, screening, access to healthcare, or other clinically consequential decisions. Different product category. Requires a new formal assessment before implementation or commercialization. **Not implemented.** |
-
----
-
-## 13. Governance gates
-
-| Gate | State | Status |
-|---|---|---|
-| **G0** — Synthetic AI experimentation | Synthetic fixture; controlled model endpoint; feature gate; output controls; minimized logs; experimental status | **AVAILABLE** (development) |
-| **G1** — Sandbox interoperability | FHIR client; SMART + PKCE; sandbox credentials; projection; v1; explicit separation from the model path | **AVAILABLE IN DEVELOPMENT / SANDBOX** |
-| **G2** — Real clinical data | Future. Requires data categories, purpose, roles, access, security, retention, audit, deployment, providers, regulatory applicability, operations | **NOT ENTERED** |
-| **G3** — AI with clinical context | Future. Model receives information derived from real clinical context. Requires use case, input, minimization, purpose, provider processing/retention/logging, security, model governance, human oversight, output handling, risk classification | **NOT ENTERED** |
-| **G4** — Clinical decision support | Future. Outputs that may materially influence clinical decisions or healthcare access. New product, technical, governance, and regulatory assessment | **NOT ENTERED** |
-
-G0 and G1 describe the current development baseline. G2–G4 are future.
-
----
-
-## 14. Gate transition principle
-
-A gate must not be crossed simply because the underlying technical capability exists.
-
-```text
-FHIR client works
-        X
-        ↓
-therefore send FHIR to Gemini
-```
-
-```text
-Gemini summary works with synthetic data
-        X
-        ↓
-therefore use it with patient records
-```
-
-These are **not** acceptable governance transitions.
-
-A transition must be evaluated as a **product change**.
-
----
-
-## 15. Current commercial boundary
-
-The current product can be positioned as a developing **Healthcare AI & Interoperability Platform** with demonstrated technical capabilities in:
-
-- FHIR interoperability;
-- SMART sandbox integration;
-- controlled clinical-data projection;
-- model-boundary design;
-- AI provider integration using synthetic data;
-- AI governance controls.
-
-The product must **not** currently be represented as:
-
-- a certified SIHCE;
-- a RENHICE participant;
-- a clinically validated AI system;
-- a clinical decision-support system;
-- a production patient-data AI platform;
-- a regulatory-compliant platform under any framework solely because these technical controls exist.
-
-Commercial positioning must reflect the actual implementation state.
-
----
-
-## 16. Future commercial evolution
-
-```text
-Healthcare interoperability
-        |
-        +----> Healthcare data services
-        |
-        +----> AI-assisted workflows
-        |
-        +----> Clinical-context AI
-        |
-        +----> Clinical decision support
-```
-
-Each branch is a **separate** product-evolution decision.
-
-The current baseline does **not** commit the product to any specific future branch.
-
-The purpose of this document is to prevent accidental capability expansion without an explicit decision.
-
----
-
-## 17. Reusable technical boundaries
-
-Architectural concepts that may remain reusable as the product evolves:
-
-- explicit interoperability boundary;
-- controlled data projection;
-- model boundary;
-- provider abstraction;
-- feature gating;
-- model invocation semantics;
-- output constraints;
-- human-review flag;
-- correlation identifiers;
-- minimized application audit events;
-- threat-model documentation.
-
-Reusability does **not** imply that the same controls are sufficient for every future deployment or clinical use.
-
-Each material change must be evaluated against the new context.
-
-These concepts are **not** a general-purpose agent framework.
-
----
-
-## 18. Explicitly out of scope for this phase
-
-This document does not authorize or initiate implementation of:
-
-- RAG;
-- agents;
-- MCP;
-- LangGraph;
-- memory;
-- OpenAI;
-- a second model provider;
-- fallback;
-- router;
-- frontend;
-- enterprise IAM;
-- RBAC;
-- tenancy;
-- operational HITL;
-- WAF;
-- SIEM;
-- DLP;
-- FHIR server;
-- FHIR → Gemini;
-- additional clinical resources;
-- MedicationRequest integration into Epic;
-- production EHR credentials;
-- production patient data;
-- clinical decision support.
-
-These may be considered in future product phases only after explicit product and governance decisions.
-
----
-
-## 19. Relationship with regulatory-context.md
-
-`regulatory-context.md` answers: **which regulatory and applicability questions are relevant?**
-
-This document answers: **what product boundary are we applying those questions to?**
-
-```text
-regulatory-context.md
-        |
-        v
-Regulatory applicability
-        |
-        v
-product-governance-boundary.md
-        |
-        v
-Product scope / gates
-        |
-        v
-Future architecture decisions
-        |
-        v
-Implementation
-```
-
-Neither document is a substitute for legal advice or formal regulatory assessment.
-
-This phase does not reopen the Phase A legal inventory.
-
----
-
-## 20. Relationship with the technical governance baseline
-
-The current technical governance baseline remains documented in:
-
-- `laboratory-state.md` — historical development baseline after Tasks 076/077;
-- `llm-boundary-threats-and-controls.md` — threat model T1–T9;
-- `ADR-076-controlled-gemini-integration.md`;
-- `docs/fhir/model-boundary-contract-v1.md`.
-
-Those documents describe technical history, controls, decisions, and threat considerations.
-
-This document adds the **product-level** boundary.
-
-Historical terminology in `laboratory-state.md` should not override the current product identity: **Healthcare AI & Interoperability Platform**.
-
----
-
-## 21. Change-control principle
-
-Any of the following should trigger a new product/governance review:
-
-- production patient data;
-- FHIR-derived data sent to an AI model;
-- new clinical AI use case;
-- clinical decision support;
-- new external AI provider;
-- material provider change;
-- new deployment model;
-- SIHCE positioning;
-- RENHICE integration;
-- material expansion of the clinical projection;
-- new jurisdiction;
-- customer-hosted production deployment;
-- hybrid deployment involving clinical data.
-
-The existence of a technical implementation does not by itself authorize the change.
-
----
-
-## 22. Current boundary summary
-
-As of 20 September 2026:
-
-```text
-                    HEALTHCARE AI &
-                INTEROPERABILITY PLATFORM
-                           |
-             +-------------+-------------+
-             |                           |
-             v                           v
-       INTEROPERABILITY              AI SURFACE
-             |                           |
-        FHIR / SMART                Gemini
-             |                           |
-        Epic/Oracle                  Synthetic
-         sandboxes                  fixture only
-             |                           |
-       Controlled                    Experimental
-       projection                     summary
-             |                           |
-             +------------X--------------+
-                          |
-                 No FHIR → Gemini
-```
-
-Current boundary: FHIR/interoperability and experimental AI remain separate.
-
-The product may evolve beyond this boundary, but every material expansion requires an explicit product and governance decision.
-
----
-
-## 23. Final principle
-
-The platform should evolve by **explicit contracts and gates** rather than by accidental capability expansion.
-
-In particular:
-
-- A technical path that is possible is not automatically a product capability.
-- A product capability is not automatically a legal authorization.
-
-The current governance baseline therefore favors explicit separation between:
-
-- interoperability;
-- healthcare data processing;
-- AI experimentation;
-- clinical-context AI;
-- and clinical decision support.
-
-This boundary remains valid until a future product decision explicitly changes it and the corresponding technical, governance, and regulatory assessments are completed.
+- [`regulatory-context.md`](regulatory-context.md)
+- [`../architecture/README.md`](../architecture/README.md)
+- [`../adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md`](../adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md)
+- [`../contracts/post-consultation-result-review-v1.md`](../contracts/post-consultation-result-review-v1.md)
+- [`../../services/ai-service/README.md`](../../services/ai-service/README.md)

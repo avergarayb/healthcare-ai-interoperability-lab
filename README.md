@@ -1,64 +1,69 @@
-# Healthcare AI & Interoperability Lab
+# Healthcare AI & Interoperability Platform
 
-Independent laboratory project for building healthcare interoperability and AI capabilities from scratch.
+An evolving platform for controlled healthcare interoperability and AI capabilities. The repository retains historical `lab` names where they are part of paths, Compose identifiers, fixtures, or compatibility contracts; those names do not define the current product direction.
 
-Architecture decisions live in [`docs/PROJECT.md`](docs/PROJECT.md). The implementation sequence lives in [`docs/roadmap.md`](docs/roadmap.md).
+The platform currently contains two independently deployable product units:
 
-## Target Architecture
+- **Healthcare Interoperability** — Java 21 / Spring Boot, FHIR R4, SMART authorization, Epic and Oracle sandbox integrations, local HAPI connectivity, controlled projections and bounded interoperability contracts.
+- **Healthcare AI** — Python / FastAPI / LangGraph, the Model Boundary v1 consumer, the gated synthetic Gemini endpoint, and **Clinical Follow-up Review** with deterministic application-owned FHIR acquisition and protocol authority.
 
-EHRs (FHIR / HL7 v2)
-→ Java / Spring Boot Integration Layer
-→ normalized healthcare context
-→ Python / FastAPI AI Service
-→ RAG / Agents / ML
-→ model gateway
+They may be deployed together or independently. Final pricing, packaging and commercial SKUs are not decided.
 
-## Initial Phase
+## Current architecture
 
-- FHIR R4 fundamentals
-- Local HAPI FHIR
-- Java 21 + Spring Boot `fhir-integration-service`
-- PostgreSQL
-- Docker Compose
-- Postman
-- Git / GitHub
+```text
+Healthcare systems / FHIR endpoints
+        |
+        +--> Healthcare Interoperability (Java)
+        |       FHIR + SMART + routing + projections + v1 contracts
+        |
+        +--> Healthcare AI (Python)
+                authorized bounded FHIR reads for explicit capabilities
+                deterministic protocol authority
+                LangGraph/Gemini narrative subflow where allowed
+```
 
-## Repository Layout
+For Clinical Follow-up Review, mandatory Patient, Encounter, Observation and Appointment acquisition occurs before LangGraph. `POST_CONSULTATION_RESULT_REVIEW_V1` determines protocol, human-review and proposed-action fields. Gemini does not own those decisions. The capability performs no FHIR writes.
+
+Start here:
+
+- [Product scope](docs/PROJECT.md)
+- [Architecture authority and decision index](docs/architecture/README.md)
+- [Healthcare Interoperability documentation](docs/fhir/README.md)
+- [Healthcare AI service runbook](services/ai-service/README.md)
+- [ADR-085: Python FHIR and model authority boundary](docs/adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md)
+- [Clinical Follow-up Review V1 contract](docs/contracts/post-consultation-result-review-v1.md)
+
+## Implemented versus not implemented
+
+Implemented development capabilities include FHIR R4 client operations, local HAPI, sandbox SMART integrations, controlled Java projections, the Python internal APIs, bounded HAPI reads, deterministic follow-up review and a gated Gemini narrative flow.
+
+The repository does not establish production IAM/RBAC, tenancy, a durable human-review queue, clinical decision support, autonomous treatment, production deployment, regulatory certification, or production processing approval for real patient data.
+
+## Repository layout
 
 ```text
 healthcare-ai-interoperability-lab/
-├── README.md
-├── .gitignore
-├── docs/
-│   ├── PROJECT.md
-│   ├── roadmap.md
-│   ├── architecture/
-│   ├── fhir/
-│   └── tasks/
+├── docs/                         product, architecture, governance and contracts
 ├── services/
-│   ├── fhir-integration-service/
-│   └── ai-service/
-├── infra/
-│   └── docker/
-├── experiments/
+│   ├── fhir-integration-service/ Healthcare Interoperability
+│   └── ai-service/               Healthcare AI
+├── infra/docker/                 local HAPI and support infrastructure
+├── experiments/                  reserved experimental workspace
 ├── tests/
 └── scripts/
 ```
 
-The Docker Compose project name is `healthcare-ai-interoperability-lab`. Services remain `hapi-fhir` and `hapi-fhir-postgres`, plus optional `lab-oauth` and `fhir-gateway` for OAuth/SMART. The initial application is `fhir-integration-service` (Java packages: `client`, `server`, `auth`, `smart`, `mapping`, `patient`, `snapshot`, `projection`, `modelboundary`, `agentstub`, `routing`, `capability`, `connectivity`, `observability`, `exception`, `resilience`, `vendor` — see [`docs/fhir/fhir-architecture.md`](docs/fhir/fhir-architecture.md)). Routed FHIR capability discovery interprets `GET /metadata`; see [`docs/fhir/fhir-capability-discovery.md`](docs/fhir/fhir-capability-discovery.md). An Oracle Health sandbox profile can be enabled from the environment and checked for connectivity without clinical access; see [`docs/fhir/fhir-endpoint-connectivity.md`](docs/fhir/fhir-endpoint-connectivity.md) and [`.env.example`](.env.example). Interactive SMART Authorization Code + PKCE against that sandbox is documented in [`docs/fhir/fhir-smart-interactive-authorization.md`](docs/fhir/fhir-smart-interactive-authorization.md); default tests do not require Oracle credentials. The same sandbox exposes a public `CapabilityStatement` that the existing discovery model can normalize, and an issued SMART token can authorize a generic Patient search, a controlled Patient read, a Condition search, an Observation search, a DiagnosticReport search, a MedicationRequest search, a controlled clinical snapshot of status and counts, a controlled projection with an application retention ceiling, a vendor-neutral model boundary contract (`GET /api/model-boundary/v1`), and a contract-consuming stub (`GET /api/agent-stub/v1`) by that Patient when a sandbox Patient ID is configured; see [`docs/fhir/vendors/oracle-health.md`](docs/fhir/vendors/oracle-health.md). SMART discovery is validated for Authorization Code + PKCE S256 without connecting Epic; see [`docs/fhir/fhir-smart-real-world-readiness.md`](docs/fhir/fhir-smart-real-world-readiness.md). An Epic sandbox profile can start the same interactive SMART Authorization Code + PKCE flow when enabled (`GET /epic/sandbox/smart/start`). After a token and a configured Patient ID, the laboratory can run a controlled Patient read, a Condition search, an Observation search, a DiagnosticReport search, and a controlled clinical snapshot against that sandbox; default tests do not require Epic credentials; see [`docs/fhir/vendors/epic.md`](docs/fhir/vendors/epic.md). Task 074 adds `services/ai-service`, a FastAPI consumer of `GET /api/model-boundary/v1`. That path does not call a language model. See [`docs/fhir/ai-service-model-boundary-consumer.md`](docs/fhir/ai-service-model-boundary-consumer.md). Task 076 adds a separate, disabled-by-default `POST /internal/experimental-summary` that may call Gemini with fixture `SYN-076-001` only. See [`docs/adr/ADR-076-controlled-gemini-integration.md`](docs/adr/ADR-076-controlled-gemini-integration.md).
+The Compose project name remains `healthcare-ai-interoperability-lab`. Its HAPI FHIR, PostgreSQL, optional `lab-oauth` and gateway services are local-development support, not a production product estate or customer EHR.
 
 ## Prerequisites
 
 - Java 21
 - Maven 3.9+
-- Python 3.11+ (only for `services/ai-service`)
+- Python 3.11+
 - Docker and Docker Compose
 
-## Local Setup
-
-The FHIR server runs in Docker. The integration service runs on the host.
-
-### 1. Start HAPI FHIR and PostgreSQL
+## Local HAPI setup
 
 From the repository root:
 
@@ -66,72 +71,48 @@ From the repository root:
 docker compose -f infra/docker/docker-compose.yml up -d
 ```
 
-HAPI FHIR uses PostgreSQL for persistence. Configuration stays in `infra/docker/` and is not part of the application code.
-
-Optional overrides: copy `infra/docker/.env.example` to `infra/docker/.env`. Do not commit `.env` files.
-
-HAPI takes a minute or two to become ready on first start.
-
-### 2. Verify the FHIR endpoint
-
-Capability Statement:
+HAPI may take a minute or two on first startup. Verify:
 
 ```http
 GET http://localhost:8080/fhir/metadata
 ```
 
-Example:
+The default local FHIR base URL is `http://localhost:8080/fhir`. Configuration under `infra/docker/` belongs to the local support stack.
 
-```bash
-curl http://localhost:8080/fhir/metadata
-```
-
-FHIR base URL: `http://localhost:8080/fhir`
-
-### 3. Build and test the integration service
+## Healthcare Interoperability
 
 ```bash
 cd services/fhir-integration-service
 mvn test
-```
-
-### 4. Start the integration service
-
-```bash
-cd services/fhir-integration-service
 mvn spring-boot:run
 ```
 
-Health endpoint:
+The Java service listens on port `8081`. Vendor sandbox features are disabled/configuration-dependent and default tests do not require live Epic or Oracle credentials. See [FHIR documentation](docs/fhir/README.md).
 
-```http
-GET http://localhost:8081/actuator/health
+## Healthcare AI
+
+```powershell
+cd services/ai-service
+py -3 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+py -3 -m pytest
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8090
 ```
 
-Example:
+Live HAPI and Gemini tests are separate opt-ins. See the [AI service runbook](services/ai-service/README.md) before enabling either.
 
-```bash
-curl http://localhost:8081/actuator/health
-```
-
-The service listens on port `8081` so it does not collide with HAPI FHIR on `8080`.
-
-## Stop Local Infrastructure
+## Stop local infrastructure
 
 ```bash
 docker compose -f infra/docker/docker-compose.yml down
 ```
 
-## Branch Strategy
+## Engineering principles
 
-- `main`: stable
-- `feature/*`: isolated work
-
-## Principles
-
-1. Interoperability first.
-2. Vendor-neutral architecture.
-3. Java for enterprise healthcare integration.
-4. Python for AI/ML.
-5. Security and observability from the beginning.
-6. No unnecessary microservices before there is a clear boundary.
+1. Explicit product and authority boundaries.
+2. Vendor-neutral interoperability where the implemented contract supports it.
+3. Application-owned security, data-integrity and protocol decisions.
+4. Models are not trusted decision authorities.
+5. Bounded, observable and fail-closed external access.
+6. Historical evidence remains historical; current documents identify present behavior.

@@ -42,6 +42,8 @@ _HAPI_CONTINUATION_KEYS = frozenset(
 )
 _HAPI_REQUIRED_KEYS = frozenset({"_getpages", "_getpagesoffset", "_count", "_bundletype"})
 _HAPI_PAGE_TOKEN_MAX_LENGTH = 512
+_RESOURCE_CONTINUATION_PAGING_KEYS = frozenset({"page", "token"})
+_RESOURCE_PAGE_TOKEN_MAX_LENGTH = 512
 
 log = logging.getLogger("ai-service")
 _retry_sleep = time.sleep
@@ -51,6 +53,8 @@ _retry_sleep = time.sleep
 class _SearchTraversal:
     resource_type: str
     page_size: int
+    semantic_query: tuple[tuple[str, str], ...]
+    continuation_kind: str | None = None
     hapi_token: str | None = None
     hapi_offset: int = 0
 
@@ -127,14 +131,14 @@ class HapiReadClient:
         """Traverse one fixed FHIR search endpoint within strict V1 bounds."""
         current_url = f"{self.base_url}/{path.lstrip('/')}"
         try:
-            page_size = _validate_initial_search_url(
+            page_size, semantic_query = _validate_initial_search_url(
                 self.base_url,
                 current_url,
                 expected_resource_type,
             )
         except ReadClientError as exc:
             return BoundedSearchResult(BoundedSearchStatus.FAILED, (), str(exc))
-        traversal = _SearchTraversal(expected_resource_type, page_size)
+        traversal = _SearchTraversal(expected_resource_type, page_size, semantic_query)
         visited = {_canonical_url(current_url)}
         resources: list[dict] = []
         by_identity: dict[tuple[str, str], dict] = {}
@@ -282,7 +286,11 @@ def _search_page(bundle: dict, expected_resource_type: str) -> tuple[list[dict],
     return resources, next_urls[0] if next_urls else None
 
 
-def _validate_initial_search_url(base_url: str, url: str, resource_type: str) -> int:
+def _validate_initial_search_url(
+    base_url: str,
+    url: str,
+    resource_type: str,
+) -> tuple[int, tuple[tuple[str, str], ...]]:
     parsed_base = urlsplit(base_url)
     parsed = urlsplit(url)
     if not parsed.query:
@@ -290,10 +298,15 @@ def _validate_initial_search_url(base_url: str, url: str, resource_type: str) ->
     _validate_common_target(parsed_base, parsed)
     _validate_resource_search_target(parsed_base, parsed, resource_type)
     pairs = _parse_query(parsed.query)
+    keys = [key for key, _value in pairs]
+    if len(keys) != len(set(keys)):
+        raise ReadClientError("initial FHIR search query contains duplicate parameters")
+    if any(key in _RESOURCE_CONTINUATION_PAGING_KEYS for key in keys):
+        raise ReadClientError("initial FHIR search contains reserved paging parameters")
     counts = [value for key, value in pairs if key == "_count"]
     if len(counts) != 1 or not _ascii_decimal(counts[0]) or int(counts[0]) <= 0:
         raise ReadClientError("FHIR search requires one positive page size")
-    return int(counts[0])
+    return int(counts[0]), tuple(pairs)
 
 
 def _validated_next_url(
@@ -322,13 +335,15 @@ def _validated_next_url(
     _validate_common_target(parsed_base, parsed)
     expected_path = f"{parsed_base.path.rstrip('/')}/{traversal.resource_type}"
     if parsed.path == expected_path:
-        if traversal.hapi_token is not None:
+        if traversal.continuation_kind == "hapi":
             raise ReadClientError("FHIR continuation shape changed during traversal")
-        _validate_resource_search_target(parsed_base, parsed, traversal.resource_type)
-        if any(key == "_getpages" for key, _value in _parse_query(parsed.query)):
-            raise ReadClientError("HAPI continuation must use the FHIR base endpoint")
+        _validate_resource_continuation(parsed_base, parsed, traversal)
+        traversal.continuation_kind = "resource"
     elif parsed.path == parsed_base.path:
+        if traversal.continuation_kind == "resource":
+            raise ReadClientError("FHIR continuation shape changed during traversal")
         _validate_hapi_continuation(parsed, traversal)
+        traversal.continuation_kind = "hapi"
     else:
         raise ReadClientError("FHIR continuation endpoint does not match the search")
     return resolved
@@ -359,6 +374,36 @@ def _validate_resource_search_target(base, target, resource_type: str) -> None:
         raise ReadClientError("FHIR continuation endpoint does not match the search")
     if not target.query:
         raise ReadClientError("FHIR continuation must remain a search URL")
+
+
+def _validate_resource_continuation(base, target, traversal: _SearchTraversal) -> None:
+    """Bind ordinary resource-endpoint paging to the initial application search."""
+    _validate_resource_search_target(base, target, traversal.resource_type)
+    pairs = _parse_query(target.query)
+    keys = [key for key, _value in pairs]
+    if len(keys) != len(set(keys)):
+        raise ReadClientError("FHIR resource continuation query contains duplicate parameters")
+    if "_getpages" in keys:
+        raise ReadClientError("HAPI continuation must use the FHIR base endpoint")
+
+    values = dict(pairs)
+    initial_values = dict(traversal.semantic_query)
+    for key, expected in initial_values.items():
+        if values.get(key) != expected:
+            raise ReadClientError("FHIR resource continuation changed the authorized search")
+
+    paging_keys = set(values).difference(initial_values)
+    if not paging_keys or not paging_keys.issubset(_RESOURCE_CONTINUATION_PAGING_KEYS):
+        raise ReadClientError("FHIR resource continuation query parameters are not allowed")
+
+    if "page" in values and (
+        not _ascii_decimal(values["page"]) or int(values["page"]) <= 0
+    ):
+        raise ReadClientError("FHIR resource continuation page is invalid")
+    if "token" in values and (
+        not values["token"] or len(values["token"]) > _RESOURCE_PAGE_TOKEN_MAX_LENGTH
+    ):
+        raise ReadClientError("FHIR resource continuation token is invalid")
 
 
 def _validate_hapi_continuation(target, traversal: _SearchTraversal) -> None:
@@ -400,7 +445,13 @@ def _parse_query(query: str) -> list[tuple[str, str]]:
     if not query:
         raise ReadClientError("FHIR continuation must remain a search URL")
     try:
-        return parse_qsl(query, keep_blank_values=True, strict_parsing=True)
+        return parse_qsl(
+            query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            encoding="utf-8",
+            errors="strict",
+        )
     except ValueError as exc:
         raise ReadClientError("FHIR continuation query is malformed") from exc
 

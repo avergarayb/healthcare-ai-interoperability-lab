@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import threading
+from urllib.parse import urlencode
 
 import httpx
 import pytest
@@ -280,15 +281,30 @@ def _observation(observation_id: str, encounter_id: str, patient_id: str = PATIE
     }
 
 
-def _bundle(resources=(), next_page: int | None = None) -> dict:
-    value = {
+def _bundle(resources=()) -> dict:
+    return {
         "resourceType": "Bundle",
         "type": "searchset",
         "entry": [{"resource": resource} for resource in resources],
     }
-    if next_page is not None:
-        value["link"] = [{"relation": "next", "url": f"?page={next_page}"}]
-    return value
+
+
+def _resource_next_for_request(
+    request: httpx.Request,
+    *,
+    page: int | None = None,
+    token: str | None = None,
+) -> str:
+    pairs = [
+        (key, value)
+        for key, value in request.url.params.multi_items()
+        if key not in {"page", "token"}
+    ]
+    if page is not None:
+        pairs.append(("page", str(page)))
+    if token is not None:
+        pairs.append(("token", token))
+    return f"?{urlencode(pairs)}"
 
 
 def _paged_workflow(
@@ -327,7 +343,15 @@ def _paged_workflow(
             "Appointment": appointment_pages,
         }[endpoint]
         resources, next_page = pages[page]
-        return httpx.Response(200, json=_bundle(resources, next_page))
+        payload = _bundle(resources)
+        if next_page is not None:
+            payload["link"] = [
+                {
+                    "relation": "next",
+                    "url": _resource_next_for_request(request, page=next_page),
+                }
+            ]
+        return httpx.Response(200, json=payload)
 
     http = httpx.Client(transport=httpx.MockTransport(handler), timeout=5.0)
     client = HapiReadClient("http://hapi.example/fhir", http_client=http)
@@ -885,7 +909,13 @@ def test_one_workflow_keeps_concurrent_cases_and_page_tokens_isolated():
                     json={
                         **_bundle([]),
                         "link": [
-                            {"relation": "next", "url": f"?token={case_id}-patient"}
+                            {
+                                "relation": "next",
+                                "url": _resource_next_for_request(
+                                    request,
+                                    token=f"{case_id}-patient",
+                                ),
+                            }
                         ],
                     },
                 )
@@ -907,7 +937,15 @@ def test_one_workflow_keeps_concurrent_cases_and_page_tokens_isolated():
                     "resourceType": "Bundle",
                     "type": "searchset",
                     "entry": [],
-                    "link": [{"relation": "next", "url": f"?token={case_id}-{suffix}"}],
+                    "link": [
+                        {
+                            "relation": "next",
+                            "url": _resource_next_for_request(
+                                request,
+                                token=f"{case_id}-{suffix}",
+                            ),
+                        }
+                    ],
                 },
             )
         assert token == f"{case_id}-{suffix}"

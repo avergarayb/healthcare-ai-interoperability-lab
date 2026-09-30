@@ -1,147 +1,87 @@
-﻿# ai-service
+# Healthcare AI service
 
-Task 074 laboratory consumer for Product B. FastAPI reads the existing Java Model Boundary Contract v1 and stops. That path does not call a language model.
+Python / FastAPI product unit of the **Healthcare AI & Interoperability Platform**.
 
-Task 076 adds a separate, disabled-by-default experimental Gemini summary that accepts only fixture `SYN-076-001`. It does not consume v1 or call Java, Epic, Oracle, or HAPI.
+The service currently contains three deliberately separate internal capabilities:
 
-```text
-Epic / Oracle sandbox
-        ↓
-fhir-integration-service (Java)
-        ↓
-GET /api/model-boundary/v1
-        ↓
-ai-service (Python)
-        ↓
-received | rejected  (modelCalled=false)
-```
+1. Model Boundary v1 consumption without model invocation.
+2. A disabled-by-default synthetic Gemini summary experiment.
+3. **Clinical Follow-up Review**, with application-owned FHIR acquisition, deterministic protocol authority and a legacy/narrative LangGraph/Gemini subflow.
 
-## What this service does
-
-1. Receives `GET /internal/agent-context` with inbound `X-Service-Token`. Missing, wrong, or unconfigured token returns HTTP 401 and does not call Java.
-2. After authentication, calls `GET {MODEL_BOUNDARY_BASE_URL}{MODEL_BOUNDARY_PATH}` with `X-Service-Token` when `MODEL_BOUNDARY_SERVICE_TOKEN` is set.
-3. Validates HTTP, JSON, required v1 fields, and `outcome`.
-4. Decides `received` or `rejected`.
-5. Always returns `modelCalled=false`.
-
-It consumes the Java contract as-is. It does not wrap it, copy `records`, or add `usable` / `requiresHumanReview` / `modelCallAuthorized`.
-
-Task 076 is a second path. It does not change the v1 consumer.
-
-## What this service does not do
-
-- RAG, MCP, or a second LLM provider on the 074 and 076 paths
-- Direct Epic, Oracle, or SMART access. The follow-up path reads HAPI; 074 and 076 do not
-- Patient CRUD or new Java clinical endpoints
-- OAuth, production identity, or fine-grained clinical authorization
-- Sending `ModelBoundaryContract` v1 or live EHR data to Gemini
-
-Task 075 protects `GET /api/model-boundary/v1` with a laboratory shared secret. `GET /internal/agent-context`, `POST /internal/experimental-summary`, and `POST /internal/agent/follow-up` reuse the same inbound token on the Python side and stay fail-closed when the token is blank. Sharing the secret does not merge the paths.
+The authoritative follow-up rules are in [`../../docs/contracts/post-consultation-result-review-v1.md`](../../docs/contracts/post-consultation-result-review-v1.md). The FHIR/model boundary decision is [ADR-085](../../docs/adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md).
 
 ## Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Process liveness |
-| `GET` | `/internal/agent-context` | Consume the Java v1 contract (`X-Service-Token` required) |
-| `POST` | `/internal/experimental-summary` | Gated Gemini summary of fixture `SYN-076-001` |
-| `POST` | `/internal/agent/follow-up` | `FollowUpWorkflow.run()`. Token required. Disabled unless `FOLLOWUP_AGENT_ENABLED=true` |
+| `GET` | `/health` | Process liveness; no service token required. |
+| `GET` | `/internal/agent-context` | Authenticated consumption of Java Model Boundary v1; always `modelCalled=false`. |
+| `POST` | `/internal/experimental-summary` | Gated Gemini summary for exact fixture `SYN-076-001`. |
+| `POST` | `/internal/agent/follow-up` | Gated Clinical Follow-up Review for an allowed `caseId`. |
+
+The three internal endpoints require `X-Service-Token` and fail closed when `MODEL_BOUNDARY_SERVICE_TOKEN` is empty, absent or different. Sharing the development token does not merge their contracts.
 
 ## Environment
 
-Copy `.env.example`. Do not commit `.env`.
+Copy `.env.example` to a local untracked `.env` or export variables in the process environment. Uvicorn does not load `.env` automatically. Never commit real credentials.
 
-| Variable | Laboratory default | Notes |
+| Variable | Default/example | Purpose |
 |---|---|---|
-| `MODEL_BOUNDARY_BASE_URL` | `http://localhost:8081` | Java service |
-| `MODEL_BOUNDARY_PATH` | `/api/model-boundary/v1` | Existing contract surface |
-| `MODEL_BOUNDARY_TIMEOUT_SECONDS` | `90` | Java snapshot can take ~60s per socket |
-| `MODEL_BOUNDARY_SERVICE_TOKEN` | (empty) | Same value as Java. Empty is fail-closed for inbound 074/076 and for Java v1 |
-| `AI_SERVICE_HOST` | `0.0.0.0` | |
-| `AI_SERVICE_PORT` | `8090` | |
-| `LLM_EXPERIMENTAL_ENABLED` | `false` | `true` required before the 076 Gemini summary. Does not enable the Follow-up Agent |
-| `FOLLOWUP_AGENT_ENABLED` | `false` | `true` required before `POST /internal/agent/follow-up` runs the agent |
-| `GEMINI_API_KEY` | (empty) | Python only. Never commit a real value |
-| `GEMINI_MODEL` | `gemini-flash-latest` | Override only. No automatic fallback if Google returns 404 |
-| `RUN_LIVE_GEMINI_TESTS` | `false` | Opt-in live pytest |
+| `MODEL_BOUNDARY_BASE_URL` | `http://localhost:8081` | Producer used by `/internal/agent-context`. |
+| `MODEL_BOUNDARY_PATH` | `/api/model-boundary/v1` | Java v1 contract path. |
+| `MODEL_BOUNDARY_TIMEOUT_SECONDS` | `90` | Timeout for the Java v1 consumer. |
+| `MODEL_BOUNDARY_SERVICE_TOKEN` | empty | Shared development service token; blank is fail-closed. |
+| `AI_SERVICE_HOST` | `0.0.0.0` | Uvicorn bind value; not by itself a production network boundary. |
+| `AI_SERVICE_PORT` | `8090` | Python service port. |
+| `LLM_EXPERIMENTAL_ENABLED` | `false` | Enables only `/internal/experimental-summary`. |
+| `FOLLOWUP_AGENT_ENABLED` | `false` | Existing configuration name that enables Clinical Follow-up Review. |
+| `FHIR_BASE_URL` | `http://localhost:8080/fhir` | Authorized FHIR endpoint used by the follow-up HAPI read client. |
+| `GEMINI_API_KEY` | empty | Gemini credential; required only for live model execution. |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Configured Gemini model; no automatic model fallback. |
+| `RUN_HAPI_INTEGRATION_TESTS` | `false` | Test-only opt-in for local real-HAPI tests. |
+| `RUN_LIVE_GEMINI_TESTS` | `false` | Test-only opt-in for live Gemini tests. |
 
-Use `5` seconds only in mocked tests.
-
-## Output
-
-Exactly these fields:
-
-```json
-{
-  "status": "received",
-  "modelCalled": false,
-  "contractVersion": "v1",
-  "outcome": "SNAPSHOT_COMPLETE",
-  "reason": null
-}
-```
-
-`status` is `received` or `rejected`. `reason` is `null` on `received`. Closed rejection reasons:
-
-- `empty_context` — no collection has `retainedCount > 0` (same idea as `AgentStub.hasClinicalData`)
-- `boundary_outcome_not_success` — HTTP 200 and `outcome` is `SNAPSHOT_UNAVAILABLE`, `PATIENT_CONTEXT_NOT_CONFIGURED`, or `AUTHENTICATION_REQUIRED`
-- `boundary_http_4xx` / `boundary_http_5xx` — Java HTTP class wins; body is not treated as a usable contract
-- `boundary_timeout` / `boundary_connection_error`
-- `invalid_contract` — not JSON, missing required keys, unknown `outcome`, or `retainedCount` not safely readable
-
-`medicationRequests: null` is valid. A missing `medicationRequests` key is `invalid_contract`.
-
-`SNAPSHOT_PARTIAL` with retained context is `received`.
-
-Logs include a correlation id, Java HTTP status, duration, and the consumer verdict. They never include Patient identifiers, tokens, FHIR JSON, clinical values, or the full contract.
+`FHIR_BASE_URL` is read by the FHIR client rather than the `Settings` dataclass. The two test flags are read by tests, not by application startup configuration.
 
 ## Local run
 
-Java `fhir-integration-service` must already be listening on port 8081 if you want a live call. Default tests do not need it.
+Start local HAPI from the repository root if Clinical Follow-up Review needs it:
 
 ```bash
+docker compose -f infra/docker/docker-compose.yml up -d
+```
+
+Then install and run the service:
+
+```powershell
 cd services/ai-service
 py -3 -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+$env:MODEL_BOUNDARY_SERVICE_TOKEN = "<local-token>"
+$env:FOLLOWUP_AGENT_ENABLED = "true"
+$env:FHIR_BASE_URL = "http://localhost:8080/fhir"
+$env:GEMINI_API_KEY = "<local-key>"
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8090
 ```
 
-```http
-GET http://localhost:8090/internal/agent-context
-X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
-```
+Do not treat this local bind, shared token or local HAPI stack as a production deployment architecture.
 
-Experimental Gemini (disabled unless `LLM_EXPERIMENTAL_ENABLED=true` and `GEMINI_API_KEY` is set):
+## Model Boundary v1 consumer
 
-```http
-POST http://localhost:8090/internal/experimental-summary
-X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
-```
+`GET /internal/agent-context` authenticates the caller, fetches the configured Java `GET /api/model-boundary/v1`, validates the closed contract and returns `received` or `rejected`. It does not send the v1 payload to Gemini and always returns `modelCalled=false`.
 
-The body must be exactly fixture `SYN-076-001` from `app/experimental_fixture.py`.
+This remains independent from Clinical Follow-up Review.
 
-## Follow-up Agent
+## Synthetic experimental summary
 
-`POST /internal/agent/follow-up` calls `FollowUpWorkflow.run(case_id)`. That workflow is the LangGraph follow-up: Gemini tool calling, policy, audit, `ToolNode`, and the FHIR read chain. It does not change 074 or 076. `GeminiProvider.generate_summary()` still serves `POST /internal/experimental-summary`.
+`POST /internal/experimental-summary` remains disabled unless `LLM_EXPERIMENTAL_ENABLED=true`. It accepts only the exact synthetic fixture `SYN-076-001` and uses `GeminiProvider.generate_summary()`.
 
-`FOLLOWUP_AGENT_ENABLED` defaults to `false` and is separate from `LLM_EXPERIMENTAL_ENABLED`. While it is false, a valid token receives HTTP 503 and the workflow does not run:
+It does not consume Model Boundary v1 or implement the follow-up protocol. Its historical scope is recorded by ADR-076.
 
-```json
-{"detail": "Follow-up agent is disabled"}
-```
+## Clinical Follow-up Review
 
-That response is returned after authentication and before request validation. A missing or wrong token is still HTTP 401 with an empty body, whether the flag is true or false. A malformed body returns HTTP 422 only after the flag is enabled, and the workflow does not run.
-
-To try it locally, set the flag in the same shell that starts uvicorn. Uvicorn does not load `.env` by itself.
-
-```powershell
-$env:FOLLOWUP_AGENT_ENABLED = "true"
-$env:MODEL_BOUNDARY_SERVICE_TOKEN = "<local-token>"
-$env:GEMINI_API_KEY = "<local-key>"
-```
-
-Gemini for this path uses `Settings.gemini_api_key` and `Settings.gemini_model`. Default tests inject a scripted workflow and do not call Gemini.
+Request:
 
 ```http
 POST http://localhost:8090/internal/agent/follow-up
@@ -151,7 +91,46 @@ Content-Type: application/json
 {"caseId": "SYN-FOLLOWUP-001"}
 ```
 
-A workflow result uses HTTP 200. Internal statuses map as `finish` → `completed`, `denied` → `denied`, `unavailable` → `unavailable`, and `limit` → `limit`.
+`FOLLOWUP_AGENT_ENABLED` must be `true`. Authentication occurs before the feature gate and request validation:
+
+- missing/wrong/unconfigured token: HTTP 401 with an empty body;
+- valid token while disabled: HTTP 503 with `{"detail":"Follow-up agent is disabled"}`;
+- invalid request after enablement: HTTP 422;
+- unexpected workflow failure: HTTP 502 with `{"detail":"Follow-up workflow failed"}`;
+- valid projected workflow result: HTTP 200.
+
+The retained environment/error string uses “agent” for compatibility; the productive capability name is **Clinical Follow-up Review**.
+
+### Mandatory acquisition and deterministic authority
+
+For every accepted request, the application binds the authorized case and, before LangGraph, acquires:
+
+- the unique Patient identified by `Patient.identifier` system `https://lab.local/followup-case` and value `caseId`;
+- the Patient resource;
+- finished Encounters for that Patient;
+- final Observations for that Patient;
+- Appointments for that Patient.
+
+Collection searches use page size 25, at most 4 pages and at most 100 unique resources per type. Search completeness is recorded explicitly; partial traversal cannot prove absence.
+
+The application evaluates `POST_CONSULTATION_RESULT_REVIEW_V1` over the authorized immutable snapshot. Gemini does not choose the mandatory reads and cannot set protocol, clinical-assessment, human-review or action fields.
+
+### Narrative agent subflow
+
+After deterministic evaluation, the existing LangGraph/Gemini subflow may run when the workflow is available. It retains two authorized read tools:
+
+- `get_patient_followup_context`;
+- `get_patient_appointments`.
+
+The model may choose between these narrative tools, but cannot supply a Patient id or arbitrary FHIR query. Tool policy requires the already authorized `caseId`; unknown tools and `send_message` are denied and audited before `ToolNode` execution.
+
+Tool results may contain FHIR-derived payloads only through these explicit contracts. This is not general permission to send arbitrary FHIR context to Gemini.
+
+`MAX_MODEL_TURNS` is 4. Automatic function calling is disabled. When a final model message carries a valid structured `follow_up_required` value (`true`, `false` or `unknown`), that value is projected. After tool use, an unstructured response triggers one closing request for the structured object; if the final or closing response still omits a valid structured decision, legacy `followUpRequired="unknown"` remains possible. Free text is never parsed to infer the value, and this legacy field does not control deterministic protocol authority.
+
+### Response
+
+A matched example has this shape:
 
 ```json
 {
@@ -159,106 +138,115 @@ A workflow result uses HTTP 200. Internal statuses map as `finish` → `complete
   "caseId": "SYN-FOLLOWUP-001",
   "status": "completed",
   "context": {"patient": "resolved", "observation": "with_resources"},
-  "schedule": {"check": "not_checked"},
+  "schedule": {"check": "checked", "classifications": ["NONE"]},
   "clinicalAssessment": {"status": "not_performed"},
-  "humanReview": {"status": "not_evaluated"},
-  "action": {"status": "not_determined"},
+  "humanReview": {
+    "status": "required",
+    "reason": "deterministic_post_consultation_protocol_match"
+  },
+  "action": {"status": "proposed", "type": "review_follow_up_case"},
+  "protocol": {
+    "id": "POST_CONSULTATION_RESULT_REVIEW_V1",
+    "evaluationStatus": "matched",
+    "reasonCodes": ["post_consultation_result_requires_review"],
+    "matchedResources": ["Encounter/encounter-id", "Observation/observation-id"]
+  },
   "followUpRequired": "unknown",
-  "answer": "Synthetic answer.",
-  "evidence": [
-    {"tool": "get_patient_followup_context", "id": "Patient/SYN-PATIENT-001"},
-    {"tool": "get_patient_followup_context", "id": "Observation/obs-synthetic-001"}
-  ]
+  "answer": "Narrative model output.",
+  "evidence": []
 }
 ```
 
-The application creates one `runId` and passes it into the workflow. Evidence lists FHIR references actually read. Each reference keeps the name of the tool that read it. The body does not include the patient, the observation, the appointment, prompts, completions, or signatures. An unexpected workflow failure, including a Gemini or transport error the workflow does not map to `unavailable`, returns HTTP 502 `{"detail": "Follow-up workflow failed"}` and does not echo the exception.
+Top-level `status` describes execution, not protocol evaluation. Internal execution statuses map as:
 
-This surface uses synthetic laboratory data only. It does not diagnose, prescribe, or write clinical records. `/health` stays open and does not read this flag.
+- `finish` -> `completed`;
+- `denied` -> `denied`;
+- `unavailable` -> `unavailable`;
+- `limit` -> `limit`.
 
-The previous manual runtime, its JSON tool loop, fixture tools, and `FollowUpResponse` contract have been removed. They are not a second implementation.
+`clinicalAssessment.status` remains `not_performed`. When the protocol matches, `humanReview.status=required` means response-level presentation for review; no durable queue or assignment exists. `action.status=proposed` does not execute anything.
 
-## Tests
+`answer` and `followUpRequired` remain legacy model-owned output and do not control `protocol`, `clinicalAssessment`, `humanReview` or `action`.
+
+`evidence` identifies resources returned through narrative tools. `protocol.matchedResources` identifies resources used by the deterministic rule. They are intentionally different provenance sets.
+
+### FHIR and HAPI behavior
+
+The follow-up client performs GET-only reads. It retries transport loss and transient HTTP 408, 429, 500, 502, 503 and 504 up to three attempts including the first. Redirects are disabled.
+
+An ordinary same-resource continuation must preserve the exact resource endpoint and every application-controlled initial query parameter, including Patient/subject, status and `_count` where present. Only the recognized `page` and `token` paging values may be added or changed.
+
+Separately, the client supports the narrowly constrained HAPI 8.10 base-endpoint continuation shape. That branch preserves configured origin and base path, page size, traversal token and offset progression. The two continuation shapes cannot be mixed during one traversal. Unsafe, cyclic, malformed or cross-origin links fail closed. Opaque paging tokens are not logged and are not authorization.
+
+See the [V1 contract](../../docs/contracts/post-consultation-result-review-v1.md) for exact completeness, reference, timestamp, appointment and failure semantics.
+
+### Known limitations
+
+- No FHIR writes or autonomous messages.
+- No clinical interpretation, diagnosis, severity, urgency or treatment decision.
+- No persistent memory, checkpoint or case database.
+- No durable human-review queue, assignment or acknowledgement.
+- No enterprise IAM/RBAC or tenancy.
+- No production network or secret-management architecture.
+- No production authorization/governance conclusion for real clinical data sent to Gemini.
+
+## Tests and evaluation
+
+### Deterministic suite
 
 ```bash
 cd services/ai-service
 py -3 -m pytest
 ```
 
-The default suite stays deterministic. It does not call Epic, Oracle, or Gemini, and it does not need an API key.
+The default suite uses fake/scripted providers and in-memory or mocked transports. It does not require Gemini, Epic, Oracle, a live API key or live HAPI. It protects closed HTTP contracts, authentication/gates, workflow ordering, model/tool policy, retry behavior, case isolation, protocol semantics and pagination validation.
 
-Follow-up endpoint tests inject a scripted workflow. Experimental-summary tests use `FakeLLMProvider` and stub `GeminiProvider._invoke` for `generate_summary()`.
+### Focused protocol and workflow coverage
 
-## Follow-up evaluation
+```powershell
+py -3 -m pytest `
+  tests/test_post_consultation_review.py `
+  tests/test_post_consultation_pagination.py `
+  tests/test_post_consultation_workflow.py `
+  tests/test_langgraph_followup_workflow.py `
+  tests/test_langgraph_gemini_fhir_followup.py
+```
 
-`evaluation` runs the same `FollowUpWorkflow` with a scripted model and the in-memory FHIR client. It checks system behavior: which tools ran, in what order, whether policy allowed them, which FHIR ids were read, whether `follow_up_required` is the structured token, how many model turns were used, and whether the run stopped by `finish`, `close`, `denied`, `unavailable`, or `limit`.
+These tests protect mandatory acquisition, completeness/failure semantics, temporal and appointment rules, concurrency/case isolation, deterministic projection and independence from legacy model output.
 
-It does not judge clinical correctness. A scripted `true`, `false`, or `unknown` checks that the workflow kept the model's structured field. It is not a rule that an appointment, an observation, or an empty search means follow-up is required. The harness does not call Gemini, does not use another model as a judge, and does not show clinical safety or clinical effectiveness. It does not replace human review.
+### Deterministic evaluation harness
 
 ```bash
-cd services/ai-service
 py -3 -m pytest tests/test_followup_evaluation.py
 ```
 
-## Live Gemini
+The harness runs the productive workflow with scripted model replies and in-memory FHIR data. It checks tool/policy behavior and expected deterministic protocol outcomes. It does not use another model as a judge and does not establish clinical effectiveness or safety.
 
-Set `RUN_LIVE_GEMINI_TESTS=true` together with `RUN_HAPI_INTEGRATION_TESTS=true` to run the opt-in follow-up case. It stays skipped otherwise. HAPI reads alone use `RUN_HAPI_INTEGRATION_TESTS=true`. The experimental summary has its own opt-in live test and still uses `GeminiProvider.generate_summary()`.
+### Real local HAPI
 
-## Follow-up workflow
+In PowerShell, with the local HAPI service running:
 
-`POST /internal/agent/follow-up` calls `FollowUpWorkflow.run(case_id)`.
-
-Incremental LangGraph laboratories (C16-A through C16-T) were used to prove the pieces. Those lesson modules are gone. One workflow remains:
-
-```text
-FollowUpWorkflow.run
-        |
-        v
-LangGraph
-        |
-        +--> Gemini tool calling
-        |
-        +--> evaluate_tool_policy
-        |
-        +--> record_policy_audit
-        |
-        +--> ToolNode
-                |
-                v
-        get_patient_followup_context
-        get_patient_appointments
-                |
-                v
-        FollowUpFHIRAdapter
-                |
-                v
-        ClientFHIRTransport
-                |
-                v
-        HapiReadClient
-                |
-                v
-        HAPI FHIR
+```powershell
+$env:RUN_HAPI_INTEGRATION_TESTS = "true"
+py -3 -m pytest tests/test_langgraph_fhir_hapi.py tests/test_langgraph_followup_workflow.py tests/test_langgraph_gemini_fhir_followup.py
 ```
 
-Policy and audit stay outside the graph. `evaluate_tool_policy` runs before `ToolNode`. `ToolNode` executes an allowed tool. It does not authorize. The allowlist is `get_patient_followup_context` and `get_patient_appointments`. Anything else, including `send_message`, is denied. A denied or unknown tool is audited and does not reach `ToolNode`. Each proposed tool gets its own audit line and the same `run_id`. `MAX_MODEL_TURNS` is 4. LangGraph `recursion_limit` is not the product limit.
+This opt-in category exercises productive HAPI reads, including multipage traversal. It does not require live Gemini unless the Gemini opt-in is also enabled.
 
-The model chooses the tools. After `get_patient_followup_context` it can answer, or it can call `get_patient_appointments` with the same case id. The application does not force that second call. Automatic function calling is disabled on every Gemini request (`AutomaticFunctionCallingConfig(disable=True)`). While the model may still call a tool, both read tools are declared and no JSON schema is set. A model message that already carries structured `follow_up_required` (`true`, `false`, or `unknown`) finishes. If the model stops after a clinical read without that token, the `close` node makes one later request. That request asks only for the JSON object `answer` plus `follow_up_required` and declares no tools. `close` does not choose a tool. The workflow copies the structured field. It does not read the answer text. `thought_signature` from a function-call part is sent back on the next request and is not logged or returned.
+### Live Gemini
 
-A Gemini call retries only transient failures: HTTP 408, 429, 500, 502, 503, 504, plus `httpx` connect and timeout errors. The limit is 3 attempts, including the first call. The wait is 0.25 seconds and then 0.5 seconds, capped at 1 second. HTTP 400, 401, and other permanent statuses are not retried. The SDK retry is fixed at one attempt, so the application retry is the only retry. The same `run_id` is kept. A retry does not call policy again and does not run a tool that already succeeded. A HAPI GET uses the same attempt limit for transport loss and those same HTTP statuses. HTTP 404 and a case with no patient are not retried. After the attempts are exhausted, Gemini still becomes HTTP 502 and a HAPI 5xx still becomes `unavailable`. A transport failure still returns HTTP 502 without this response body. This retry behavior is covered by deterministic tests, not by a live Gemini call.
+```powershell
+$env:RUN_HAPI_INTEGRATION_TESTS = "true"
+$env:RUN_LIVE_GEMINI_TESTS = "true"
+py -3 -m pytest tests/test_langgraph_gemini_fhir_followup.py
+```
 
-`record_policy_audit` writes one `followup_tool_policy_audit` line on the `ai-service` logger for each proposed tool. That line uses the same `run_id` as the HTTP `runId` and the workflow, plus `case_id`, `tool_name`, `decision`, `policy_version`, and `reason`. It does not include prompts, signatures, Patient, Observation, or Appointment.
+Live follow-up coverage requires both flags and a configured key/model. The experimental-summary live test also uses `RUN_LIVE_GEMINI_TESTS`, but remains a separate endpoint and contract. Live Gemini is never part of the default deterministic suite.
 
-The case id is not a `Patient.id`. The adapter searches `Patient.identifier` (`system` `https://lab.local/followup-case`, `value` equal to the case id). `get_patient_followup_context` then reads that Patient and the Observations whose subject is that Patient. A successful search with zero Observation returns an empty list and Patient evidence only. It does not invent an Observation id and it does not set `followUpRequired`. A failed Observation read stays `unavailable`. When the Patient was already read, that Patient stays in `evidence` and `context.patient` is `resolved` while `context.observation` is `unavailable`. A search that returns no Patient is `context.patient` `not_resolved`, which is still workflow `unavailable`. `get_patient_appointments` uses the same identifier lookup and then reads `Appointment?patient=Patient/{id}`. It does not accept a patient id or a FHIR query from the model. Each read Appointment gets an operational classification: upcoming confirmed, upcoming unconfirmed, cancelled, past, other, or `NONE` when the search has no appointment for that patient. That classification does not set `followUpRequired`. An empty search adds no Appointment evidence. A cancelled or past Appointment that was read does. The laboratory Patient `SYN-PATIENT-001` carries the identifier for `SYN-FOLLOWUP-001` and the synthetic Appointment `appointment-synthetic-001`. Other synthetic follow-up patients hold one appointment state each, so those states are not stacked on the same patient. A case with no matching identifier is `unavailable`. Other accepted case ids have no FHIR patient yet. This path only reads HAPI. FHIR remains the source of truth.
+Test counts are release evidence, not architectural requirements; the protected categories and invariants are the durable documentation.
 
-This follow-up has no persistent memory, RAG, checkpointing, or human-in-the-loop interrupt. It does not write FHIR resources.
+## Logging and audit
 
-`followUpRequired` is the structured token `true`, `false`, or `unknown`. It is legacy model output. The service does not infer it from the answer text, and it does not derive `context`, `schedule`, `clinicalAssessment`, `humanReview`, or `action` from it. `unknown` stays valid when the model returns that token.
+The HTTP layer logs correlation id, method, path and bounded status without secrets. Tool-policy audit records `run_id`, `case_id`, tool name, decision, policy version, reason and timestamp.
 
-`status` is the workflow execution. `context` is the Patient and Observation read state. `schedule.check` is `not_checked` when the appointment tool did not run, `checked` with classifications when it did, and `unavailable` when that read failed. `NONE` is a checked empty search, not a skipped tool. `clinicalAssessment` is `not_performed` because no clinical protocol ran. `humanReview` is `not_evaluated` because no review policy ran. `action` is `not_determined` because the product did not choose an action. `answer` is narrative. `evidence` lists FHIR resources that were actually read. These fields do not establish clinical correctness.
-
-Gemini settings come from `Settings` (`GEMINI_API_KEY`, `GEMINI_MODEL`). `config.py` was not changed. `GeminiProvider` still serves the experimental summary.
-
-`FollowUpWorkflowResult` is the internal result: `run_id`, `case_id`, `status` (`finish`, `denied`, `unavailable`, `limit`), `final_answer`, `follow_up_required`, and `evidence`. The HTTP body is `FollowUpEndpointResponse`.
-
-HAPI reads are opt-in with `RUN_HAPI_INTEGRATION_TESTS=true`. Live Gemini stays opt-in with `RUN_LIVE_GEMINI_TESTS=true`.
+Application logs must not contain service tokens, API keys, prompts, completions, thought signatures, FHIR payloads or raw HAPI paging tokens. The current in-memory/development audit behavior is not a durable production audit system.
