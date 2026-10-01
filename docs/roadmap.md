@@ -27,15 +27,16 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - Bounded, completeness-aware HAPI pagination and case isolation.
 - Deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` outside model authority.
 - Response-level human-review requirement and proposed review action when the protocol matches.
+- Durable SQLite-backed operational review cases with queue, provenance, bounded closure outcomes and transition history.
 - Deterministic, evaluation-harness and opt-in real-HAPI coverage.
 
 ## Current product gaps
 
 The following capabilities are not established by the current repository:
 
-- durable human-review queue, assignment and disposition;
+- human-review assignment, claiming and verified reviewer identity;
 - clinical assessment or clinical decision support;
-- persistent follow-up case state or workflow checkpointing;
+- general workflow checkpointing beyond the operational review-case store;
 - product frontend;
 - enterprise IAM/RBAC and multi-tenancy;
 - durable audit storage and production operations;
@@ -51,7 +52,7 @@ This list is an inventory, not a priority order.
 
 Future product decisions may consider:
 
-- operational human-review case management;
+- reviewer assignment and identity-backed case management;
 - additional explicitly authorized FHIR capabilities or adapters;
 - broader interoperability mechanisms such as HL7 v2 or other designed adapters;
 - production identity, tenancy, audit and deployment controls;
@@ -64,4 +65,4 @@ Each candidate requires a separate product decision, security assessment and acc
 
 The repository has an implemented interoperability foundation and an implemented Healthcare AI workflow foundation. It is beyond the former “Phase 2–3” and “future AI/LangGraph” descriptions.
 
-It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, and deterministic follow-up review is not clinical diagnosis or an operational review system.
+It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, the SQLite review store is single-instance, and deterministic follow-up review is not clinical diagnosis.

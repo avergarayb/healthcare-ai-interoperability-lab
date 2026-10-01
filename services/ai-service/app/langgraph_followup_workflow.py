@@ -59,6 +59,7 @@ from app.langgraph_gemini_fhir_followup import (
     MAX_MODEL_TURNS,
     build_gemini_fhir_followup,
 )
+from app.followup_review import FollowUpReviewCase
 from app.post_consultation_review import (
     ProtocolEvaluationStatus,
     ProtocolReviewResult,
@@ -119,6 +120,7 @@ class FollowUpWorkflowResult:
     observation_collection: str = "not_read"
     appointment_collection: str = "not_read"
     protocol_encounters: tuple[dict[str, Any], ...] = ()
+    review_case: FollowUpReviewCase | None = None
 
 
 class FollowUpWorkflow:
@@ -135,6 +137,10 @@ class FollowUpWorkflow:
         clock: Callable[[], str],
         run_id: str,
         now: Callable[[], datetime] | None = None,
+        ensure_review_case: Callable[
+            [str, ProtocolReviewResult], FollowUpReviewCase | None
+        ]
+        | None = None,
     ) -> None:
         self.model = model
         self.sink = sink
@@ -143,6 +149,7 @@ class FollowUpWorkflow:
         self.audit = audit
         self.clock = clock
         self.run_id = run_id
+        self.ensure_review_case = ensure_review_case
         self._engine = build_gemini_fhir_followup(
             fhir_client,
             sink,
@@ -166,6 +173,11 @@ class FollowUpWorkflow:
             protocol = evaluate_post_consultation_review(snapshot)
             if protocol.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE:
                 return self._unavailable_result(case_id, protocol)
+            review_case = (
+                self.ensure_review_case(case_id, protocol)
+                if self.ensure_review_case is not None
+                else None
+            )
             state = self._engine.invoke(case_id)
             patient = state["patient"]
             ledger = adapter.ledger
@@ -190,6 +202,7 @@ class FollowUpWorkflow:
                 observation_collection=ledger.observation_collection.value,
                 appointment_collection=ledger.appointment_collection.value,
                 protocol_encounters=tuple(dict(item) for item in ledger.encounters),
+                review_case=review_case,
             )
 
     def _unavailable_result(
@@ -231,6 +244,10 @@ def build_live_followup_workflow(
     base_url: str | None = None,
     policy: Callable[..., Any] = evaluate_tool_policy,
     audit: Callable[..., Any] = record_policy_audit,
+    ensure_review_case: Callable[
+        [str, ProtocolReviewResult], FollowUpReviewCase | None
+    ]
+    | None = None,
 ) -> FollowUpWorkflow:
     """Compose the live model and the live read client outside the workflow class."""
     from app.langgraph_fhir_hapi import HapiReadClient
@@ -244,6 +261,7 @@ def build_live_followup_workflow(
         audit=audit,
         clock=clock,
         run_id=run_id,
+        ensure_review_case=ensure_review_case,
     )
 
 

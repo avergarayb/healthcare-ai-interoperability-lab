@@ -23,7 +23,7 @@ Healthcare systems / FHIR endpoints
                 LangGraph/Gemini narrative subflow where allowed
 ```
 
-For Clinical Follow-up Review, mandatory Patient, Encounter, Observation and Appointment acquisition occurs before LangGraph. `POST_CONSULTATION_RESULT_REVIEW_V1` determines protocol, human-review and proposed-action fields. Gemini does not own those decisions. The capability performs no FHIR writes.
+For Clinical Follow-up Review, mandatory Patient, Encounter, Observation and Appointment acquisition occurs before LangGraph. `POST_CONSULTATION_RESULT_REVIEW_V1` determines protocol, human-review and proposed-action fields. A separate SQLite-backed operational workflow creates or reuses a durable review case for a match before Gemini runs. Gemini does not own those decisions or durable state. The capability performs no FHIR writes.
 
 Start here:
 
@@ -32,13 +32,15 @@ Start here:
 - [Healthcare Interoperability documentation](docs/fhir/README.md)
 - [Healthcare AI service runbook](services/ai-service/README.md)
 - [ADR-085: Python FHIR and model authority boundary](docs/adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md)
+- [ADR-086: persistent follow-up review workflow](docs/adr/ADR-086-persistent-follow-up-review-workflow-and-operational-authority-boundary.md)
 - [Clinical Follow-up Review V1 contract](docs/contracts/post-consultation-result-review-v1.md)
+- [Operational Follow-up Review Workflow V1 contract](docs/contracts/follow-up-review-workflow-v1.md)
 
 ## Implemented versus not implemented
 
-Implemented development capabilities include FHIR R4 client operations, local HAPI, sandbox SMART integrations, controlled Java projections, the Python internal APIs, bounded HAPI reads, deterministic follow-up review and a gated Gemini narrative flow.
+Implemented development capabilities include FHIR R4 client operations, local HAPI, sandbox SMART integrations, controlled Java projections, the Python internal APIs, bounded HAPI reads, deterministic follow-up review, durable single-instance operational review cases and a gated Gemini narrative flow.
 
-The repository does not establish production IAM/RBAC, tenancy, a durable human-review queue, clinical decision support, autonomous treatment, production deployment, regulatory certification, or production processing approval for real patient data.
+The repository does not establish production IAM/RBAC, tenancy, human assignment or verified reviewer identity, clinical decision support, autonomous treatment, multi-replica review persistence, production deployment, regulatory certification, or production processing approval for real patient data.
 
 ## Repository layout
 

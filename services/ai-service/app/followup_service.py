@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from dataclasses import replace
 from typing import Any, Callable
 
 from fastapi import Request
@@ -27,9 +28,15 @@ from app.followup_models import (
     HumanReview,
     HumanReviewStatus,
     ProtocolState,
+    ReviewCaseLink,
     ScheduleAppointment,
     ScheduleState,
     dump_followup_endpoint_response,
+)
+from app.followup_review import (
+    FollowUpReviewCaseService,
+    InvalidReviewTrigger,
+    ReviewPersistenceUnavailable,
 )
 from app.langgraph_fhir_client import InMemoryAuditSink, default_clock
 from app.langgraph_followup_workflow import (
@@ -43,6 +50,7 @@ log = logging.getLogger("ai-service")
 
 DISABLED_DETAIL = "Follow-up agent is disabled"
 WORKFLOW_FAILED_DETAIL = "Follow-up workflow failed"
+REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL = "Follow-up review persistence unavailable"
 
 _HTTP_STATUS = {
     "finish": FollowUpEndpointStatus.COMPLETED,
@@ -85,8 +93,34 @@ def run_followup_http(
     run_id = str(uuid.uuid4())
     factory = build_workflow or build_followup_workflow
     workflow = factory(run_id)
+    review_service: FollowUpReviewCaseService | None = None
+
+    def ensure_review_case(case_id, protocol):
+        nonlocal review_service
+        if protocol.evaluation_status.value != "matched":
+            return None
+        if review_service is None:
+            repository = getattr(request.app.state, "followup_review_repository", None)
+            if repository is None:
+                raise ReviewPersistenceUnavailable
+            review_service = FollowUpReviewCaseService(repository)
+        return review_service.ensure_for_protocol(case_id, protocol)
+
+    if isinstance(workflow, FollowUpWorkflow):
+        workflow.ensure_review_case = ensure_review_case
     try:
         result = workflow.run(parsed.case_id)
+        if result.protocol.evaluation_status.value == "matched" and result.review_case is None:
+            result = _with_review_case(
+                result,
+                ensure_review_case(result.case_id, result.protocol),
+            )
+    except (ReviewPersistenceUnavailable, InvalidReviewTrigger):
+        _log(correlation_id, "persistence_unavailable")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL},
+        )
     except Exception:
         _log(correlation_id, "error")
         return JSONResponse(status_code=502, content={"detail": WORKFLOW_FAILED_DETAIL})
@@ -126,12 +160,25 @@ def _project(result: FollowUpWorkflowResult) -> FollowUpEndpointResponse | None:
                 reasonCodes=list(result.protocol.reason_codes),
                 matchedResources=list(result.protocol.matched_resources),
             ),
+            reviewCase=(
+                ReviewCaseLink(
+                    reviewCaseId=result.review_case.id,
+                    status=result.review_case.status.value,
+                    version=result.review_case.version,
+                )
+                if result.review_case is not None
+                else None
+            ),
             followUpRequired=FollowUpRequired(result.follow_up_required),
             answer=result.final_answer,
             evidence=_evidence(result.evidence),
         )
     except ValidationError:
         return None
+
+
+def _with_review_case(result: FollowUpWorkflowResult, review_case) -> FollowUpWorkflowResult:
+    return replace(result, review_case=review_case)
 
 
 def _schedule(result: FollowUpWorkflowResult) -> ScheduleState:

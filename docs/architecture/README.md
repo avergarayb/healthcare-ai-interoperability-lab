@@ -25,6 +25,7 @@ Configured authorized FHIR endpoint
         -> Healthcare AI case-bound GET reads
         -> mandatory Patient + Encounter + Observation + Appointment snapshot
         -> deterministic POST_CONSULTATION_RESULT_REVIEW_V1
+        -> durable operational review case when MATCHED
         -> authorized LangGraph/Gemini narrative subflow when allowed
         -> application-owned response projection
 ```
@@ -38,13 +39,15 @@ The second flow does not require the Java process merely to obtain FHIR context 
 - The deterministic protocol owns `protocol`, `clinicalAssessment`, `humanReview` and `action`.
 - Gemini owns only legacy narrative output such as `answer` and `followUpRequired`.
 - FHIR-derived model input is allowed only through explicitly authorized tool/data contracts.
-- `humanReview.status=required` is a response-level requirement, not a durable review work item.
+- `humanReview.status=required` remains a response-level protocol requirement. A separate `FollowUpReviewCase` is the durable operational work item.
 - `action.status=proposed` is not external execution.
+- Gemini cannot create, close or select the outcome of an operational review case.
 
 ## Authoritative documents
 
 - [Product scope](../PROJECT.md)
 - [Clinical Follow-up Review V1 contract](../contracts/post-consultation-result-review-v1.md)
+- [Operational Follow-up Review Workflow V1 contract](../contracts/follow-up-review-workflow-v1.md)
 - [Healthcare Interoperability architecture](../fhir/fhir-architecture.md)
 - [Healthcare AI runbook](../../services/ai-service/README.md)
 - [AI governance](../ai-governance/README.md)
@@ -63,6 +66,7 @@ The second flow does not require the Java process merely to obtain FHIR context 
 | [ADR-083](../adr/ADR-083-product-and-local-fhir-packaging.md) | Local-FHIR Support Pack distinction retained; single-runtime wording refined by ADR-084. |
 | [ADR-084](../adr/ADR-084-product-identity-and-architectural-units.md) | Establishes independent product units; Python-FHIR current-state portions superseded by ADR-085. |
 | [ADR-085](../adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) | Accepted current decision for bounded Python FHIR reads and model authority. |
+| [ADR-086](../adr/ADR-086-persistent-follow-up-review-workflow-and-operational-authority-boundary.md) | Accepted current decision for durable operational follow-up review state and authority. |
 
 ## Historical governance artifacts
 

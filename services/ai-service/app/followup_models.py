@@ -153,6 +153,14 @@ class ProtocolState(BaseModel):
     matched_resources: list[str] = Field(alias="matchedResources")
 
 
+class ReviewCaseLink(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    review_case_id: str = Field(alias="reviewCaseId")
+    status: Literal["open", "closed"]
+    version: int = Field(ge=1)
+
+
 class FollowUpRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -193,6 +201,7 @@ class FollowUpEndpointResponse(BaseModel):
             matchedResources=[],
         )
     )
+    review_case: ReviewCaseLink | None = Field(default=None, alias="reviewCase")
     follow_up_required: FollowUpRequired = Field(alias="followUpRequired")
     answer: str
     evidence: list[Evidence]

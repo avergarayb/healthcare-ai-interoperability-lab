@@ -10,6 +10,8 @@ The service currently contains three deliberately separate internal capabilities
 
 The authoritative follow-up rules are in [`../../docs/contracts/post-consultation-result-review-v1.md`](../../docs/contracts/post-consultation-result-review-v1.md). The FHIR/model boundary decision is [ADR-085](../../docs/adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md).
 
+The separate durable operational workflow is defined by [`FOLLOW_UP_REVIEW_WORKFLOW_V1`](../../docs/contracts/follow-up-review-workflow-v1.md) and [ADR-086](../../docs/adr/ADR-086-persistent-follow-up-review-workflow-and-operational-authority-boundary.md).
+
 ## Endpoints
 
 | Method | Path | Purpose |
@@ -18,8 +20,11 @@ The authoritative follow-up rules are in [`../../docs/contracts/post-consultatio
 | `GET` | `/internal/agent-context` | Authenticated consumption of Java Model Boundary v1; always `modelCalled=false`. |
 | `POST` | `/internal/experimental-summary` | Gated Gemini summary for exact fixture `SYN-076-001`. |
 | `POST` | `/internal/agent/follow-up` | Gated Clinical Follow-up Review for an allowed `caseId`. |
+| `GET` | `/internal/follow-up-review-cases` | Bounded operational review queue; defaults to open cases. |
+| `GET` | `/internal/follow-up-review-cases/{reviewCaseId}` | Operational state, immutable trigger provenance and transition history. |
+| `POST` | `/internal/follow-up-review-cases/{reviewCaseId}/close` | Idempotent terminal closure with an approved operational outcome. |
 
-The three internal endpoints require `X-Service-Token` and fail closed when `MODEL_BOUNDARY_SERVICE_TOKEN` is empty, absent or different. Sharing the development token does not merge their contracts.
+All `/internal/*` endpoints require `X-Service-Token` and fail closed when `MODEL_BOUNDARY_SERVICE_TOKEN` is empty, absent or different. Sharing the development token does not merge their contracts. This token authenticates an internal service caller; it does not establish human reviewer identity.
 
 ## Environment
 
@@ -36,12 +41,15 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 | `LLM_EXPERIMENTAL_ENABLED` | `false` | Enables only `/internal/experimental-summary`. |
 | `FOLLOWUP_AGENT_ENABLED` | `false` | Existing configuration name that enables Clinical Follow-up Review. |
 | `FHIR_BASE_URL` | `http://localhost:8080/fhir` | Authorized FHIR endpoint used by the follow-up HAPI read client. |
+| `AI_REVIEW_DB_PATH` | `./data/follow-up-review.sqlite3` | Dedicated file-backed SQLite product store for operational review cases. |
 | `GEMINI_API_KEY` | empty | Gemini credential; required only for live model execution. |
 | `GEMINI_MODEL` | `gemini-flash-latest` | Configured Gemini model; no automatic model fallback. |
 | `RUN_HAPI_INTEGRATION_TESTS` | `false` | Test-only opt-in for local real-HAPI tests. |
 | `RUN_LIVE_GEMINI_TESTS` | `false` | Test-only opt-in for live Gemini tests. |
 
 `FHIR_BASE_URL` is read by the FHIR client rather than the `Settings` dataclass. The two test flags are read by tests, not by application startup configuration.
+
+`AI_REVIEW_DB_PATH` is not HAPI PostgreSQL. V1 supports one `ai-service` instance and one writer store. The operator owns durable-volume placement, file permissions, backup and storage protection. Standard SQLite does not itself encrypt data at rest; environments using real clinical data require separately approved protected storage. No retention duration or automatic purge is configured.
 
 ## Local run
 
@@ -151,6 +159,11 @@ A matched example has this shape:
     "reasonCodes": ["post_consultation_result_requires_review"],
     "matchedResources": ["Encounter/encounter-id", "Observation/observation-id"]
   },
+  "reviewCase": {
+    "reviewCaseId": "<uuid>",
+    "status": "open",
+    "version": 1
+  },
   "followUpRequired": "unknown",
   "answer": "Narrative model output.",
   "evidence": []
@@ -164,11 +177,45 @@ Top-level `status` describes execution, not protocol evaluation. Internal execut
 - `unavailable` -> `unavailable`;
 - `limit` -> `limit`.
 
-`clinicalAssessment.status` remains `not_performed`. When the protocol matches, `humanReview.status=required` means response-level presentation for review; no durable queue or assignment exists. `action.status=proposed` does not execute anything.
+`clinicalAssessment.status` remains `not_performed`. When the protocol matches, `humanReview.status=required` remains the response-level protocol requirement. The separate `reviewCase` projection identifies the durable operational work item. `action.status=proposed` does not execute an external action.
+
+The review case is created or reused after deterministic evaluation and committed before the narrative model runs. If matched-case persistence is unavailable, the endpoint returns HTTP 503 and does not invoke Gemini. Once committed, a later model failure cannot roll the case back. The same deterministic event reuses its case even when that case is already closed; consequently `humanReview.status=required` and `reviewCase.status=closed` can validly appear together.
 
 `answer` and `followUpRequired` remain legacy model-owned output and do not control `protocol`, `clinicalAssessment`, `humanReview` or `action`.
 
 `evidence` identifies resources returned through narrative tools. `protocol.matchedResources` identifies resources used by the deterministic rule. They are intentionally different provenance sets.
+
+### Durable operational review workflow
+
+Only a deterministic `MATCHED` result creates a case. Identity uses SHA-256 over versioned canonical JSON containing exact `caseId`, exact `protocolId` and sorted unique `matchedResources`. Run ids, reason codes, timestamps and model output do not participate. FHIR logical resource versions are not part of V1 identity, so the same logical resource references reuse the existing case after closure.
+
+The lifecycle is exactly `open -> closed`. Closure outcomes are exactly:
+
+- `follow_up_coordination_planned`;
+- `review_completed_no_operational_action`.
+
+These outcomes are operational and do not express clinical normality, urgency, necessity, diagnosis, treatment or recommendation.
+
+Queue example:
+
+```http
+GET /internal/follow-up-review-cases?status=open&limit=25
+X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
+```
+
+The queue supports exact `caseId`, a maximum limit of 100 and an opaque keyset cursor. Ordering is oldest first by creation time and review-case id. Durable and cursor timestamps use exact `YYYY-MM-DDTHH:MM:SS.ffffffZ` form, and cursor JSON rejects duplicate member names. Detail returns minimized protocol provenance and `created`/`closed` transition history; it does not read live FHIR.
+
+Closure example:
+
+```http
+POST /internal/follow-up-review-cases/<review-case-uuid>/close
+X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
+Content-Type: application/json
+
+{"expectedVersion":1,"outcome":"follow_up_coordination_planned"}
+```
+
+The state update and append-only `closed` event are atomic. Retrying the same outcome returns the existing case without a duplicate event. A stale open version or different outcome after closure returns HTTP 409.
 
 ### FHIR and HAPI behavior
 
@@ -184,8 +231,10 @@ See the [V1 contract](../../docs/contracts/post-consultation-result-review-v1.md
 
 - No FHIR writes or autonomous messages.
 - No clinical interpretation, diagnosis, severity, urgency or treatment decision.
-- No persistent memory, checkpoint or case database.
-- No durable human-review queue, assignment or acknowledgement.
+- No general LangGraph checkpoint or conversational memory; persistence is limited to operational review cases.
+- No assignment, claiming, acknowledgement state or verified human reviewer identity.
+- SQLite V1 is single-instance and does not provide multi-replica persistence.
+- Standard SQLite storage is not encrypted at rest by this application.
 - No enterprise IAM/RBAC or tenancy.
 - No production network or secret-management architecture.
 - No production authorization/governance conclusion for real clinical data sent to Gemini.
@@ -200,6 +249,8 @@ py -3 -m pytest
 ```
 
 The default suite uses fake/scripted providers and in-memory or mocked transports. It does not require Gemini, Epic, Oracle, a live API key or live HAPI. It protects closed HTTP contracts, authentication/gates, workflow ordering, model/tool policy, retry behavior, case isolation, protocol semantics and pagination validation.
+
+Dedicated temporary-file SQLite tests additionally protect schema migration, restart durability, deterministic identity, unique creation, optimistic closure, concurrent races, queue pagination and data minimization.
 
 ### Focused protocol and workflow coverage
 
@@ -247,6 +298,6 @@ Test counts are release evidence, not architectural requirements; the protected 
 
 ## Logging and audit
 
-The HTTP layer logs correlation id, method, path and bounded status without secrets. Tool-policy audit records `run_id`, `case_id`, tool name, decision, policy version, reason and timestamp.
+The HTTP layer logs correlation id, method, path and bounded status without secrets. Tool-policy audit records `run_id`, `case_id`, tool name, decision, policy version, reason and timestamp. Durable review `created` and `closed` events are operational transition provenance; they are not security, clinical or verified-human audit.
 
 Application logs must not contain service tokens, API keys, prompts, completions, thought signatures, FHIR payloads or raw HAPI paging tokens. The current in-memory/development audit behavior is not a durable production audit system.

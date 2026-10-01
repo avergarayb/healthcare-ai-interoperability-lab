@@ -304,6 +304,7 @@ def test_fake_model_returns_an_application_result():
             "observation_collection",
             "appointment_collection",
             "protocol_encounters",
+            "review_case",
     }
     assert result.context_patient == "resolved"
     assert result.context_observation == "with_resources"

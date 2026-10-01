@@ -33,6 +33,7 @@ Currently implemented:
 - Clinical Follow-up Review through `POST /internal/agent/follow-up`;
 - direct, stable but constrained FHIR reads for that authorized capability;
 - deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` authority outside the model;
+- durable operational follow-up review cases with bounded queue, provenance and closure APIs;
 - an authorized legacy/narrative LangGraph/Gemini subflow.
 
 Healthcare AI does not have arbitrary FHIR access. Current follow-up reads are case-bound, GET-only, resource-constrained, bounded, completeness-aware and fail-closed. See [ADR-085](adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) and the [V1 contract](contracts/post-consultation-result-review-v1.md).
@@ -49,6 +50,7 @@ Optional composition does not merge their security perimeters or make every inte
 - Applications authorize and bound data acquisition.
 - `POST_CONSULTATION_RESULT_REVIEW_V1` owns deterministic follow-up evaluation.
 - Gemini does not control protocol, clinical assessment, human review or action.
+- Durable review workflow state is operational authority separate from protocol projection and clinical facts.
 - FHIR-derived data may reach Gemini only through explicitly authorized contracts.
 - No current Clinical Follow-up Review path writes FHIR or executes an autonomous external action.
 
@@ -58,7 +60,7 @@ The repository does not establish:
 
 - production IAM, RBAC or multi-tenancy;
 - a production secret-management or network-isolation architecture;
-- a durable human-review queue or case-management workflow;
+- human assignment, claiming, verified reviewer identity or a multi-user case-management system;
 - clinical assessment, diagnosis, severity, urgency or treatment decisions;
 - autonomous messaging, prescribing or FHIR writes from Healthcare AI;
 - production processing approval for real patient data;

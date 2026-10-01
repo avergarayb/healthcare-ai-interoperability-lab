@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, Request
@@ -13,6 +14,12 @@ from app.config import Settings
 from app.consumer import consume
 from app.experimental_service import load_json_body, run_experimental_summary
 from app.followup_service import run_followup_http
+from app.followup_review_http import (
+    close_review_case_http,
+    get_review_case_http,
+    list_review_cases_http,
+)
+from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.gemini_provider import GeminiProvider
 from app.llm_provider import LLMProvider
 from app.models import AgentContextResult
@@ -22,12 +29,25 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 log = logging.getLogger("ai-service")
 
-app = FastAPI(title="ai-service", version="0.1.0")
-
-
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings.from_env()
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    settings = get_settings()
+    repository = SQLiteFollowUpReviewCaseRepository(settings.ai_review_db_path)
+    repository.initialize()
+    application.state.followup_review_repository = repository
+    try:
+        yield
+    finally:
+        if hasattr(application.state, "followup_review_repository"):
+            del application.state.followup_review_repository
+
+
+app = FastAPI(title="ai-service", version="0.1.0", lifespan=lifespan)
 
 
 def get_llm_provider(settings: Settings = Depends(get_settings)) -> LLMProvider | None:
@@ -72,3 +92,34 @@ async def follow_up(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     return run_followup_http(request, settings, await request.body())
+
+
+@app.get("/internal/follow-up-review-cases")
+def list_follow_up_review_cases(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return list_review_cases_http(request, settings)
+
+
+@app.get("/internal/follow-up-review-cases/{review_case_id}")
+def get_follow_up_review_case(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_review_case_http(request, settings, review_case_id)
+
+
+@app.post("/internal/follow-up-review-cases/{review_case_id}/close")
+async def close_follow_up_review_case(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return close_review_case_http(
+        request,
+        settings,
+        review_case_id,
+        await request.body(),
+    )

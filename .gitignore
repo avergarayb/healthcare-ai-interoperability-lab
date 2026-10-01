@@ -34,5 +34,9 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 
+# Local Healthcare AI operational review store
+/data/follow-up-review.sqlite3*
+/services/ai-service/data/follow-up-review.sqlite3*
+
 # Local Docker bind-mount data (named volumes are preferred)
 infra/docker/data/
