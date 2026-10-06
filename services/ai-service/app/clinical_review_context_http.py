@@ -12,7 +12,12 @@ from app.clinical_review_context import (
     dump_clinical_review_context,
 )
 from app.config import Settings
-from app.followup_review import ReviewCaseNotFound, ReviewPersistenceUnavailable, validate_review_case_id
+from app.followup_review import (
+    FollowUpReviewCaseRepository,
+    ReviewCaseNotFound,
+    ReviewPersistenceUnavailable,
+    validate_review_case_id,
+)
 from app.followup_review_http import (
     INVALID_REVIEW_CASE_ID_DETAIL,
     NOT_FOUND_DETAIL,
@@ -55,6 +60,17 @@ def get_clinical_review_context_http(
     except ClinicalContextUnavailable:
         return JSONResponse(status_code=503, content={"detail": CLINICAL_CONTEXT_UNAVAILABLE_DETAIL})
     return JSONResponse(status_code=200, content=dump_clinical_review_context(payload))
+
+
+def clinical_context_service(
+    request: Request,
+    repository: FollowUpReviewCaseRepository,
+) -> ClinicalReviewContextService:
+    """Build the in-process context reader. The browser never supplies the FHIR client."""
+    return ClinicalReviewContextService(
+        repository,
+        fhir_client_factory=lambda: _fhir_client(request),
+    )
 
 
 def _fhir_client(request: Request) -> HapiReadClient:

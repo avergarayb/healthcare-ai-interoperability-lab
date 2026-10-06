@@ -6,15 +6,18 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings
 from app.consumer import consume
 from app.experimental_service import load_json_body, run_experimental_summary
 from app.followup_service import run_followup_http
 from app.clinical_review_context_http import get_clinical_review_context_http
+from app.human_review_client import close_review_case, render_review_case, render_review_queue
 from app.followup_review_http import (
     close_review_case_http,
     get_review_case_http,
@@ -49,12 +52,43 @@ async def lifespan(application: FastAPI):
 
 
 app = FastAPI(title="ai-service", version="0.1.0", lifespan=lifespan)
+# Public Human Review demo assets only. Do not place other files in this directory.
+app.mount(
+    "/review-static",
+    StaticFiles(directory=Path(__file__).resolve().parent / "static" / "human_review"),
+    name="review-static",
+)
 
 
 def get_llm_provider(settings: Settings = Depends(get_settings)) -> LLMProvider | None:
     if not settings.gemini_api_key or not settings.gemini_model:
         return None
     return GeminiProvider(api_key=settings.gemini_api_key, model=settings.gemini_model)
+
+
+@app.get("/review-cases")
+def review_cases(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_review_queue(request, settings)
+
+
+@app.get("/review-cases/{review_case_id}")
+def review_case(review_case_id: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_review_case(request, settings, review_case_id)
+
+
+@app.post("/review-cases/{review_case_id}/close")
+async def review_case_close(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return close_review_case(
+        request,
+        settings,
+        review_case_id,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
 
 
 @app.get("/health")

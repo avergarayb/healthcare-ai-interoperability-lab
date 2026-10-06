@@ -34,6 +34,7 @@ Currently implemented:
 - direct, stable but constrained FHIR reads for that authorized capability;
 - deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` authority outside the model;
 - durable operational follow-up review cases with bounded queue, provenance and closure APIs;
+- a server-rendered synthetic review demo at `/review-cases` inside this process;
 - an authorized legacy/narrative LangGraph/Gemini subflow.
 
 Healthcare AI does not have arbitrary FHIR access. Current follow-up reads are case-bound, GET-only, resource-constrained, bounded, completeness-aware and fail-closed. See [ADR-085](adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) and the [V1 contract](contracts/post-consultation-result-review-v1.md).
@@ -52,6 +53,7 @@ Optional composition does not merge their security perimeters or make every inte
 - Gemini does not control protocol, clinical assessment, human review or action.
 - Durable review workflow state is operational authority separate from protocol projection and clinical facts.
 - `CLINICAL_REVIEW_CONTEXT_V1` reads current FHIR for an open review case and does not change protocol or review authority.
+- The human review demo is presentation only. It does not authenticate a person, and the browser does not receive `X-Service-Token`.
 - FHIR-derived data may reach Gemini only through explicitly authorized contracts.
 - No current Clinical Follow-up Review path writes FHIR or executes an autonomous external action.
 

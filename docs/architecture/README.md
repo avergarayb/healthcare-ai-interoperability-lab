@@ -42,6 +42,7 @@ The second flow does not require the Java process merely to obtain FHIR context 
 - `humanReview.status=required` remains a response-level protocol requirement. A separate `FollowUpReviewCase` is the durable operational work item.
 - `action.status=proposed` is not external execution.
 - Gemini cannot create, close or select the outcome of an operational review case.
+- The synthetic review demo is server-rendered HTML inside Healthcare AI. It presents the existing review contracts and does not give the browser `X-Service-Token`. Close forms are signed with `HUMAN_REVIEW_FORM_SIGNING_SECRET`, not the service token. See [ADR-088](../adr/ADR-088-server-rendered-human-review-demo.md).
 
 ## Authoritative documents
 
@@ -68,6 +69,7 @@ The second flow does not require the Java process merely to obtain FHIR context 
 | [ADR-085](../adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) | Accepted current decision for bounded Python FHIR reads and model authority. |
 | [ADR-086](../adr/ADR-086-persistent-follow-up-review-workflow-and-operational-authority-boundary.md) | Accepted current decision for durable operational follow-up review state and authority. Its exclusion of live clinical-detail projection is superseded only by ADR-087. |
 | [ADR-087](../adr/ADR-087-case-bound-current-clinical-review-context.md) | Accepted current decision for bounded current clinical context of an open review case. |
+| [ADR-088](../adr/ADR-088-server-rendered-human-review-demo.md) | Accepted current decision for the server-rendered synthetic review demo inside Healthcare AI. |
 
 ## Historical governance artifacts
 

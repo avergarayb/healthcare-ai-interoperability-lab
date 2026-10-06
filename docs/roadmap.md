@@ -29,6 +29,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - Response-level human-review requirement and proposed review action when the protocol matches.
 - Durable SQLite-backed operational review cases with queue, provenance, bounded closure outcomes and transition history.
 - Open-case `CLINICAL_REVIEW_CONTEXT_V1` current FHIR projection without protocol reevaluation or persistence.
+- Server-rendered synthetic review queue, case page and operational close inside Healthcare AI.
 - Deterministic, evaluation-harness and opt-in real-HAPI coverage.
 
 ## Current product gaps
@@ -38,7 +39,7 @@ The following capabilities are not established by the current repository:
 - human-review assignment, claiming and verified reviewer identity;
 - clinical assessment or clinical decision support;
 - general workflow checkpointing beyond the operational review-case store;
-- product frontend;
+- a multi-user product frontend and human authentication; the synthetic review demo is not that frontend;
 - enterprise IAM/RBAC and multi-tenancy;
 - durable audit storage and production operations;
 - production secret management and enforced network architecture;

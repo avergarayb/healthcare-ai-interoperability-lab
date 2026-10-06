@@ -35,7 +35,8 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 | `MODEL_BOUNDARY_BASE_URL` | `http://localhost:8081` | Producer used by `/internal/agent-context`. |
 | `MODEL_BOUNDARY_PATH` | `/api/model-boundary/v1` | Java v1 contract path. |
 | `MODEL_BOUNDARY_TIMEOUT_SECONDS` | `90` | Timeout for the Java v1 consumer. |
-| `MODEL_BOUNDARY_SERVICE_TOKEN` | empty | Shared development service token; blank is fail-closed. |
+| `MODEL_BOUNDARY_SERVICE_TOKEN` | empty | Shared development service token for `/internal/*`; blank is fail-closed. |
+| `HUMAN_REVIEW_FORM_SIGNING_SECRET` | empty | Separate server-side secret for Human Review close-form HMAC. Blank disables the close form. Do not reuse the service token. |
 | `AI_SERVICE_HOST` | `0.0.0.0` | Uvicorn bind value; not by itself a production network boundary. |
 | `AI_SERVICE_PORT` | `8090` | Python service port. |
 | `LLM_EXPERIMENTAL_ENABLED` | `false` | Enables only `/internal/experimental-summary`. |
@@ -213,6 +214,16 @@ X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
 ```
 
 `CLINICAL_REVIEW_CONTEXT_V1` resolves the Patient again from the persisted `caseId`, rereads the exact provenance Encounter and Observation, and repeats the bounded Appointment search. It does not rerun the protocol, call Gemini, or store the projection. A closed case returns HTTP 409. The contract is [CLINICAL_REVIEW_CONTEXT_V1](../../docs/contracts/clinical-review-context-v1.md).
+
+Synthetic review demo, same process and port:
+
+```text
+GET /review-cases
+GET /review-cases/<review-case-uuid>
+POST /review-cases/<review-case-uuid>/close
+```
+
+These pages are HTML for a controlled synthetic demo. They are not a user login. Anyone who can reach the process can open them. `caseId` is an operational identifier, not a patient name or `Patient.id`. The service token stays on the server and is not rendered. `MODEL_BOUNDARY_SERVICE_TOKEN` protects internal service calls only. The close form is signed with `HUMAN_REVIEW_FORM_SIGNING_SECRET`, a different server-side value. If that signing secret is missing or blank, the close form is not issued and a close POST is refused. The HMAC shows that this presentation layer issued that case id, expected version and expiry. It is not authentication, not authorization, not single-use, and not replay-proof. The review-case version check remains authoritative. Current clinical context is read while the case is open and is not stored. A closed case shows the operational record and history without a historical clinical snapshot. If the current context cannot be loaded, the operational close form remains available. Gemini narrative is not shown. This is not a production clinical application. See [ADR-088](../../docs/adr/ADR-088-server-rendered-human-review-demo.md).
 
 Closure example:
 

@@ -1,4 +1,4 @@
-"""Environment settings. Do not log MODEL_BOUNDARY_SERVICE_TOKEN or GEMINI_API_KEY."""
+"""Environment settings. Do not log service tokens, the review form signing secret, or GEMINI_API_KEY."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ class Settings:
     gemini_model: str = "gemini-flash-latest"
     followup_agent_enabled: bool = False
     ai_review_db_path: str = "./data/follow-up-review.sqlite3"
+    human_review_form_signing_secret: str = field(default="", repr=False)
 
     @property
     def model_boundary_url(self) -> str:
@@ -59,4 +60,5 @@ class Settings:
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip() or "gemini-flash-latest",
             followup_agent_enabled=followup_raw == "true",
             ai_review_db_path=review_db_path,
+            human_review_form_signing_secret=os.getenv("HUMAN_REVIEW_FORM_SIGNING_SECRET", "").strip(),
         )
