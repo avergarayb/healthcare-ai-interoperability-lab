@@ -164,7 +164,7 @@ The schema is versioned and initialized at application startup. Connections are 
 
 The store contains potentially sensitive operational metadata. It does not store raw Patient, Encounter, Observation, Appointment or Bundle payloads; Patient id as a separate field; prompts, completions, answers or tool evidence; notes; human identifiers; or assignment.
 
-Creation provenance remains immutable when source FHIR changes or disappears. No live FHIR detail, deletion, purge or retention duration is provided.
+Creation provenance remains immutable when source FHIR changes or disappears. Operational detail and history do not retrieve live FHIR. Current clinical inspection of an open case is the separate [CLINICAL_REVIEW_CONTEXT_V1](clinical-review-context-v1.md) contract. This workflow does not store that projection. No deletion, purge or retention duration is provided.
 
 Standard SQLite is not encrypted at rest. Real-clinical-data environments require deployment-provided protected storage and an approved retention policy. This contract does not establish production real-data readiness.
 

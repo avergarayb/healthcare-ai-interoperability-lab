@@ -20,6 +20,11 @@ LESSON_MODULES = {
     "langgraph_gemini_fhir_followup.py",
     "langgraph_followup_workflow.py",
 }
+# These modules reuse the FHIR read implementation. They must not import LangGraph or Gemini.
+FHIR_REUSE_MODULES = {
+    "clinical_review_context.py",
+    "clinical_review_context_http.py",
+}
 PRODUCTION_SOURCE = "\n".join(
     _read(path) for path in sorted(APP.glob("*.py")) if path.name not in LESSON_MODULES
 )
@@ -71,9 +76,17 @@ def test_app_source_does_not_call_a_language_model_or_clinical_host():
             continue
         assert token not in APP_SOURCE
     for path in sorted(APP.glob("*.py")):
-        if path.name in LESSON_MODULES or path.name == "followup_service.py":
+        if path.name in LESSON_MODULES or path.name in FHIR_REUSE_MODULES or path.name == "followup_service.py":
             continue
         assert "langgraph" not in _read(path)
+    for name in FHIR_REUSE_MODULES:
+        source = _read(APP / name)
+        assert "import langgraph" not in source
+        assert "from langgraph" not in source
+        assert "gemini" not in source
+        assert "langgraph_gemini" not in source
+        assert "langgraph_followup_workflow" not in source
+        assert "followupworkflow" not in source
     lesson_without_core = LESSON_SOURCE.replace("langchain_core", "")
     assert "import langchain" not in lesson_without_core
     assert "from langchain " not in lesson_without_core

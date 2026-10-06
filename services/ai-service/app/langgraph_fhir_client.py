@@ -60,6 +60,13 @@ class ReadClientError(Exception):
     """A read client could not return a response."""
 
 
+class ExactResourceNotFound(ReadClientError):
+    """An exact resource read received HTTP 404. This is not a transport failure."""
+
+    def __init__(self) -> None:
+        super().__init__("exact resource was not found")
+
+
 class BoundedSearchStatus(str, Enum):
     COMPLETE = "complete"
     INCOMPLETE_LIMIT = "incomplete_limit"

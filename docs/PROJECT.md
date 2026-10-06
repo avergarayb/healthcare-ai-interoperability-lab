@@ -51,6 +51,7 @@ Optional composition does not merge their security perimeters or make every inte
 - `POST_CONSULTATION_RESULT_REVIEW_V1` owns deterministic follow-up evaluation.
 - Gemini does not control protocol, clinical assessment, human review or action.
 - Durable review workflow state is operational authority separate from protocol projection and clinical facts.
+- `CLINICAL_REVIEW_CONTEXT_V1` reads current FHIR for an open review case and does not change protocol or review authority.
 - FHIR-derived data may reach Gemini only through explicitly authorized contracts.
 - No current Clinical Follow-up Review path writes FHIR or executes an autonomous external action.
 

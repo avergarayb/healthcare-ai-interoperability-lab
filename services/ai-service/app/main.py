@@ -14,6 +14,7 @@ from app.config import Settings
 from app.consumer import consume
 from app.experimental_service import load_json_body, run_experimental_summary
 from app.followup_service import run_followup_http
+from app.clinical_review_context_http import get_clinical_review_context_http
 from app.followup_review_http import (
     close_review_case_http,
     get_review_case_http,
@@ -100,6 +101,15 @@ def list_follow_up_review_cases(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     return list_review_cases_http(request, settings)
+
+
+@app.get("/internal/follow-up-review-cases/{review_case_id}/clinical-context")
+def get_follow_up_review_clinical_context(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_clinical_review_context_http(request, settings, review_case_id)
 
 
 @app.get("/internal/follow-up-review-cases/{review_case_id}")

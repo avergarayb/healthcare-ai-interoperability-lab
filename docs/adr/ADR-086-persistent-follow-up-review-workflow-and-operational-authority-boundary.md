@@ -94,3 +94,4 @@ This decision does not introduce clinical interpretation, live clinical-detail p
 - [ADR-085](ADR-085-python-follow-up-fhir-and-model-authority-boundary.md)
 - [POST_CONSULTATION_RESULT_REVIEW_V1](../contracts/post-consultation-result-review-v1.md)
 - [FOLLOW_UP_REVIEW_WORKFLOW_V1](../contracts/follow-up-review-workflow-v1.md)
+- [ADR-087](ADR-087-case-bound-current-clinical-review-context.md) supersedes only this decision's non-goal that excluded live clinical-detail projection.

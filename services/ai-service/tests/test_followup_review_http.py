@@ -129,6 +129,11 @@ def _client(repository) -> TestClient:
         ("get", "/internal/follow-up-review-cases", None),
         ("get", "/internal/follow-up-review-cases/00000000-0000-4000-8000-000000000000", None),
         (
+            "get",
+            "/internal/follow-up-review-cases/00000000-0000-4000-8000-000000000000/clinical-context",
+            None,
+        ),
+        (
             "post",
             "/internal/follow-up-review-cases/00000000-0000-4000-8000-000000000000/close",
             {"expectedVersion": 1, "outcome": "follow_up_coordination_planned"},

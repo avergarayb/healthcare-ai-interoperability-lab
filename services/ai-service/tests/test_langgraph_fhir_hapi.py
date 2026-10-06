@@ -16,6 +16,7 @@ import pytest
 from app.langgraph_fhir_client import (
     BoundedSearchStatus,
     CASE_IDENTIFIER_SYSTEM,
+    ExactResourceNotFound,
     PATIENT_CASE,
     PATIENT_ID,
     ClientFHIRTransport,
@@ -312,3 +313,46 @@ def test_local_server_missing_patient_is_not_a_clinical_result():
     client = HapiReadClient(hapi_base_url())
     with pytest.raises(ReadClientError, match="HTTP 404"):
         client.get("Patient/SYN-MISSING-C16O")
+
+
+def test_exact_read_distinguishes_not_found_from_transport_failure(monkeypatch):
+    monkeypatch.setattr("app.langgraph_fhir_hapi._retry_sleep", lambda _delay: None)
+    seen = {"status": 404}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/Encounter/enc-exact-001")
+        assert "identifier" not in str(request.url.query)
+        return httpx.Response(seen["status"], json={"resourceType": "OperationOutcome"})
+
+    client, http = _client(handler)
+    try:
+        with pytest.raises(ExactResourceNotFound) as not_found:
+            client.read_exact("Encounter", "enc-exact-001")
+        assert not isinstance(not_found.value, type(None))
+        assert type(not_found.value) is ExactResourceNotFound
+        assert "enc-exact-001" not in str(not_found.value)
+        seen["status"] = 503
+        with pytest.raises(ReadClientError, match="HTTP 503") as failed:
+            client.read_exact("Encounter", "enc-exact-001")
+        assert not isinstance(failed.value, ExactResourceNotFound)
+        with pytest.raises(ReadClientError, match="not authorized"):
+            client.read_exact("Patient", "enc-exact-001")
+        with pytest.raises(ReadClientError, match="not authorized"):
+            client.read_exact("Encounter", "enc/other")
+    finally:
+        http.close()
+    with pytest.raises(ReadClientError, match="HTTP 404") as ordinary:
+        ordinary_client, ordinary_http = _client(lambda _request: httpx.Response(404, json={}))
+        try:
+            ordinary_client.get("Encounter/enc-exact-001")
+        finally:
+            ordinary_http.close()
+    assert not isinstance(ordinary.value, ExactResourceNotFound)
+
+
+@pytest.mark.skipif(not _hapi_enabled(), reason="set RUN_HAPI_INTEGRATION_TESTS=true to call the local server")
+def test_live_exact_read_not_found_is_typed():
+    client = HapiReadClient(hapi_base_url())
+    with pytest.raises(ExactResourceNotFound):
+        client.read_exact("Encounter", "missing-clinical-context-encounter")
+    assert "missing-clinical-context-encounter" not in str(ExactResourceNotFound())

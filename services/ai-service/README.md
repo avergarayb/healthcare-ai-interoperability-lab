@@ -203,7 +203,16 @@ GET /internal/follow-up-review-cases?status=open&limit=25
 X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
 ```
 
-The queue supports exact `caseId`, a maximum limit of 100 and an opaque keyset cursor. Ordering is oldest first by creation time and review-case id. Durable and cursor timestamps use exact `YYYY-MM-DDTHH:MM:SS.ffffffZ` form, and cursor JSON rejects duplicate member names. Detail returns minimized protocol provenance and `created`/`closed` transition history; it does not read live FHIR.
+The queue supports exact `caseId`, a maximum limit of 100 and an opaque keyset cursor. Ordering is oldest first by creation time and review-case id. Durable and cursor timestamps use exact `YYYY-MM-DDTHH:MM:SS.ffffffZ` form, and cursor JSON rejects duplicate member names. Operational detail returns minimized protocol provenance and `created`/`closed` transition history. It does not read live FHIR.
+
+Current clinical inspection for an open case is a separate read:
+
+```http
+GET /internal/follow-up-review-cases/<review-case-uuid>/clinical-context
+X-Service-Token: <same MODEL_BOUNDARY_SERVICE_TOKEN>
+```
+
+`CLINICAL_REVIEW_CONTEXT_V1` resolves the Patient again from the persisted `caseId`, rereads the exact provenance Encounter and Observation, and repeats the bounded Appointment search. It does not rerun the protocol, call Gemini, or store the projection. A closed case returns HTTP 409. The contract is [CLINICAL_REVIEW_CONTEXT_V1](../../docs/contracts/clinical-review-context-v1.md).
 
 Closure example:
 

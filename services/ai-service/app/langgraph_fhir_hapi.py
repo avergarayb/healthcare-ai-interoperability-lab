@@ -19,12 +19,14 @@ from app.langgraph_fhir_client import (
     BOUNDARY_EVENTS,
     BoundedSearchResult,
     BoundedSearchStatus,
+    ExactResourceNotFound,
     FHIR_NEXT_URL_MAX_LENGTH,
     FHIR_SEARCH_MAX_PAGES,
     FHIR_SEARCH_MAX_UNIQUE_RESOURCES_PER_TYPE,
     ReadClientError,
     bundle_list_field,
 )
+from app.post_consultation_review import validated_fhir_id
 
 
 DEFAULT_BASE_URL = "http://localhost:8080/fhir"
@@ -44,6 +46,7 @@ _HAPI_REQUIRED_KEYS = frozenset({"_getpages", "_getpagesoffset", "_count", "_bun
 _HAPI_PAGE_TOKEN_MAX_LENGTH = 512
 _RESOURCE_CONTINUATION_PAGING_KEYS = frozenset({"page", "token"})
 _RESOURCE_PAGE_TOKEN_MAX_LENGTH = 512
+_EXACT_RESOURCE_TYPES = frozenset({"Encounter", "Observation"})
 
 log = logging.getLogger("ai-service")
 _retry_sleep = time.sleep
@@ -92,6 +95,28 @@ class HapiReadClient:
         url = f"{self.base_url}/{path.lstrip('/')}"
         return self._get_url(url, path)
 
+    def read_exact(self, resource_type: str, resource_id: str) -> dict:
+        """GET one authorized resource. HTTP 404 is ExactResourceNotFound and is not retried."""
+        if resource_type not in _EXACT_RESOURCE_TYPES or validated_fhir_id(resource_id) is None:
+            raise ReadClientError("exact resource address is not authorized")
+        path = f"{resource_type}/{resource_id}"
+        url = f"{self.base_url}/{path}"
+        last_error: ReadClientError | None = None
+        for attempt in range(1, FHIR_READ_ATTEMPTS + 1):
+            try:
+                return self._read_once(url, path, exact_not_found=True)
+            except ExactResourceNotFound:
+                raise
+            except ReadClientError as exc:
+                last_error = exc
+                if attempt >= FHIR_READ_ATTEMPTS or not _fhir_retryable(exc):
+                    raise
+                log.info("fhir_read_retry status=%s attempt=%s", _fhir_status_label(exc), attempt)
+                _retry_sleep(_fhir_backoff_seconds(attempt))
+        if last_error is not None:
+            raise last_error
+        raise ReadClientError("transport failed")
+
     def _get_url(self, url: str, call_label: str) -> dict:
         """GET one already-authorized URL with the existing per-page retry."""
         last_error: ReadClientError | None = None
@@ -108,7 +133,7 @@ class HapiReadClient:
             raise last_error
         raise ReadClientError("transport failed")
 
-    def _read_once(self, url: str, call_label: str) -> dict:
+    def _read_once(self, url: str, call_label: str, *, exact_not_found: bool = False) -> dict:
         BOUNDARY_EVENTS.append(f"client:{call_label}")
         self.calls.append(call_label)
         try:
@@ -117,6 +142,8 @@ class HapiReadClient:
             raise ReadClientError("transport failed") from exc
         if 300 <= response.status_code < 400:
             raise ReadClientError("redirect response is not allowed")
+        if response.status_code == 404 and exact_not_found:
+            raise ExactResourceNotFound()
         if response.status_code >= 400:
             raise ReadClientError(f"HTTP {response.status_code}")
         try:
