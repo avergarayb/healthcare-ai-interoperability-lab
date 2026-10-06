@@ -33,6 +33,7 @@ Currently implemented:
 - Clinical Follow-up Review through `POST /internal/agent/follow-up`;
 - direct, stable but constrained FHIR reads for that authorized capability;
 - deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` authority outside the model;
+- deterministic `MISSED_FOLLOW_UP_REVIEW_V1` for a past `noshow` without a confirmed future Appointment, without Gemini;
 - durable operational follow-up review cases with bounded queue, provenance and closure APIs;
 - a server-rendered synthetic review demo at `/review-cases` inside this process;
 - an authorized legacy/narrative LangGraph/Gemini subflow.
@@ -49,7 +50,7 @@ Optional composition does not merge their security perimeters or make every inte
 
 - Healthcare systems and configured FHIR endpoints remain sources of clinical facts.
 - Applications authorize and bound data acquisition.
-- `POST_CONSULTATION_RESULT_REVIEW_V1` owns deterministic follow-up evaluation.
+- `POST_CONSULTATION_RESULT_REVIEW_V1` and `MISSED_FOLLOW_UP_REVIEW_V1` own deterministic follow-up evaluation. Neither infers clinical meaning.
 - Gemini does not control protocol, clinical assessment, human review or action.
 - Durable review workflow state is operational authority separate from protocol projection and clinical facts.
 - `CLINICAL_REVIEW_CONTEXT_V1` reads current FHIR for an open review case and does not change protocol or review authority.

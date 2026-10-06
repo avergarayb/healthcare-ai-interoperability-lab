@@ -124,6 +124,12 @@ Collection searches use page size 25, at most 4 pages and at most 100 unique res
 
 The application evaluates `POST_CONSULTATION_RESULT_REVIEW_V1` over the authorized immutable snapshot. Gemini does not choose the mandatory reads and cannot set protocol, clinical-assessment, human-review or action fields.
 
+### Missed follow-up review
+
+`POST /internal/agent/missed-follow-up` uses the same authentication, feature flag and `{"caseId": "..."}` request. It resolves the authorized Patient and reads Appointments only. A past `noshow` without a confirmed future `booked` Appointment matches. Each matched Appointment reuses or creates one review case. `cancelled` is not a trigger. The response has no narrative and no `Patient.id`. See [MISSED_FOLLOW_UP_REVIEW_V1](../../docs/contracts/missed-follow-up-review-v1.md).
+
+The shared `/review-cases` pages show this protocol as "Missed follow-up review" and keep the technical protocol id. Opening a case reads current Appointments and does not rewrite the original trigger.
+
 ### Narrative agent subflow
 
 After deterministic evaluation, the existing LangGraph/Gemini subflow may run when the workflow is available. It retains two authorized read tools:

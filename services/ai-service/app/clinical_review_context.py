@@ -35,6 +35,7 @@ from app.langgraph_fhir_followup import (
     schedule_classifications,
 )
 from app.langgraph_fhir_hapi import ExactResourceNotFound
+from app.missed_follow_up_review import MISSED_FOLLOW_UP_REVIEW_V1
 from app.post_consultation_review import (
     POST_CONSULTATION_RESULT_REVIEW_V1,
     parse_fhir_reference,
@@ -76,6 +77,7 @@ RetrievalReason = Literal[
     "current_context_complete",
     "provenance_encounter_not_found",
     "provenance_observation_not_found",
+    "provenance_appointment_not_found",
 ]
 
 
@@ -104,7 +106,10 @@ class ReviewCaseRef(BaseModel):
 class TriggerProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    protocol_id: Literal["POST_CONSULTATION_RESULT_REVIEW_V1"] = Field(alias="protocolId")
+    protocol_id: Literal[
+        "POST_CONSULTATION_RESULT_REVIEW_V1",
+        "MISSED_FOLLOW_UP_REVIEW_V1",
+    ] = Field(alias="protocolId")
     evaluation_status: Literal["matched"] = Field(alias="evaluationStatus")
     reason_codes: list[str] = Field(alias="reasonCodes")
     matched_resources: list[str] = Field(alias="matchedResources")
@@ -305,12 +310,32 @@ class AppointmentProjection(BaseModel):
     items: list[AppointmentItem]
 
 
-class CurrentContext(BaseModel):
+class TriggerAppointmentAvailable(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    reference: str
+    availability: Literal["available"]
+    status: str
+    start: str | None = None
+
+
+class TriggerAppointmentMissing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reference: str
+    availability: Literal["not_found"]
+
+
+class CurrentContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     patient: PatientProjection
-    encounter: EncounterAvailable | EncounterMissing
-    observation: ObservationAvailable | ObservationMissing
+    encounter: EncounterAvailable | EncounterMissing | None = None
+    observation: ObservationAvailable | ObservationMissing | None = None
+    trigger_appointment: TriggerAppointmentAvailable | TriggerAppointmentMissing | None = Field(
+        default=None,
+        alias="triggerAppointment",
+    )
     appointments: AppointmentProjection
 
 
@@ -406,6 +431,8 @@ class ClinicalReviewContextService:
             raise ReviewCaseNotFound
         if case.status is not ReviewCaseStatus.OPEN:
             raise ClinicalContextClosed
+        if case.protocol_id == MISSED_FOLLOW_UP_REVIEW_V1:
+            return self._read_missed_follow_up(case)
         encounter_id, observation_id = _provenance_ids(case)
         fhir = self._fhir_after_authorization()
         try:
@@ -418,6 +445,33 @@ class ClinicalReviewContextService:
                 _require_associated_observation(observation, observation_id, encounter_id, patient_id)
             appointments = _read_appointments(fhir, patient_id, self._clock())
             return _response(case, encounter, observation, appointments, _retrieved_at(self._clock()))
+        except ClinicalContextUnavailable:
+            raise
+        except Exception as exc:
+            raise ClinicalContextUnavailable from exc
+
+    def _read_missed_follow_up(self, case: FollowUpReviewCase) -> ClinicalReviewContextResponse:
+        appointment_id = _missed_provenance_id(case)
+        fhir = self._fhir_after_authorization()
+        try:
+            patient_id = _resolve_patient(fhir, case.case_id)
+            appointment = _read_provenance(fhir, "Appointment", appointment_id)
+            trigger_view = None
+            if isinstance(appointment, dict):
+                trigger_view = _require_associated_appointment(
+                    appointment,
+                    appointment_id,
+                    patient_id,
+                    self._clock(),
+                )
+            appointments = _read_appointments(fhir, patient_id, self._clock())
+            return _missed_response(
+                case,
+                appointment_id,
+                trigger_view,
+                appointments,
+                _retrieved_at(self._clock()),
+            )
         except ClinicalContextUnavailable:
             raise
         except Exception as exc:
@@ -437,6 +491,23 @@ class ClinicalReviewContextService:
         if client is None:
             raise ClinicalContextUnavailable
         return client
+
+
+def _missed_provenance_id(case: FollowUpReviewCase) -> str:
+    if case.protocol_id != MISSED_FOLLOW_UP_REVIEW_V1:
+        raise ClinicalContextUnavailable
+    if case.protocol_evaluation_status != "matched":
+        raise ClinicalContextUnavailable
+    try:
+        canonical_reason_codes(case.reason_codes)
+    except Exception as exc:
+        raise ClinicalContextUnavailable from exc
+    if len(case.matched_resources) != 1:
+        raise ClinicalContextUnavailable
+    appointment_id = parse_fhir_reference(case.matched_resources[0], "Appointment")
+    if appointment_id is None:
+        raise ClinicalContextUnavailable
+    return appointment_id
 
 
 def _provenance_ids(case: FollowUpReviewCase) -> tuple[str, str]:
@@ -491,6 +562,28 @@ def _read_provenance(client: _ExactReadClient, resource_type: str, resource_id: 
     if not isinstance(payload, dict):
         raise ClinicalContextUnavailable
     return payload
+
+
+def _require_associated_appointment(
+    resource: dict,
+    appointment_id: str,
+    patient_id: str,
+    now: datetime,
+) -> dict:
+    if resource.get("resourceType") != "Appointment" or resource.get("id") != appointment_id:
+        raise ClinicalContextUnavailable
+    try:
+        view = _appointment_view(resource, patient_id, now)
+    except Exception as exc:
+        raise ClinicalContextUnavailable from exc
+    if view is None or view.get("id") != appointment_id:
+        raise ClinicalContextUnavailable
+    if not isinstance(view.get("status"), str) or not _bounded_text(view["status"]):
+        raise ClinicalContextUnavailable
+    start = view.get("start")
+    if start is not None and not _bounded_text(start):
+        raise ClinicalContextUnavailable
+    return view
 
 
 def _require_associated_encounter(resource: dict, encounter_id: str, patient_id: str) -> None:
@@ -605,6 +698,65 @@ def _response(
             appointments=AppointmentProjection(
                 collectionStatus="complete",
                 classifications=classified,
+                items=[_appointment_item(item) for item in appointments],
+            ),
+        ),
+    )
+
+
+def _missed_response(
+    case: FollowUpReviewCase,
+    appointment_id: str,
+    trigger_view: dict | None,
+    appointments: list[dict],
+    retrieved_at: str,
+) -> ClinicalReviewContextResponse:
+    reference = f"Appointment/{appointment_id}"
+    reasons: list[RetrievalReason] = []
+    if trigger_view is None:
+        trigger: TriggerAppointmentAvailable | TriggerAppointmentMissing = TriggerAppointmentMissing(
+            reference=reference,
+            availability="not_found",
+        )
+        reasons.append("provenance_appointment_not_found")
+    else:
+        start = trigger_view.get("start")
+        trigger = TriggerAppointmentAvailable(
+            reference=reference,
+            availability="available",
+            status=str(trigger_view.get("status")),
+            start=start if isinstance(start, str) else None,
+        )
+    retrieval_status: Literal["complete", "provenance_resource_not_found"] = (
+        "complete" if not reasons else "provenance_resource_not_found"
+    )
+    if not reasons:
+        reasons = ["current_context_complete"]
+    return ClinicalReviewContextResponse(
+        reviewCase=ReviewCaseRef(
+            reviewCaseId=case.id,
+            status="open",
+            version=case.version,
+        ),
+        triggerProvenance=TriggerProvenance(
+            protocolId=MISSED_FOLLOW_UP_REVIEW_V1,
+            evaluationStatus="matched",
+            reasonCodes=list(case.reason_codes),
+            matchedResources=list(case.matched_resources),
+            createdAt=case.created_at,
+        ),
+        retrieval=RetrievalState(
+            status=retrieval_status,
+            retrievedAt=retrieved_at,
+            source="fhir_current",
+            reasonCodes=reasons,
+        ),
+        currentContext=CurrentContext(
+            patient=PatientProjection(resolution="resolved"),
+            triggerAppointment=trigger,
+            appointments=AppointmentProjection(
+                collectionStatus="complete",
+                classifications=schedule_classifications(appointments),
                 items=[_appointment_item(item) for item in appointments],
             ),
         ),

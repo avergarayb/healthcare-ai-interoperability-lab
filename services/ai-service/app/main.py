@@ -16,6 +16,7 @@ from app.config import Settings
 from app.consumer import consume
 from app.experimental_service import load_json_body, run_experimental_summary
 from app.followup_service import run_followup_http
+from app.missed_follow_up_service import run_missed_follow_up_http
 from app.clinical_review_context_http import get_clinical_review_context_http
 from app.human_review_client import close_review_case, render_review_case, render_review_queue
 from app.followup_review_http import (
@@ -127,6 +128,14 @@ async def follow_up(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     return run_followup_http(request, settings, await request.body())
+
+
+@app.post("/internal/agent/missed-follow-up")
+async def missed_follow_up(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return run_missed_follow_up_http(request, settings, await request.body())
 
 
 @app.get("/internal/follow-up-review-cases")

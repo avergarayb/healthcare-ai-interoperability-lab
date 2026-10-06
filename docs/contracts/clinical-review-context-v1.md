@@ -44,11 +44,13 @@ Eligibility is point-in-time. `open` is checked once before the first FHIR call.
 
 1. Load the durable case.
 2. Require `open`.
-3. Require protocol `POST_CONSULTATION_RESULT_REVIEW_V1`, evaluation `matched`, and exactly one canonical `Encounter/{id}` plus one canonical `Observation/{id}`.
+3. Require evaluation `matched` and provenance for the case protocol.
+   - `POST_CONSULTATION_RESULT_REVIEW_V1`: exactly one canonical `Encounter/{id}` and one canonical `Observation/{id}`.
+   - `MISSED_FOLLOW_UP_REVIEW_V1`: exactly one canonical `Appointment/{id}`.
 4. Resolve one Patient from the persisted `caseId` with the existing bounded identifier search.
-5. GET the exact provenance Encounter and Observation.
+5. GET the exact provenance resources for that protocol. The missed-follow-up path does not read Encounter or Observation.
 6. Search Appointment for the resolved Patient with the existing bounded search.
-7. Validate identity and association, then project.
+7. Validate identity and association, then project. Encounter and Observation sections are omitted when the protocol has no such provenance.
 
 Absolute, query-bearing, fragment, history, foreign, and wrong-type references are rejected. Unsupported provenance returns HTTP 503 and does not call FHIR.
 
@@ -60,7 +62,7 @@ A typed exact read distinguishes a genuine upstream HTTP 404 from transport fail
 
 | Condition | HTTP |
 |---|---|
-| Exact Encounter or Observation returns 404 | 200, `availability=not_found` for that resource |
+| Exact Encounter, Observation, or trigger Appointment returns 404 | 200, `availability=not_found` for that resource |
 | Transport, malformed payload, wrong type, wrong id, or foreign association | 503, no clinical body |
 | Patient resolution failure | 503 |
 | Appointment search incomplete, failed, or containing a foreign resource | 503 |
@@ -77,8 +79,9 @@ The body is a closed object. Unknown fields are rejected by the service models. 
 - `triggerProvenance`: protocol id, `matched`, reason codes, matched resources, `createdAt`
 - `retrieval`: `complete` or `provenance_resource_not_found`, `retrievedAt`, `source=fhir_current`, bounded reason codes
 - `currentContext.patient`: `{ "resolution": "resolved" }` only
-- `currentContext.encounter`: reference, availability, and, when available, status and optional period start/end
-- `currentContext.observation`: reference, availability, and, when available, status, optional issued, encounter reference, code, and content
+- `currentContext.encounter`: present for `POST_CONSULTATION_RESULT_REVIEW_V1`; reference, availability, and, when available, status and optional period start/end
+- `currentContext.observation`: present for `POST_CONSULTATION_RESULT_REVIEW_V1`; reference, availability, and, when available, status, optional issued, encounter reference, code, and content
+- `currentContext.triggerAppointment`: present for `MISSED_FOLLOW_UP_REVIEW_V1`; reference, availability, and, when available, status and optional start
 - `currentContext.appointments`: `collectionStatus=complete`, classifications, and items with reference, status, optional start, and classification
 
 Patient id, name, birth date, gender, address, telecom, identifiers, and raw FHIR are not returned.
@@ -90,6 +93,7 @@ Retrieval reason codes are exactly:
 - `current_context_complete`
 - `provenance_encounter_not_found`
 - `provenance_observation_not_found`
+- `provenance_appointment_not_found`
 
 ## 8. Observation projection
 

@@ -30,7 +30,15 @@ Configured authorized FHIR endpoint
         -> application-owned response projection
 ```
 
-The second flow does not require the Java process merely to obtain FHIR context when an authorized FHIR endpoint is configured. It does not authorize arbitrary FHIR access or writes.
+```text
+Configured authorized FHIR endpoint
+        -> Healthcare AI Patient resolution + bounded Appointment search
+        -> deterministic MISSED_FOLLOW_UP_REVIEW_V1
+        -> one durable review case per missed Appointment when MATCHED
+        -> shared review queue and case page
+```
+
+These flows do not require the Java process merely to obtain FHIR context when an authorized FHIR endpoint is configured. They do not authorize arbitrary FHIR access or writes. `MISSED_FOLLOW_UP_REVIEW_V1` does not call Gemini or LangGraph. See [ADR-089](../adr/ADR-089-missed-follow-up-review.md).
 
 ## Authority boundaries
 
@@ -48,6 +56,7 @@ The second flow does not require the Java process merely to obtain FHIR context 
 
 - [Product scope](../PROJECT.md)
 - [Clinical Follow-up Review V1 contract](../contracts/post-consultation-result-review-v1.md)
+- [Missed follow-up review V1 contract](../contracts/missed-follow-up-review-v1.md)
 - [Operational Follow-up Review Workflow V1 contract](../contracts/follow-up-review-workflow-v1.md)
 - [Healthcare Interoperability architecture](../fhir/fhir-architecture.md)
 - [Healthcare AI runbook](../../services/ai-service/README.md)
@@ -70,6 +79,7 @@ The second flow does not require the Java process merely to obtain FHIR context 
 | [ADR-086](../adr/ADR-086-persistent-follow-up-review-workflow-and-operational-authority-boundary.md) | Accepted current decision for durable operational follow-up review state and authority. Its exclusion of live clinical-detail projection is superseded only by ADR-087. |
 | [ADR-087](../adr/ADR-087-case-bound-current-clinical-review-context.md) | Accepted current decision for bounded current clinical context of an open review case. |
 | [ADR-088](../adr/ADR-088-server-rendered-human-review-demo.md) | Accepted current decision for the server-rendered synthetic review demo inside Healthcare AI. |
+| [ADR-089](../adr/ADR-089-missed-follow-up-review.md) | Accepted current decision for missed follow-up review on the shared review case. |
 
 ## Historical governance artifacts
 

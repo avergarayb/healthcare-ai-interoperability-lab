@@ -27,6 +27,7 @@ from app.followup_review import (
 from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.langgraph_fhir_client import BoundedSearchResult, BoundedSearchStatus, CASE_IDENTIFIER_SYSTEM
 from app.main import app, get_settings
+from app.missed_follow_up_review import MISSED_FOLLOW_UP_REVIEW_V1
 from app.post_consultation_review import (
     POST_CONSULTATION_RESULT_REVIEW_V1,
     ProtocolEvaluationStatus,
@@ -133,6 +134,13 @@ class ScriptedFhir:
             return dict(self.encounter)
         if resource_type == "Observation":
             return dict(self.observation)
+        if resource_type == "Appointment":
+            for item in self.appointments:
+                if item.get("id") == resource_id:
+                    return dict(item)
+            from app.langgraph_fhir_hapi import ExactResourceNotFound
+
+            raise ExactResourceNotFound()
         raise AssertionError(resource_type)
 
 
@@ -236,6 +244,7 @@ def test_open_case_returns_current_context_without_patient_identity(tmp_path):
     assert body["retrieval"]["source"] == "fhir_current"
     assert body["retrieval"]["reasonCodes"] == ["current_context_complete"]
     assert body["currentContext"]["patient"] == {"resolution": "resolved"}
+    assert "triggerAppointment" not in body["currentContext"]
     assert body["currentContext"]["encounter"]["availability"] == "available"
     assert body["currentContext"]["encounter"]["status"] == "finished"
     assert body["currentContext"]["encounter"]["reference"] == f"Encounter/{ENCOUNTER}"
@@ -846,3 +855,83 @@ def test_endpoint_does_not_call_a_model_or_persist_context():
         assert token not in source
     assert "sqlite" not in inspect.getsource(ClinicalReviewContextService).lower()
     assert "insert" not in inspect.getsource(ClinicalReviewContextService).lower()
+
+
+def _missed_protocol(appointment_id: str = "noshow-008") -> ProtocolReviewResult:
+    return ProtocolReviewResult(
+        id=MISSED_FOLLOW_UP_REVIEW_V1,
+        evaluation_status=ProtocolEvaluationStatus.MATCHED,
+        reason_codes=("missed_follow_up_without_confirmed_replacement",),
+        matched_resources=(f"Appointment/{appointment_id}",),
+        human_review_status="required",
+        human_review_reason="deterministic_missed_follow_up_protocol_match",
+        action_status="proposed",
+        action_type="review_follow_up_case",
+    )
+
+
+def test_missed_follow_up_context_reads_the_trigger_and_current_appointments(tmp_path):
+    repository = _repository(tmp_path)
+    case = FollowUpReviewCaseService(repository).ensure_for_protocol(CASE, _missed_protocol())
+    assert case is not None
+    fhir = ScriptedFhir()
+    fhir.appointments = [
+        _appointment("noshow-008", PATIENT, status="noshow", start="2026-01-01T00:00:00Z"),
+        _appointment(APPOINTMENT, PATIENT, status="booked", start="2027-03-15T15:00:00Z"),
+    ]
+    body = _body(repository, fhir, case.id)
+    assert body["schema"] == "CLINICAL_REVIEW_CONTEXT_V1"
+    assert body["triggerProvenance"]["protocolId"] == MISSED_FOLLOW_UP_REVIEW_V1
+    assert body["triggerProvenance"]["matchedResources"] == ["Appointment/noshow-008"]
+    assert "encounter" not in body["currentContext"]
+    assert "observation" not in body["currentContext"]
+    assert body["currentContext"]["triggerAppointment"]["availability"] == "available"
+    assert body["currentContext"]["triggerAppointment"]["status"] == "noshow"
+    assert body["currentContext"]["appointments"]["classifications"] == ["UPCOMING_CONFIRMED", "OTHER"]
+    assert {item["reference"] for item in body["currentContext"]["appointments"]["items"]} == {
+        "Appointment/noshow-008",
+        f"Appointment/{APPOINTMENT}",
+    }
+    rendered = json.dumps(body)
+    assert PATIENT not in rendered
+    assert "resourceType" not in rendered
+    exact_types = [call[1] for call in fhir.calls if call[0] == "exact"]
+    assert exact_types == ["Appointment"]
+    stored = repository.get(case.id)
+    assert stored is not None
+    assert stored.status.value == "open"
+    assert stored.matched_resources == ("Appointment/noshow-008",)
+
+
+def test_missing_trigger_appointment_keeps_the_case_and_current_search(tmp_path):
+    repository = _repository(tmp_path)
+    case = FollowUpReviewCaseService(repository).ensure_for_protocol(CASE, _missed_protocol())
+    assert case is not None
+    fhir = ScriptedFhir()
+    fhir.appointments = [_appointment(APPOINTMENT, PATIENT)]
+    fhir.missing.add("noshow-008")
+    body = _body(repository, fhir, case.id)
+    assert body["retrieval"]["status"] == "provenance_resource_not_found"
+    assert body["retrieval"]["reasonCodes"] == ["provenance_appointment_not_found"]
+    assert body["currentContext"]["triggerAppointment"] == {
+        "reference": "Appointment/noshow-008",
+        "availability": "not_found",
+    }
+    assert body["currentContext"]["appointments"]["items"][0]["reference"] == f"Appointment/{APPOINTMENT}"
+    assert repository.get(case.id).matched_resources == ("Appointment/noshow-008",)
+
+
+def test_foreign_trigger_appointment_fails_closed(tmp_path):
+    repository = _repository(tmp_path)
+    case = FollowUpReviewCaseService(repository).ensure_for_protocol(CASE, _missed_protocol())
+    assert case is not None
+    fhir = ScriptedFhir()
+    fhir.appointments = [_appointment("noshow-008", OTHER_PATIENT, status="noshow", start="2026-01-01T00:00:00Z")]
+    response = _http(repository, fhir).get(
+        f"/internal/follow-up-review-cases/{case.id}/clinical-context",
+        headers=AUTH,
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Clinical review context unavailable"
+    assert "noshow-008" not in response.text
+    assert repository.get(case.id).matched_resources == ("Appointment/noshow-008",)

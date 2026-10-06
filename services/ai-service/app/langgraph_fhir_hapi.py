@@ -46,7 +46,7 @@ _HAPI_REQUIRED_KEYS = frozenset({"_getpages", "_getpagesoffset", "_count", "_bun
 _HAPI_PAGE_TOKEN_MAX_LENGTH = 512
 _RESOURCE_CONTINUATION_PAGING_KEYS = frozenset({"page", "token"})
 _RESOURCE_PAGE_TOKEN_MAX_LENGTH = 512
-_EXACT_RESOURCE_TYPES = frozenset({"Encounter", "Observation"})
+_EXACT_RESOURCE_TYPES = frozenset({"Encounter", "Observation", "Appointment"})
 
 log = logging.getLogger("ai-service")
 _retry_sleep = time.sleep

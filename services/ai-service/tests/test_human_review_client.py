@@ -52,6 +52,7 @@ from app.human_review_client import (
 )
 from app.langgraph_fhir_client import BoundedSearchResult, BoundedSearchStatus, CASE_IDENTIFIER_SYSTEM, ReadClientError
 from app.main import app, get_settings
+from app.missed_follow_up_review import MISSED_FOLLOW_UP_REVIEW_V1
 from app.post_consultation_review import (
     POST_CONSULTATION_RESULT_REVIEW_V1,
     ProtocolEvaluationStatus,
@@ -163,6 +164,13 @@ class ScriptedFhir:
             return dict(self.encounter)
         if resource_type == "Observation":
             return dict(self.observation)
+        if resource_type == "Appointment":
+            for item in self.appointments:
+                if item.get("id") == resource_id:
+                    return dict(item)
+            from app.langgraph_fhir_hapi import ExactResourceNotFound
+
+            raise ExactResourceNotFound()
         raise AssertionError(resource_type)
 
 
@@ -878,3 +886,59 @@ def test_direct_closed_case_has_history_without_a_form(tmp_path):
     assert "<th>Event</th>" in response.text
     assert 'name="outcome"' not in response.text
     assert fhir.calls == []
+
+
+def test_queue_and_case_page_cover_missed_follow_up_without_encounter(tmp_path):
+    repository = _repository(tmp_path)
+    first = _create(repository)
+    missed_protocol = ProtocolReviewResult(
+        id=MISSED_FOLLOW_UP_REVIEW_V1,
+        evaluation_status=ProtocolEvaluationStatus.MATCHED,
+        reason_codes=("missed_follow_up_without_confirmed_replacement",),
+        matched_resources=("Appointment/noshow-008",),
+        human_review_status="required",
+        human_review_reason="deterministic_missed_follow_up_protocol_match",
+        action_status="proposed",
+        action_type="review_follow_up_case",
+    )
+    missed = FollowUpReviewCaseService(repository).ensure_for_protocol(CASE, missed_protocol)
+    assert missed is not None
+    payload = '"><img src=x onerror=alert(1)>'
+    fhir = ScriptedFhir()
+    fhir.appointments = [
+        _appointment("noshow", "2026-01-01T00:00:00Z", "noshow-008"),
+        _appointment("booked", "2099-01-01T00:00:00Z", "appointment-008"),
+    ]
+    fhir.appointments[0]["status"] = payload
+    client = _client(repository, fhir)
+    queue = client.get("/review-cases")
+    assert queue.status_code == 200
+    assert "Missed follow-up review" in queue.text
+    assert MISSED_FOLLOW_UP_REVIEW_V1 in queue.text
+    assert POST_CONSULTATION_RESULT_REVIEW_V1 in queue.text
+    assert SIGNING_SECRET not in queue.text
+    assert SERVICE_TOKEN not in queue.text
+    page = client.get(f"/review-cases/{missed.id}")
+    assert page.status_code == 200
+    assert "Missed follow-up review" in page.text
+    assert "Follow-up appointment was not completed." in page.text
+    assert "No confirmed future follow-up was recorded at the time the case was created." in page.text
+    assert "Appointment/noshow-008" in page.text
+    assert "not rescheduled" not in page.text
+    assert "<h3>Encounter</h3>" not in page.text
+    assert "<h3>Observation</h3>" not in page.text
+    assert "Upcoming, confirmed" in page.text
+    assert "<img" not in page.text
+    assert "&lt;img src=x onerror=alert(1)&gt;" in page.text
+    assert PATIENT not in page.text
+    assert SIGNING_SECRET not in page.text
+    assert SERVICE_TOKEN not in page.text
+    first_page = client.get(f"/review-cases/{first.id}")
+    assert "<h3>Encounter</h3>" in first_page.text
+    assert "<h3>Observation</h3>" in first_page.text
+    closed = _post_close(client, missed.id, page.text, "follow_up_coordination_planned")
+    assert closed.status_code == 303
+    stored = repository.get(missed.id)
+    assert stored is not None
+    assert stored.status is ReviewCaseStatus.CLOSED
+    assert stored.outcome is ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED

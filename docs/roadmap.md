@@ -26,6 +26,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - Mandatory application-owned Patient, Encounter, Observation and Appointment acquisition.
 - Bounded, completeness-aware HAPI pagination and case isolation.
 - Deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` outside model authority.
+- Deterministic `MISSED_FOLLOW_UP_REVIEW_V1` from Patient and Appointment reads only, without Gemini, on the same review queue.
 - Response-level human-review requirement and proposed review action when the protocol matches.
 - Durable SQLite-backed operational review cases with queue, provenance, bounded closure outcomes and transition history.
 - Open-case `CLINICAL_REVIEW_CONTEXT_V1` current FHIR projection without protocol reevaluation or persistence.

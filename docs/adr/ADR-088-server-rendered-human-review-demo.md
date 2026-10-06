@@ -32,6 +32,8 @@ The close form includes a short-lived HMAC over the review case id, expected ver
 
 Static files for this demo are served only from `app/static/human_review`. That directory is the public asset root for the review pages.
 
+The same queue and case page present `POST_CONSULTATION_RESULT_REVIEW_V1` and `MISSED_FOLLOW_UP_REVIEW_V1`. The second protocol is labeled "Missed follow-up review". Its case page shows the Appointment trigger and current Appointments, and omits Encounter and Observation.
+
 The demo is reachable by anyone who can reach the process. `caseId` is an operational identifier. Patient name, date of birth, MRN and `Patient.id` are not shown. Gemini narrative is not shown. Current clinical context is not stored. A closed case does not gain a historical clinical snapshot. Failure to load the current context does not block operational closure.
 
 Future human IAM stays a separate decision.

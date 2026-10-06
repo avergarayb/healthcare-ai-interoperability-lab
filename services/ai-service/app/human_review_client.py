@@ -62,9 +62,16 @@ _OUTCOME_LABELS = {
     ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED: "Follow-up coordination planned",
     ReviewOutcome.REVIEW_COMPLETED_NO_OPERATIONAL_ACTION: "Review completed, no operational action recorded",
 }
+_PROTOCOL_LABELS = {
+    "MISSED_FOLLOW_UP_REVIEW_V1": "Missed follow-up review",
+}
 _REASON_LABELS = {
     "post_consultation_result_requires_review": (
         "A post-consultation result was selected for operational review."
+    ),
+    "missed_follow_up_without_confirmed_replacement": (
+        "Follow-up appointment was not completed. "
+        "No confirmed future follow-up was recorded at the time the case was created."
     ),
 }
 _APPOINTMENT_LABELS = {
@@ -85,6 +92,7 @@ MSG_CONTEXT_UNAVAILABLE = "Current clinical context is temporarily unavailable."
 MSG_CONTEXT_CLOSED = "Current clinical context is not available for a closed case."
 MSG_ENCOUNTER_MISSING = "The recorded encounter was not found."
 MSG_OBSERVATION_MISSING = "The recorded observation was not found."
+MSG_APPOINTMENT_MISSING = "The recorded appointment was not found."
 MSG_VALUE_HIDDEN = "Result value is not available in this view."
 MSG_CODE_HIDDEN = "Result code is not available in this view."
 MSG_CLOSE_INVALID = "The close request was not valid."
@@ -394,10 +402,12 @@ def _queue_body(items: tuple[FollowUpReviewCase, ...], next_position: tuple[str,
         rows = []
         for case in items:
             href = "/review-cases/" + quote(case.id, safe="")
+            label = _PROTOCOL_LABELS.get(case.protocol_id)
+            label_html = f"{esc(label)} " if label else ""
             rows.append(
                 "<tr>"
                 f"<td><a href=\"{esc(href)}\">{esc(case.case_id)}</a></td>"
-                f"<td>{esc(case.protocol_id)}</td>"
+                f"<td>{label_html}{esc(case.protocol_id)}</td>"
                 f"<td>{esc(case.created_at)}</td>"
                 f"<td>{esc(case.status.value)}</td>"
                 "</tr>"
@@ -465,7 +475,12 @@ def _provenance_section(case: FollowUpReviewCase) -> str:
         "<section><h2>Why this case was created</h2>"
         "<p>This section is the original trigger recorded when the case was created.</p>"
         "<dl>"
-        f"<dt>Protocol</dt><dd>{esc(case.protocol_id)}</dd>"
+        + (
+            f"<dt>Review</dt><dd>{esc(_PROTOCOL_LABELS[case.protocol_id])}</dd>"
+            if case.protocol_id in _PROTOCOL_LABELS
+            else ""
+        )
+        + f"<dt>Protocol</dt><dd>{esc(case.protocol_id)}</dd>"
         f"<dt>Evaluation status</dt><dd>{esc(case.protocol_evaluation_status)}</dd>"
         "</dl>"
         f"<p>{esc(matched)}</p>"
@@ -488,8 +503,12 @@ def _context_section(context: ClinicalReviewContextResponse | None, message: str
         parts.append(_p(message))
     if context is not None:
         parts.append(f"<p>Retrieved {esc(context.retrieval.retrieved_at)}</p>")
-        parts.append(_encounter_html(context))
-        parts.append(_observation_html(context))
+        if context.current_context.encounter is not None:
+            parts.append(_encounter_html(context))
+        if context.current_context.observation is not None:
+            parts.append(_observation_html(context))
+        if context.current_context.trigger_appointment is not None:
+            parts.append(_trigger_appointment_html(context))
         parts.append(_appointments_html(context))
     parts.append("</section>")
     return "".join(parts)
@@ -528,6 +547,27 @@ def _observation_html(context: ClinicalReviewContextResponse) -> str:
         )
     technical = f"<p>Technical reference: {esc(observation.reference)}</p>"
     return "<h3>Observation</h3>" + body + technical
+
+
+def _trigger_appointment_html(context: ClinicalReviewContextResponse) -> str:
+    trigger = context.current_context.trigger_appointment
+    if trigger is None:
+        return ""
+    if trigger.availability == "not_found":
+        body = _p(MSG_APPOINTMENT_MISSING)
+    else:
+        start = trigger.start or "None"
+        body = (
+            "<dl>"
+            f"<dt>Status</dt><dd>{esc(trigger.status)}</dd>"
+            f"<dt>Start</dt><dd>{esc(start)}</dd>"
+            "</dl>"
+        )
+    return (
+        "<h3>Recorded appointment</h3>"
+        + body
+        + f"<p>Technical reference: {esc(trigger.reference)}</p>"
+    )
 
 
 def _appointments_html(context: ClinicalReviewContextResponse) -> str:
