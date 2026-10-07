@@ -39,6 +39,13 @@ th, td {
   padding: 0.75rem 1rem;
 }
 
+.institutional-source {
+  background: #f7f7f7;
+  border-left: 4px solid #1f4e79;
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
 section {
   margin-top: 1.5rem;
 }

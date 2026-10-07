@@ -37,7 +37,8 @@ Currently implemented:
 - durable operational follow-up review cases with bounded queue, provenance and closure APIs;
 - a server-rendered synthetic review demo at `/review-cases` inside this process;
 - an authorized legacy/narrative LangGraph/Gemini subflow;
-- `INSTITUTIONAL_KNOWLEDGE_RETRIEVAL_V1`, a synthetic institutional-procedure index retrieved with Gemini embeddings and not connected to review cases.
+- `INSTITUTIONAL_KNOWLEDGE_RETRIEVAL_V1`, a synthetic institutional-procedure index retrieved with Gemini embeddings;
+- `AI_ASSISTED_REVIEW_V1`, an on-demand explanation for an open review case. It does not store the model output and does not choose the human outcome.
 
 Healthcare AI does not have arbitrary FHIR access. Current follow-up reads are case-bound, GET-only, resource-constrained, bounded, completeness-aware and fail-closed. See [ADR-085](adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) and the [V1 contract](contracts/post-consultation-result-review-v1.md).
 
@@ -55,8 +56,9 @@ Optional composition does not merge their security perimeters or make every inte
 - Gemini does not control protocol, clinical assessment, human review or action.
 - Durable review workflow state is operational authority separate from protocol projection and clinical facts.
 - `CLINICAL_REVIEW_CONTEXT_V1` reads current FHIR for an open review case and does not change protocol or review authority.
-- The human review demo is presentation only. It does not authenticate a person, and the browser does not receive `X-Service-Token`. It does not retrieve institutional knowledge.
-- `INSTITUTIONAL_KNOWLEDGE_RETRIEVAL_V1` retrieves repository-controlled synthetic procedures. It does not change protocol output, FHIR reads or review cases. Gemini embeddings support that retrieval. Gemini text generation does not.
+- The human review demo is presentation only. It does not authenticate a person, and the browser does not receive `X-Service-Token`. Generate AI assistance is a separate signed POST. It is not a login and it does not close the case.
+- `INSTITUTIONAL_KNOWLEDGE_RETRIEVAL_V1` retrieves repository-controlled synthetic procedures. It does not change protocol output, FHIR reads or review cases. Gemini embeddings support that retrieval.
+- `AI_ASSISTED_REVIEW_V1` may call Gemini once for an explanation after explicit generation. Observation values and patient identity stay out of that model input. Retrieval with no relevant guidance, or an unavailable index, does not call Gemini. The explanation is not stored.
 - FHIR-derived data may reach Gemini only through explicitly authorized contracts. Institutional retrieval does not embed FHIR or patient data.
 - No current Clinical Follow-up Review path writes FHIR or executes an autonomous external action.
 
@@ -72,7 +74,7 @@ The repository does not establish:
 - production processing approval for real patient data;
 - production SaaS, customer-hosted or hybrid packaging;
 - regulatory compliance, certification, SIHCE accreditation or RENHICE authorization;
-- production RAG, MCP, a second LLM provider or a model router. The synthetic institutional retrieval index is a separate non-production capability and does not generate answers.
+- production RAG, MCP, a second LLM provider or a model router. The synthetic institutional index and the on-demand explanation are separate non-production demo capabilities.
 
 Potential future technologies in historical tasks or roadmap notes are not implemented merely because they are named.
 

@@ -36,7 +36,7 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 | `MODEL_BOUNDARY_PATH` | `/api/model-boundary/v1` | Java v1 contract path. |
 | `MODEL_BOUNDARY_TIMEOUT_SECONDS` | `90` | Timeout for the Java v1 consumer. |
 | `MODEL_BOUNDARY_SERVICE_TOKEN` | empty | Shared development service token for `/internal/*`; blank is fail-closed. |
-| `HUMAN_REVIEW_FORM_SIGNING_SECRET` | empty | Separate server-side secret for Human Review close-form HMAC. Blank disables the close form. Do not reuse the service token. |
+| `HUMAN_REVIEW_FORM_SIGNING_SECRET` | empty | Separate server-side secret for close-form and AI-assistance HMAC. The purposes differ. Blank disables both forms. Do not reuse the service token. |
 | `AI_SERVICE_HOST` | `0.0.0.0` | Uvicorn bind value; not by itself a production network boundary. |
 | `AI_SERVICE_PORT` | `8090` | Python service port. |
 | `LLM_EXPERIMENTAL_ENABLED` | `false` | Enables only `/internal/experimental-summary`. |
@@ -51,8 +51,9 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 | `RUN_HAPI_INTEGRATION_TESTS` | `false` | Test-only opt-in for local real-HAPI tests. |
 | `RUN_LIVE_GEMINI_TESTS` | `false` | Test-only opt-in for live Gemini generation tests. |
 | `RUN_LIVE_EMBEDDING_TESTS` | `false` | Test-only opt-in for live embedding tests. Independent of `RUN_LIVE_GEMINI_TESTS`. |
+| `RUN_LIVE_AI_ASSISTANCE_TESTS` | `false` | Test-only opt-in for one live structured assistance call. Independent of the other live flags. |
 
-`FHIR_BASE_URL` is read by the FHIR client rather than the `Settings` dataclass. The two test flags are read by tests, not by application startup configuration.
+`FHIR_BASE_URL` is read by the FHIR client rather than the `Settings` dataclass. The live-test flags are read by tests, not by application startup configuration.
 
 `AI_REVIEW_DB_PATH` is not HAPI PostgreSQL. V1 supports one `ai-service` instance and one writer store. The operator owns durable-volume placement, file permissions, backup and storage protection. Standard SQLite does not itself encrypt data at rest; environments using real clinical data require separately approved protected storage. No retention duration or automatic purge is configured.
 
@@ -231,9 +232,10 @@ Synthetic review demo, same process and port:
 GET /review-cases
 GET /review-cases/<review-case-uuid>
 POST /review-cases/<review-case-uuid>/close
+POST /review-cases/<review-case-uuid>/ai-assistance
 ```
 
-These pages are HTML for a controlled synthetic demo. They are not a user login. Anyone who can reach the process can open them. `caseId` is an operational identifier, not a patient name or `Patient.id`. The service token stays on the server and is not rendered. `MODEL_BOUNDARY_SERVICE_TOKEN` protects internal service calls only. The close form is signed with `HUMAN_REVIEW_FORM_SIGNING_SECRET`, a different server-side value. If that signing secret is missing or blank, the close form is not issued and a close POST is refused. The HMAC shows that this presentation layer issued that case id, expected version and expiry. It is not authentication, not authorization, not single-use, and not replay-proof. The review-case version check remains authoritative. Current clinical context is read while the case is open and is not stored. A closed case shows the operational record and history without a historical clinical snapshot. If the current context cannot be loaded, the operational close form remains available. Gemini narrative is not shown. This is not a production clinical application. See [ADR-088](../../docs/adr/ADR-088-server-rendered-human-review-demo.md).
+These pages are HTML for a controlled synthetic demo. They are not a user login. Anyone who can reach the process can open them. `caseId` is an operational identifier, not a patient name or `Patient.id`. The service token stays on the server and is not rendered. `MODEL_BOUNDARY_SERVICE_TOKEN` protects internal service calls only. The close form and the AI-assistance form are signed with `HUMAN_REVIEW_FORM_SIGNING_SECRET`, a different server-side value, and with different HMAC purposes. A close token does not authorize generation, and a generation token does not authorize close. If that signing secret is missing or blank, neither form is issued and both POSTs are refused. The close HMAC binds the case id, expected version and expiry. The assistance HMAC binds purpose `ai-assistance`, the case id and expiry. Neither is authentication, authorization, single-use, or replay-proof. The review-case version check remains authoritative for close. Current clinical context is read while the case is open and is not stored. A closed case shows the operational record and history without a historical clinical snapshot and without a generate button. If the current context cannot be loaded, the operational close form remains available. Legacy Gemini narrative is not shown. Explicit AI assistance is a separate section and is not stored. This is not a production clinical application. See [ADR-088](../../docs/adr/ADR-088-server-rendered-human-review-demo.md) and [ADR-091](../../docs/adr/ADR-091-ai-assisted-review.md).
 
 Closure example:
 
@@ -278,7 +280,15 @@ The corpus is the repository directory `knowledge/institutional/`. Chunks are de
 
 Gemini is used only through `client.models.embed_content` and `INSTITUTIONAL_KNOWLEDGE_EMBEDDING_MODEL`. Indexing a chunk whose content hash or model is new requires the embedding provider. A semantic query also embeds `queryText`. If that query embedding is unavailable, the status is `UNAVAILABLE` and the HTTP status is 503. The service does not substitute a lexical search and call it a semantic result. `FOUND` and `NO_RELEVANT_GUIDANCE` are HTTP 200.
 
-The default score cutoff `0.68` is the initial demonstration threshold selected from the first live embedding validation. It is provisional and must be reevaluated when the corpus grows, document versions change, the embedding model changes, or the retrieval evaluation set grows. It is not validated, calibrated, production-ready, or clinically meaningful. Retrieved text is institutional data, not an instruction and not a clinical conclusion. The endpoint does not generate an explanation. See [ADR-090](../../docs/adr/ADR-090-institutional-knowledge-rag.md) and the [V1 contract](../../docs/contracts/institutional-knowledge-retrieval-v1.md).
+The default score cutoff `0.68` is the initial demonstration threshold selected from the first live embedding validation. It is provisional and must be reevaluated when the corpus grows, document versions change, the embedding model changes, or the retrieval evaluation set grows. It is not validated, calibrated, production-ready, or clinically meaningful. Retrieved text is institutional data, not an instruction and not a clinical conclusion. The retrieval endpoint does not generate an explanation. See [ADR-090](../../docs/adr/ADR-090-institutional-knowledge-rag.md) and the [V1 contract](../../docs/contracts/institutional-knowledge-retrieval-v1.md).
+
+## AI-assisted review
+
+`POST /review-cases/<review-case-uuid>/ai-assistance` asks for one explanation of an open review case. The button is `Generate AI assistance`. GET does not generate. The service reads Clinical Review Context and institutional retrieval in process. It does not call `/internal/knowledge/retrieve` over HTTP and it does not add an internal assistance route.
+
+The server query is `post consultation result follow-up` or `missed follow-up appointment`. Observation values, `code.text`, resource ids, references, timestamps and patient identity are not sent to Gemini. `NO_RELEVANT_GUIDANCE` and retrieval `UNAVAILABLE` stop before Gemini. A successful call uses `GEMINI_MODEL` once, with JSON schema, `thinking_level=low` for the current Gemini 3.8 Flash alias, and a 1024-token output bound. `MAX_TOKENS` is discarded. Summary and each review point must cite retrieved chunks. The page shows server-projected title, version, section and source text apart from the generated prose. The score is not shown.
+
+Nothing is stored in the review database. The generation POST returns 303 to the case page. One process-local ticket lets that next GET show the assistance once. Refresh and any later GET say `Not generated` and do not call Gemini again. Close behavior is unchanged. A blank signing secret hides the button and rejects the POST before FHIR, retrieval and Gemini. This is a synthetic demo. It is not validated clinical assistance and it is not production-ready. See [ADR-091](../../docs/adr/ADR-091-ai-assisted-review.md) and the [V1 contract](../../docs/contracts/ai-assisted-review-v1.md).
 
 Startup initializes this index without blocking review-case startup. A failed corpus or a missing embedding credential leaves retrieval unavailable and leaves the follow-up routes operating under their own rules. The generated SQLite file is local and must not be committed.
 
@@ -349,6 +359,17 @@ py -3 -m pytest tests/test_live_institutional_embeddings.py -s
 
 `GEMINI_API_KEY` must already be in the process environment. Exact floating-point scores are not a contract. Deterministic tests use a fake embedding provider and do not call Gemini.
 
+### Live AI assistance
+
+`RUN_LIVE_AI_ASSISTANCE_TESTS` is separate from `RUN_LIVE_GEMINI_TESTS` and `RUN_LIVE_EMBEDDING_TESTS`. It uses synthetic facts, the real institutional index and one real structured generation. It does not require HAPI, and it does not assert exact wording.
+
+```powershell
+$env:RUN_LIVE_AI_ASSISTANCE_TESTS = "true"
+$env:RUN_LIVE_GEMINI_TESTS = "false"
+$env:RUN_LIVE_EMBEDDING_TESTS = "false"
+py -3 -m pytest tests/test_live_ai_assistance.py -s
+```
+
 ### Institutional knowledge
 
 ```powershell
@@ -363,4 +384,4 @@ Test counts are release evidence, not architectural requirements; the protected 
 
 The HTTP layer logs correlation id, method, path and bounded status without secrets. Tool-policy audit records `run_id`, `case_id`, tool name, decision, policy version, reason and timestamp. Durable review `created` and `closed` events are operational transition provenance; they are not security, clinical or verified-human audit.
 
-Application logs must not contain service tokens, API keys, prompts, completions, thought signatures, FHIR payloads or raw HAPI paging tokens. Institutional retrieval logs may include correlation id, route, status, protocol id, document id, version, chunk id, result count and duration. They must not include `queryText`, document text, chunk text, vectors, the API key or the service token. The current in-memory/development audit behavior is not a durable production audit system.
+Application logs must not contain service tokens, API keys, prompts, completions, thought signatures, FHIR payloads or raw HAPI paging tokens. Institutional retrieval logs may include correlation id, route, status, protocol id, document id, version, chunk id, result count and duration. They must not include `queryText`, document text, chunk text, vectors, the API key or the service token. AI-assistance logs may include correlation id, review-case id, protocol id, assistance status, retrieval status, citation count, whether the model was called, and duration. They must not include the prompt, model input, model output, summary, review points, limitations, query text, chunk text, observation values or patient facts. The current in-memory/development audit behavior is not a durable production audit system.

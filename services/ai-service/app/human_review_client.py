@@ -12,6 +12,8 @@ import hashlib
 import hmac
 import logging
 import re
+import secrets
+import threading
 import time
 import uuid
 from html import escape
@@ -35,8 +37,16 @@ from app.clinical_review_context import (
     StringContent,
     BooleanContent,
 )
+from app.ai_assisted_review import (
+    AssistanceResult,
+    generate_ai_assistance,
+    render_assistance_section,
+    resolve_assistance_provider,
+)
 from app.clinical_review_context_http import clinical_context_service
 from app.config import Settings
+from app.institutional_knowledge import UnavailableInstitutionalKnowledge
+from app.review_reason_explanations import REASON_EXPLANATIONS
 from app.followup_review import (
     FollowUpReviewCase,
     FollowUpReviewCaseEvent,
@@ -65,15 +75,7 @@ _OUTCOME_LABELS = {
 _PROTOCOL_LABELS = {
     "MISSED_FOLLOW_UP_REVIEW_V1": "Missed follow-up review",
 }
-_REASON_LABELS = {
-    "post_consultation_result_requires_review": (
-        "A post-consultation result was selected for operational review."
-    ),
-    "missed_follow_up_without_confirmed_replacement": (
-        "Follow-up appointment was not completed. "
-        "No confirmed future follow-up was recorded at the time the case was created."
-    ),
-}
+_REASON_LABELS = REASON_EXPLANATIONS
 _APPOINTMENT_LABELS = {
     "NONE": "No appointments were returned.",
     "UPCOMING_CONFIRMED": "Upcoming, confirmed",
@@ -98,6 +100,9 @@ MSG_CODE_HIDDEN = "Result code is not available in this view."
 MSG_CLOSE_INVALID = "The close request was not valid."
 MSG_FORM_INVALID = "This close form is no longer valid."
 MSG_ORIGIN_INVALID = "This close form was not sent from this demo."
+MSG_ASSISTANCE_REQUEST_INVALID = "This AI assistance request was not valid."
+MSG_ASSISTANCE_TOKEN_INVALID = "This AI assistance request is no longer valid."
+MSG_ASSISTANCE_ORIGIN_INVALID = "This AI assistance request was not sent from this demo."
 MSG_NOT_CONFIGURED = "This demo is not configured."
 MSG_CHANGED = "This case changed. Review the current version before closing."
 MSG_CONTEXT_SCOPE = "Current clinical context is a current read. It does not re-run the original protocol."
@@ -110,6 +115,45 @@ MSG_DEMO = (
     "caseId is an operational identifier, not a patient identity."
 )
 MSG_PATIENT_HIDDEN = "Patient identity is not shown in this view."
+_HANDOFF_COOKIE = "ai_assistance_once"
+_HANDOFF_TTL_SECONDS = 60
+
+
+class _AssistanceHandoff:
+    """One-time process memory so a 303 can show assistance without storing it."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._items: dict[str, tuple[str, AssistanceResult, float]] = {}
+
+    def put(self, review_case_id: str, result: AssistanceResult) -> str:
+        token = secrets.token_urlsafe(32)
+        expires = time.monotonic() + _HANDOFF_TTL_SECONDS
+        with self._lock:
+            self._drop_expired(time.monotonic())
+            self._items[token] = (review_case_id, result, expires)
+        return token
+
+    def take(self, token: str, review_case_id: str) -> AssistanceResult | None:
+        now = time.monotonic()
+        with self._lock:
+            self._drop_expired(now)
+            item = self._items.get(token)
+            if item is None:
+                return None
+            stored_case, result, expires = item
+            if expires <= now or stored_case != review_case_id:
+                return None
+            del self._items[token]
+            return result
+
+    def _drop_expired(self, now: float) -> None:
+        expired = [key for key, item in self._items.items() if item[2] <= now]
+        for key in expired:
+            del self._items[key]
+
+
+_ASSISTANCE_HANDOFF = _AssistanceHandoff()
 
 
 def issue_form_token(
@@ -143,6 +187,41 @@ def form_token_is_valid(
     if expiry > current + FORM_TTL_SECONDS or current >= expiry:
         return False
     expected = _sign(secret, review_case_id, expected_version, expiry)
+    try:
+        return hmac.compare_digest(expected, token)
+    except TypeError:
+        return False
+
+
+def issue_assistance_token(
+    *,
+    secret: str,
+    review_case_id: str,
+    now: int | None = None,
+) -> tuple[str, int] | None:
+    """Sign an AI-assistance request. The purpose is not a close-form signature."""
+    if not secret:
+        return None
+    issued_at = _now() if now is None else now
+    expiry = issued_at + FORM_TTL_SECONDS
+    return _sign_assistance(secret, review_case_id, expiry), expiry
+
+
+def assistance_token_is_valid(
+    *,
+    secret: str,
+    review_case_id: str,
+    expiry: int,
+    token: str,
+    now: int | None = None,
+) -> bool:
+    """Accept only an AI-assistance signature for this case and expiry."""
+    if not secret or not token:
+        return False
+    current = _now() if now is None else now
+    if expiry > current + FORM_TTL_SECONDS or current >= expiry:
+        return False
+    expected = _sign_assistance(secret, review_case_id, expiry)
     try:
         return hmac.compare_digest(expected, token)
     except TypeError:
@@ -202,8 +281,12 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
         assert detail is not None
         notice = MSG_CHANGED if request.query_params.get("notice") == "changed" else ""
         context, context_message = _load_context(request, detail.case)
-        body = _case_body(detail, context, context_message, settings, notice)
-        return _html(_page("Review case", body))
+        ticket = request.cookies.get(_HANDOFF_COOKIE)
+        assistance = _ASSISTANCE_HANDOFF.take(ticket, review_case_id) if ticket else None
+        body = _case_body(detail, context, context_message, settings, notice, assistance=assistance)
+        response = _html(_page("Review case", body))
+        response.delete_cookie(_HANDOFF_COOKIE, path=_handoff_path(review_case_id))
+        return response
     finally:
         _log(request, "/review-cases/{reviewCaseId}", status, started, review_case_id)
 
@@ -276,6 +359,89 @@ def close_review_case(
         _log(request, "/review-cases/{reviewCaseId}/close", status, started, review_case_id)
 
 
+def submit_ai_assistance(
+    request: Request,
+    settings: Settings,
+    review_case_id: str,
+    raw_body: bytes,
+    content_type: str | None,
+) -> Response:
+    started = time.perf_counter()
+    status = 400
+    try:
+        try:
+            review_case_id = validate_review_case_id(review_case_id)
+        except ValueError:
+            status = 422
+            return _html(_page("Review case", _error(MSG_INVALID_LINK) + _queue_home()), status)
+        if not _same_origin(request):
+            return _html(_page("Review case", _error(MSG_ASSISTANCE_ORIGIN_INVALID) + _queue_home()), status)
+        fields = _assistance_form_fields(raw_body, content_type)
+        if fields is None:
+            return _html(_page("Review case", _error(MSG_ASSISTANCE_REQUEST_INVALID) + _queue_home()), status)
+        expiry = _expiry(fields.get("assistanceExpiry"))
+        token = fields.get("assistanceToken", "")
+        if expiry is None:
+            return _html(_page("Review case", _error(MSG_ASSISTANCE_REQUEST_INVALID) + _queue_home()), status)
+        if not settings.human_review_form_signing_secret:
+            return _html(_page("Review case", _error(MSG_NOT_CONFIGURED) + _queue_home()), status)
+        if not assistance_token_is_valid(
+            secret=settings.human_review_form_signing_secret,
+            review_case_id=review_case_id,
+            expiry=expiry,
+            token=token,
+        ):
+            return _html(_page("Review case", _error(MSG_ASSISTANCE_TOKEN_INVALID) + _queue_home()), status)
+        detail, failure = _load_detail(request, review_case_id)
+        if failure is not None:
+            status = failure
+            message = MSG_NOT_FOUND if failure == 404 else MSG_REVIEW_UNAVAILABLE
+            return _html(_page("Review case", _error(message) + _queue_home()), status)
+        assert detail is not None
+        if detail.case.status is not ReviewCaseStatus.OPEN:
+            status = 409
+            return _html(
+                _page("Review case", _error("AI assistance is available only for an open review case.") + _queue_home()),
+                status,
+            )
+        repository = _repository(request)
+        if repository is None:
+            status = 503
+            return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+
+        def read_context() -> ClinicalReviewContextResponse:
+            return clinical_context_service(request, repository).read(review_case_id)
+
+        outcome = generate_ai_assistance(
+            case=detail.case,
+            context_reader=read_context,
+            knowledge=_knowledge(request),
+            provider=_assistance_provider(request, settings),
+            correlation_id=request.headers.get("x-correlation-id") or "",
+        )
+        if outcome.context is None and outcome.result.reason in {"case_not_open", "invalid_case_context"}:
+            status = 409 if outcome.result.reason == "case_not_open" else 422
+            message = (
+                "AI assistance is available only for an open review case."
+                if outcome.result.reason == "case_not_open"
+                else "AI assistance is unavailable for this case."
+            )
+            return _html(_page("Review case", _error(message) + _queue_home()), status)
+        status = 303
+        response = _redirect(review_case_id)
+        response.set_cookie(
+            _HANDOFF_COOKIE,
+            _ASSISTANCE_HANDOFF.put(review_case_id, outcome.result),
+            max_age=_HANDOFF_TTL_SECONDS,
+            httponly=True,
+            samesite="strict",
+            path=_handoff_path(review_case_id),
+        )
+        return response
+    finally:
+        _log(request, "/review-cases/{reviewCaseId}/ai-assistance", status, started, review_case_id)
+
+
 def render_observation_value(content: object) -> str:
     """Deterministic HTML for one bounded observation value. Input models only."""
     if isinstance(content, NotProjectedContent) or not hasattr(content, "kind"):
@@ -306,12 +472,31 @@ def _sign(secret: str, review_case_id: str, expected_version: int, expiry: int) 
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
+def _sign_assistance(secret: str, review_case_id: str, expiry: int) -> str:
+    message = f"ai-assistance|{review_case_id}|{expiry}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
 def _now() -> int:
     return int(time.time())
 
 
 def _repository(request: Request):
     return getattr(request.app.state, "followup_review_repository", None)
+
+
+def _knowledge(request: Request):
+    knowledge = getattr(request.app.state, "institutional_knowledge", None)
+    if knowledge is None:
+        return UnavailableInstitutionalKnowledge()
+    return knowledge
+
+
+def _assistance_provider(request: Request, settings: Settings):
+    return resolve_assistance_provider(
+        getattr(request.app.state, "ai_assistance_provider", None),
+        settings,
+    )
 
 
 def _load_detail(request: Request, review_case_id: str) -> tuple[ReviewCaseDetail | None, int | None]:
@@ -351,6 +536,22 @@ def _same_origin(request: Request) -> bool:
 
 
 def _form_fields(raw_body: bytes, content_type: str | None) -> dict[str, str] | None:
+    return _exact_fields(
+        raw_body,
+        content_type,
+        {"outcome", "expectedVersion", "formToken", "formExpiry"},
+    )
+
+
+def _assistance_form_fields(raw_body: bytes, content_type: str | None) -> dict[str, str] | None:
+    return _exact_fields(raw_body, content_type, {"assistanceExpiry", "assistanceToken"})
+
+
+def _exact_fields(
+    raw_body: bytes,
+    content_type: str | None,
+    allowed: set[str],
+) -> dict[str, str] | None:
     if content_type is None or not content_type.startswith("application/x-www-form-urlencoded"):
         return None
     try:
@@ -361,7 +562,6 @@ def _form_fields(raw_body: bytes, content_type: str | None) -> dict[str, str] | 
         pairs = parse_qsl(text, keep_blank_values=True, strict_parsing=False, max_num_fields=8)
     except ValueError:
         return None
-    allowed = {"outcome", "expectedVersion", "formToken", "formExpiry"}
     fields: dict[str, str] = {}
     for key, value in pairs:
         if key not in allowed or key in fields:
@@ -434,6 +634,7 @@ def _case_body(
     context_message: str,
     settings: Settings,
     notice: str,
+    assistance: AssistanceResult | None,
 ) -> str:
     case = detail.case
     parts = [_demo_banner(), _queue_home()]
@@ -443,8 +644,31 @@ def _case_body(
     parts.append(_provenance_section(case))
     parts.append(_context_section(context, context_message))
     parts.append(_history_section(detail.events))
+    parts.append(_assistance_section(case, settings, assistance))
     parts.append(_outcome_section(case, settings))
     return "".join(parts)
+
+
+def _assistance_section(
+    case: FollowUpReviewCase,
+    settings: Settings,
+    assistance: AssistanceResult | None,
+) -> str:
+    open_case = case.status is ReviewCaseStatus.OPEN
+    token = (
+        issue_assistance_token(
+            secret=settings.human_review_form_signing_secret,
+            review_case_id=case.id,
+        )
+        if open_case
+        else None
+    )
+    return render_assistance_section(
+        open_case=open_case,
+        review_case_id=case.id,
+        token=token,
+        result=assistance,
+    )
 
 
 def _operational_section(case: FollowUpReviewCase) -> str:
@@ -740,6 +964,10 @@ def _page(title: str, body: str) -> str:
 
 def _html(content: str, status_code: int = 200) -> HTMLResponse:
     return HTMLResponse(content=content, status_code=status_code, headers={"Cache-Control": "no-store"})
+
+
+def _handoff_path(review_case_id: str) -> str:
+    return "/review-cases/" + quote(review_case_id, safe="")
 
 
 def _redirect(review_case_id: str, *, notice: bool = False) -> RedirectResponse:

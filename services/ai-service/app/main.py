@@ -18,7 +18,12 @@ from app.experimental_service import load_json_body, run_experimental_summary
 from app.followup_service import run_followup_http
 from app.missed_follow_up_service import run_missed_follow_up_http
 from app.clinical_review_context_http import get_clinical_review_context_http
-from app.human_review_client import close_review_case, render_review_case, render_review_queue
+from app.human_review_client import (
+    close_review_case,
+    render_review_case,
+    render_review_queue,
+    submit_ai_assistance,
+)
 from app.followup_review_http import (
     close_review_case_http,
     get_review_case_http,
@@ -80,6 +85,21 @@ def review_cases(request: Request, settings: Settings = Depends(get_settings)) -
 @app.get("/review-cases/{review_case_id}")
 def review_case(review_case_id: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
     return render_review_case(request, settings, review_case_id)
+
+
+@app.post("/review-cases/{review_case_id}/ai-assistance")
+async def review_case_ai_assistance(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_ai_assistance(
+        request,
+        settings,
+        review_case_id,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
 
 
 @app.post("/review-cases/{review_case_id}/close")

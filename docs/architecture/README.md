@@ -46,20 +46,29 @@ Repository institutional Markdown
         -> bounded institutional chunks and provenance
 ```
 
-These flows do not require the Java process merely to obtain FHIR context when an authorized FHIR endpoint is configured. They do not authorize arbitrary FHIR access or writes. `MISSED_FOLLOW_UP_REVIEW_V1` does not call Gemini or LangGraph. Institutional retrieval uses Gemini embeddings only. It does not generate text, read FHIR, or appear in `/review-cases`. See [ADR-089](../adr/ADR-089-missed-follow-up-review.md) and [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md).
+```text
+Open review case, explicit Generate AI assistance
+        -> bounded Clinical Review Context projection
+        -> server-owned institutional query
+        -> one structured Gemini explanation
+        -> trusted citation projection on the same HTML page
+```
+
+These flows do not require the Java process merely to obtain FHIR context when an authorized FHIR endpoint is configured. They do not authorize arbitrary FHIR access or writes. `MISSED_FOLLOW_UP_REVIEW_V1` does not call Gemini or LangGraph during protocol evaluation. Institutional retrieval uses Gemini embeddings only. AI-assisted review may then make one structured generation call. It does not use LangGraph. See [ADR-089](../adr/ADR-089-missed-follow-up-review.md), [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md) and [ADR-091](../adr/ADR-091-ai-assisted-review.md).
 
 ## Authority boundaries
 
 - The application chooses mandatory FHIR acquisition; the model does not.
 - FHIR search completeness and resource/reference integrity are evaluated before absence is trusted.
 - The deterministic protocol owns `protocol`, `clinicalAssessment`, `humanReview` and `action`.
-- Gemini owns only legacy narrative output such as `answer` and `followUpRequired`.
+- Legacy Gemini narrative owns `answer` and `followUpRequired`. AI-assisted review owns a separate explanatory JSON output and does not select the review outcome.
 - FHIR-derived model input is allowed only through explicitly authorized tool/data contracts.
 - `humanReview.status=required` remains a response-level protocol requirement. A separate `FollowUpReviewCase` is the durable operational work item.
 - `action.status=proposed` is not external execution.
 - Gemini cannot create, close or select the outcome of an operational review case.
 - The synthetic review demo is server-rendered HTML inside Healthcare AI. It presents the existing review contracts and does not give the browser `X-Service-Token`. Close forms are signed with `HUMAN_REVIEW_FORM_SIGNING_SECRET`, not the service token. See [ADR-088](../adr/ADR-088-server-rendered-human-review-demo.md).
 - Institutional retrieval returns procedure text and provenance. It does not own protocol evaluation or review-case state. Query embedding and new-chunk embedding both depend on the embedding provider. See [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md).
+- AI-assisted review explains an open case on demand. FHIR facts, the deterministic protocol and the human outcome stay authoritative. Observation values and patient identity are not sent to Gemini. `NO_RELEVANT_GUIDANCE` and retrieval `UNAVAILABLE` do not call Gemini. Output is not stored. See [ADR-091](../adr/ADR-091-ai-assisted-review.md).
 
 ## Authoritative documents
 
@@ -67,6 +76,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 - [Clinical Follow-up Review V1 contract](../contracts/post-consultation-result-review-v1.md)
 - [Missed follow-up review V1 contract](../contracts/missed-follow-up-review-v1.md)
 - [Institutional knowledge retrieval V1 contract](../contracts/institutional-knowledge-retrieval-v1.md)
+- [AI-assisted review V1 contract](../contracts/ai-assisted-review-v1.md)
 - [Operational Follow-up Review Workflow V1 contract](../contracts/follow-up-review-workflow-v1.md)
 - [Healthcare Interoperability architecture](../fhir/fhir-architecture.md)
 - [Healthcare AI runbook](../../services/ai-service/README.md)
@@ -90,7 +100,8 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-087](../adr/ADR-087-case-bound-current-clinical-review-context.md) | Accepted current decision for bounded current clinical context of an open review case. |
 | [ADR-088](../adr/ADR-088-server-rendered-human-review-demo.md) | Accepted current decision for the server-rendered synthetic review demo inside Healthcare AI. |
 | [ADR-089](../adr/ADR-089-missed-follow-up-review.md) | Accepted current decision for missed follow-up review on the shared review case. |
-| [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md) | Accepted current decision for synthetic institutional procedure retrieval. Not production RAG and not connected to review. |
+| [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md) | Accepted current decision for synthetic institutional procedure retrieval. Not production RAG. |
+| [ADR-091](../adr/ADR-091-ai-assisted-review.md) | Accepted current decision for on-demand explanatory review assistance. Not production-ready and not clinically certified. |
 
 ## Historical governance artifacts
 

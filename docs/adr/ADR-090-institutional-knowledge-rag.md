@@ -35,3 +35,5 @@ Citation fields come only from indexed chunk metadata. `contentRole` is `institu
 ## Consequences
 
 FHIR facts, deterministic protocol output, review-case identity and review-case closure stay unchanged when retrieval fails or succeeds. No patient, FHIR or review-case body is embedded. No new dependency, database server, port or secret is added. `GEMINI_API_KEY` is reused only for embeddings. The index is single-instance SQLite and is not a vector database.
+
+ADR-091 calls this retriever in process for on-demand explanatory assistance. That call does not change this retrieval contract, the 0.68 demonstration threshold, or review-case state.

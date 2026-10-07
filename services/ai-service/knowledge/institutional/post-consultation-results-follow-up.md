@@ -29,7 +29,7 @@ The deterministic protocol has already required human review for a result availa
 
 ## Review Procedure
 
-Confirm that human review is already required. Check whether the deterministic protocol already recorded a confirmed future follow-up. When coordination is still needed, plan follow-up coordination. When no operational action remains, record that the review is completed without operational action. Leave protocol output and review case identity unchanged.
+For post consultation result follow-up already in human review, confirm that human review is already required by the deterministic protocol. Check whether a confirmed future follow-up is currently recorded. When follow-up coordination is still needed, plan follow-up coordination. When no operational action remains, record that the review is completed without operational action. A person records the operational outcome. This review procedure does not interpret an observation value, assign clinical meaning, or replace the deterministic protocol.
 
 ## Human Authority
 

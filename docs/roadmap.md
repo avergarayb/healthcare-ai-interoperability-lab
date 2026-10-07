@@ -32,7 +32,8 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - Open-case `CLINICAL_REVIEW_CONTEXT_V1` current FHIR projection without protocol reevaluation or persistence.
 - Server-rendered synthetic review queue, case page and operational close inside Healthcare AI.
 - Synthetic institutional procedure retrieval through `POST /internal/knowledge/retrieve`, with Gemini embeddings, a separate SQLite index and no generated explanation.
-- Deterministic, evaluation-harness and opt-in real-HAPI coverage. The live embedding check is a separate opt-in from live Gemini generation.
+- On-demand AI-assisted review for an open follow-up case, with one structured Gemini explanation, claim-level citations and no stored model output.
+- Deterministic, evaluation-harness and opt-in real-HAPI coverage. Live embedding and live AI-assistance checks are separate opt-ins from live Gemini narrative tests.
 
 ## Current product gaps
 
@@ -61,7 +62,8 @@ Future product decisions may consider:
 - broader interoperability mechanisms such as HL7 v2 or other designed adapters;
 - production identity, tenancy, audit and deployment controls;
 - production retrieval beyond the synthetic institutional index, local models, MCP or additional providers;
-- customer-facing applications and integrations.
+- customer-facing applications and integrations;
+- `DEMO_EXPERIENCE_V1`: clearer review-page language and hierarchy. The manual test left protocol ids, the word matched, ISO timestamps, technical provenance, a duplicated missed-follow-up appointment, and the label "Other appointment status" unchanged on purpose.
 
 Each candidate requires a separate product decision, security assessment and acceptance contract. Historical phase names under `docs/tasks/` remain development history rather than current sequencing authority.
 
