@@ -26,6 +26,8 @@ from app.followup_review_http import (
 )
 from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.gemini_provider import GeminiProvider
+from app.institutional_knowledge import attach_institutional_knowledge
+from app.institutional_knowledge_http import retrieve_institutional_knowledge_http
 from app.llm_provider import LLMProvider
 from app.models import AgentContextResult
 from app.service_auth import authenticate
@@ -45,11 +47,14 @@ async def lifespan(application: FastAPI):
     repository = SQLiteFollowUpReviewCaseRepository(settings.ai_review_db_path)
     repository.initialize()
     application.state.followup_review_repository = repository
+    attach_institutional_knowledge(application, settings)
     try:
         yield
     finally:
         if hasattr(application.state, "followup_review_repository"):
             del application.state.followup_review_repository
+        if hasattr(application.state, "institutional_knowledge"):
+            del application.state.institutional_knowledge
 
 
 app = FastAPI(title="ai-service", version="0.1.0", lifespan=lifespan)
@@ -176,3 +181,11 @@ async def close_follow_up_review_case(
         review_case_id,
         await request.body(),
     )
+
+
+@app.post("/internal/knowledge/retrieve")
+async def retrieve_institutional_knowledge(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return retrieve_institutional_knowledge_http(request, settings, await request.body())

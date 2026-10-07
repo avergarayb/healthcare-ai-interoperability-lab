@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 
@@ -20,6 +21,9 @@ class Settings:
     followup_agent_enabled: bool = False
     ai_review_db_path: str = "./data/follow-up-review.sqlite3"
     human_review_form_signing_secret: str = field(default="", repr=False)
+    institutional_knowledge_db_path: str = "./data/institutional-knowledge.sqlite3"
+    institutional_knowledge_embedding_model: str = "gemini-embedding-001"
+    institutional_knowledge_min_score: float = 0.68
 
     @property
     def model_boundary_url(self) -> str:
@@ -48,6 +52,29 @@ class Settings:
         ).strip()
         if not review_db_path:
             raise ValueError("AI_REVIEW_DB_PATH must not be blank")
+        knowledge_db_path = os.getenv(
+            "INSTITUTIONAL_KNOWLEDGE_DB_PATH",
+            "./data/institutional-knowledge.sqlite3",
+        ).strip()
+        if not knowledge_db_path:
+            raise ValueError("INSTITUTIONAL_KNOWLEDGE_DB_PATH must not be blank")
+        embedding_model = os.getenv(
+            "INSTITUTIONAL_KNOWLEDGE_EMBEDDING_MODEL",
+            "gemini-embedding-001",
+        ).strip()
+        if (
+            not embedding_model
+            or len(embedding_model) > 128
+            or any(character.isspace() for character in embedding_model)
+        ):
+            raise ValueError("INSTITUTIONAL_KNOWLEDGE_EMBEDDING_MODEL is invalid")
+        score_raw = os.getenv("INSTITUTIONAL_KNOWLEDGE_MIN_SCORE", "0.68").strip()
+        try:
+            min_score = float(score_raw)
+        except ValueError as exc:
+            raise ValueError("INSTITUTIONAL_KNOWLEDGE_MIN_SCORE must be a number") from exc
+        if not math.isfinite(min_score) or not 0 <= min_score <= 1:
+            raise ValueError("INSTITUTIONAL_KNOWLEDGE_MIN_SCORE must be between 0 and 1")
         return cls(
             model_boundary_base_url=os.getenv("MODEL_BOUNDARY_BASE_URL", "http://localhost:8081").strip(),
             model_boundary_path=os.getenv("MODEL_BOUNDARY_PATH", "/api/model-boundary/v1").strip(),
@@ -61,4 +88,7 @@ class Settings:
             followup_agent_enabled=followup_raw == "true",
             ai_review_db_path=review_db_path,
             human_review_form_signing_secret=os.getenv("HUMAN_REVIEW_FORM_SIGNING_SECRET", "").strip(),
+            institutional_knowledge_db_path=knowledge_db_path,
+            institutional_knowledge_embedding_model=embedding_model,
+            institutional_knowledge_min_score=min_score,
         )

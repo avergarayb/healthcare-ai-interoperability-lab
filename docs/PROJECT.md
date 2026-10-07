@@ -36,7 +36,8 @@ Currently implemented:
 - deterministic `MISSED_FOLLOW_UP_REVIEW_V1` for a past `noshow` without a confirmed future Appointment, without Gemini;
 - durable operational follow-up review cases with bounded queue, provenance and closure APIs;
 - a server-rendered synthetic review demo at `/review-cases` inside this process;
-- an authorized legacy/narrative LangGraph/Gemini subflow.
+- an authorized legacy/narrative LangGraph/Gemini subflow;
+- `INSTITUTIONAL_KNOWLEDGE_RETRIEVAL_V1`, a synthetic institutional-procedure index retrieved with Gemini embeddings and not connected to review cases.
 
 Healthcare AI does not have arbitrary FHIR access. Current follow-up reads are case-bound, GET-only, resource-constrained, bounded, completeness-aware and fail-closed. See [ADR-085](adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) and the [V1 contract](contracts/post-consultation-result-review-v1.md).
 
@@ -54,8 +55,9 @@ Optional composition does not merge their security perimeters or make every inte
 - Gemini does not control protocol, clinical assessment, human review or action.
 - Durable review workflow state is operational authority separate from protocol projection and clinical facts.
 - `CLINICAL_REVIEW_CONTEXT_V1` reads current FHIR for an open review case and does not change protocol or review authority.
-- The human review demo is presentation only. It does not authenticate a person, and the browser does not receive `X-Service-Token`.
-- FHIR-derived data may reach Gemini only through explicitly authorized contracts.
+- The human review demo is presentation only. It does not authenticate a person, and the browser does not receive `X-Service-Token`. It does not retrieve institutional knowledge.
+- `INSTITUTIONAL_KNOWLEDGE_RETRIEVAL_V1` retrieves repository-controlled synthetic procedures. It does not change protocol output, FHIR reads or review cases. Gemini embeddings support that retrieval. Gemini text generation does not.
+- FHIR-derived data may reach Gemini only through explicitly authorized contracts. Institutional retrieval does not embed FHIR or patient data.
 - No current Clinical Follow-up Review path writes FHIR or executes an autonomous external action.
 
 ## Current limitations and non-goals
@@ -70,7 +72,7 @@ The repository does not establish:
 - production processing approval for real patient data;
 - production SaaS, customer-hosted or hybrid packaging;
 - regulatory compliance, certification, SIHCE accreditation or RENHICE authorization;
-- RAG, MCP, a second LLM provider or a model router as current product capabilities.
+- production RAG, MCP, a second LLM provider or a model router. The synthetic institutional retrieval index is a separate non-production capability and does not generate answers.
 
 Potential future technologies in historical tasks or roadmap notes are not implemented merely because they are named.
 

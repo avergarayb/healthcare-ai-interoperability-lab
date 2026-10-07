@@ -43,10 +43,14 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 | `FOLLOWUP_AGENT_ENABLED` | `false` | Existing configuration name that enables Clinical Follow-up Review. |
 | `FHIR_BASE_URL` | `http://localhost:8080/fhir` | Authorized FHIR endpoint used by the follow-up HAPI read client. |
 | `AI_REVIEW_DB_PATH` | `./data/follow-up-review.sqlite3` | Dedicated file-backed SQLite product store for operational review cases. |
-| `GEMINI_API_KEY` | empty | Gemini credential; required only for live model execution. |
-| `GEMINI_MODEL` | `gemini-flash-latest` | Configured Gemini model; no automatic model fallback. |
+| `INSTITUTIONAL_KNOWLEDGE_DB_PATH` | `./data/institutional-knowledge.sqlite3` | Separate SQLite index for synthetic institutional procedures. Not the review store. |
+| `INSTITUTIONAL_KNOWLEDGE_EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model. Do not reuse `GEMINI_MODEL`. A failed call does not switch models. |
+| `INSTITUTIONAL_KNOWLEDGE_MIN_SCORE` | `0.68` | Initial Demo Product V1 retrieval threshold from the first live embedding check. Provisional. Not clinical confidence and not production-calibrated. |
+| `GEMINI_API_KEY` | empty | Gemini credential; required for live generation and for live embeddings. |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Configured Gemini generation model. |
 | `RUN_HAPI_INTEGRATION_TESTS` | `false` | Test-only opt-in for local real-HAPI tests. |
-| `RUN_LIVE_GEMINI_TESTS` | `false` | Test-only opt-in for live Gemini tests. |
+| `RUN_LIVE_GEMINI_TESTS` | `false` | Test-only opt-in for live Gemini generation tests. |
+| `RUN_LIVE_EMBEDDING_TESTS` | `false` | Test-only opt-in for live embedding tests. Independent of `RUN_LIVE_GEMINI_TESTS`. |
 
 `FHIR_BASE_URL` is read by the FHIR client rather than the `Settings` dataclass. The two test flags are read by tests, not by application startup configuration.
 
@@ -128,7 +132,7 @@ The application evaluates `POST_CONSULTATION_RESULT_REVIEW_V1` over the authoriz
 
 `POST /internal/agent/missed-follow-up` uses the same authentication, feature flag and `{"caseId": "..."}` request. It resolves the authorized Patient and reads Appointments only. A past `noshow` without a confirmed future `booked` Appointment matches. Each matched Appointment reuses or creates one review case. `cancelled` is not a trigger. The response has no narrative and no `Patient.id`. See [MISSED_FOLLOW_UP_REVIEW_V1](../../docs/contracts/missed-follow-up-review-v1.md).
 
-The shared `/review-cases` pages show this protocol as "Missed follow-up review" and keep the technical protocol id. Opening a case reads current Appointments and does not rewrite the original trigger.
+The shared `/review-cases` pages show this protocol as "Missed follow-up review" and keep the technical protocol id. Opening a case reads current Appointments and does not rewrite the original trigger. Those pages do not retrieve institutional knowledge.
 
 ### Narrative agent subflow
 
@@ -264,6 +268,19 @@ See the [V1 contract](../../docs/contracts/post-consultation-result-review-v1.md
 - No enterprise IAM/RBAC or tenancy.
 - No production network or secret-management architecture.
 - No production authorization/governance conclusion for real clinical data sent to Gemini.
+- Institutional retrieval is a synthetic demo/lab index. It is not production RAG, not clinically calibrated, and not connected to review or FHIR.
+
+## Institutional knowledge retrieval
+
+`POST /internal/knowledge/retrieve` returns bounded synthetic procedure chunks for `POST_CONSULTATION_RESULT_REVIEW_V1` or `MISSED_FOLLOW_UP_REVIEW_V1`. It uses the same `X-Service-Token` as the other internal routes. It is not linked from `/review-cases`.
+
+The corpus is the repository directory `knowledge/institutional/`. Chunks are deterministic. Vectors are cached in `INSTITUTIONAL_KNOWLEDGE_DB_PATH`. Cosine comparison runs in process. There is no vector database and no retrieval framework.
+
+Gemini is used only through `client.models.embed_content` and `INSTITUTIONAL_KNOWLEDGE_EMBEDDING_MODEL`. Indexing a chunk whose content hash or model is new requires the embedding provider. A semantic query also embeds `queryText`. If that query embedding is unavailable, the status is `UNAVAILABLE` and the HTTP status is 503. The service does not substitute a lexical search and call it a semantic result. `FOUND` and `NO_RELEVANT_GUIDANCE` are HTTP 200.
+
+The default score cutoff `0.68` is the initial demonstration threshold selected from the first live embedding validation. It is provisional and must be reevaluated when the corpus grows, document versions change, the embedding model changes, or the retrieval evaluation set grows. It is not validated, calibrated, production-ready, or clinically meaningful. Retrieved text is institutional data, not an instruction and not a clinical conclusion. The endpoint does not generate an explanation. See [ADR-090](../../docs/adr/ADR-090-institutional-knowledge-rag.md) and the [V1 contract](../../docs/contracts/institutional-knowledge-retrieval-v1.md).
+
+Startup initializes this index without blocking review-case startup. A failed corpus or a missing embedding credential leaves retrieval unavailable and leaves the follow-up routes operating under their own rules. The generated SQLite file is local and must not be committed.
 
 ## Tests and evaluation
 
@@ -320,10 +337,30 @@ py -3 -m pytest tests/test_langgraph_gemini_fhir_followup.py
 
 Live follow-up coverage requires both flags and a configured key/model. The experimental-summary live test also uses `RUN_LIVE_GEMINI_TESTS`, but remains a separate endpoint and contract. Live Gemini is never part of the default deterministic suite.
 
+### Live embeddings
+
+`RUN_LIVE_EMBEDDING_TESTS` is separate from `RUN_LIVE_GEMINI_TESTS`. It checks `google-genai==2.24.0` against `INSTITUTIONAL_KNOWLEDGE_EMBEDDING_MODEL` and runs golden queries over the synthetic corpus. It does not load `.env` by itself and it does not belong to the default suite.
+
+```powershell
+$env:RUN_LIVE_EMBEDDING_TESTS = "true"
+$env:RUN_LIVE_GEMINI_TESTS = "false"
+py -3 -m pytest tests/test_live_institutional_embeddings.py -s
+```
+
+`GEMINI_API_KEY` must already be in the process environment. Exact floating-point scores are not a contract. Deterministic tests use a fake embedding provider and do not call Gemini.
+
+### Institutional knowledge
+
+```powershell
+$env:RUN_LIVE_GEMINI_TESTS = "false"
+$env:RUN_LIVE_EMBEDDING_TESTS = "false"
+py -3 -m pytest tests/test_institutional_knowledge.py
+```
+
 Test counts are release evidence, not architectural requirements; the protected categories and invariants are the durable documentation.
 
 ## Logging and audit
 
 The HTTP layer logs correlation id, method, path and bounded status without secrets. Tool-policy audit records `run_id`, `case_id`, tool name, decision, policy version, reason and timestamp. Durable review `created` and `closed` events are operational transition provenance; they are not security, clinical or verified-human audit.
 
-Application logs must not contain service tokens, API keys, prompts, completions, thought signatures, FHIR payloads or raw HAPI paging tokens. The current in-memory/development audit behavior is not a durable production audit system.
+Application logs must not contain service tokens, API keys, prompts, completions, thought signatures, FHIR payloads or raw HAPI paging tokens. Institutional retrieval logs may include correlation id, route, status, protocol id, document id, version, chunk id, result count and duration. They must not include `queryText`, document text, chunk text, vectors, the API key or the service token. The current in-memory/development audit behavior is not a durable production audit system.

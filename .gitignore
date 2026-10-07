@@ -38,5 +38,9 @@ __pycache__/
 /data/follow-up-review.sqlite3*
 /services/ai-service/data/follow-up-review.sqlite3*
 
+# Local institutional knowledge index. Not a review-case store.
+/data/institutional-knowledge.sqlite3*
+/services/ai-service/data/institutional-knowledge.sqlite3*
+
 # Local Docker bind-mount data (named volumes are preferred)
 infra/docker/data/
