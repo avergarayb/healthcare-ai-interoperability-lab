@@ -23,6 +23,7 @@ from app.human_review_client import (
     render_review_case,
     render_review_queue,
     submit_ai_assistance,
+    submit_controlled_action,
 )
 from app.followup_review_http import (
     close_review_case_http,
@@ -94,6 +95,21 @@ async def review_case_ai_assistance(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     return submit_ai_assistance(
+        request,
+        settings,
+        review_case_id,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
+
+
+@app.post("/review-cases/{review_case_id}/controlled-action")
+async def review_case_controlled_action(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_controlled_action(
         request,
         settings,
         review_case_id,

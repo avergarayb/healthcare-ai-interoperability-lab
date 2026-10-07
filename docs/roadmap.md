@@ -33,6 +33,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - Server-rendered synthetic review queue, case page and operational close inside Healthcare AI.
 - Synthetic institutional procedure retrieval through `POST /internal/knowledge/retrieve`, with Gemini embeddings, a separate SQLite index and no generated explanation.
 - On-demand AI-assisted review for an open follow-up case, with one structured Gemini explanation, claim-level citations and no stored model output.
+- One explicit internal follow-up coordination request after a closed review case whose outcome is follow-up coordination planned. The request status `requested` records that internal request. It does not send a message, write FHIR, or schedule an appointment.
 - Deterministic, evaluation-harness and opt-in real-HAPI coverage. Live embedding and live AI-assistance checks are separate opt-ins from live Gemini narrative tests.
 
 ## Current product gaps
@@ -63,6 +64,7 @@ Future product decisions may consider:
 - production identity, tenancy, audit and deployment controls;
 - production retrieval beyond the synthetic institutional index, local models, MCP or additional providers;
 - customer-facing applications and integrations;
+- an external adapter that consumes an already recorded internal coordination request. The coordination policy remains the authorization decision;
 - `DEMO_EXPERIENCE_V1`: clearer review-page language and hierarchy. The manual test left protocol ids, the word matched, ISO timestamps, technical provenance, a duplicated missed-follow-up appointment, and the label "Other appointment status" unchanged on purpose.
 
 Each candidate requires a separate product decision, security assessment and acceptance contract. Historical phase names under `docs/tasks/` remain development history rather than current sequencing authority.
@@ -71,4 +73,4 @@ Each candidate requires a separate product decision, security assessment and acc
 
 The repository has an implemented interoperability foundation and an implemented Healthcare AI workflow foundation. It is beyond the former “Phase 2–3” and “future AI/LangGraph” descriptions.
 
-It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, the SQLite review store is single-instance, and deterministic follow-up review is not clinical diagnosis.
+It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, the SQLite review store is single-instance, and deterministic follow-up review is not clinical diagnosis. An internal coordination request after an explicit POST is recorded operational evidence. It is not external execution and it is not clinical diagnosis.

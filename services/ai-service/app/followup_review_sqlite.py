@@ -10,6 +10,15 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from app.followup_coordination_action import (
+    CoordinationActionType,
+    CoordinationRequestNotPersistable,
+    CoordinationRequestStatus,
+    FollowUpCoordinationRequest,
+    build_coordination_action_identity,
+    persistable_protocol_id,
+    validate_coordination_request,
+)
 from app.followup_review import (
     FollowUpReviewCase,
     FollowUpReviewCaseEvent,
@@ -35,10 +44,17 @@ from app.followup_review import (
 )
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 BUSY_TIMEOUT_MS = 5_000
 _MIGRATION = Path(__file__).with_name("migrations") / "001_follow_up_review.sql"
-_TABLES = ("follow_up_review_cases", "follow_up_review_case_events")
+_COORDINATION_REQUEST_MIGRATION = (
+    Path(__file__).with_name("migrations") / "002_follow_up_coordination_request.sql"
+)
+_TABLES = (
+    "follow_up_review_cases",
+    "follow_up_review_case_events",
+    "follow_up_coordination_requests",
+)
 
 
 class SQLiteFollowUpReviewCaseRepository:
@@ -69,13 +85,10 @@ class SQLiteFollowUpReviewCaseRepository:
                 if version > SCHEMA_VERSION:
                     raise ReviewStoreInitializationError("review database schema version is unsupported")
                 if version == 0:
-                    migration = _MIGRATION.read_text(encoding="utf-8")
-                    try:
-                        connection.executescript(migration)
-                    except sqlite3.DatabaseError:
-                        if connection.in_transaction:
-                            connection.rollback()
-                        raise
+                    _apply_migration(connection, _MIGRATION)
+                    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                if version == 1:
+                    _apply_migration(connection, _COORDINATION_REQUEST_MIGRATION)
                 self._validate_schema(connection)
         except ReviewStoreInitializationError:
             raise
@@ -319,6 +332,87 @@ class SQLiteFollowUpReviewCaseRepository:
         detail = self.get_detail(review_case_id)
         return () if detail is None else detail.events
 
+    def ensure_follow_up_coordination_request(
+        self, review_case_id: str
+    ) -> FollowUpCoordinationRequest:
+        """Insert one coordination request, or return the row already stored.
+
+        protocol_id is copied from the review case row in this transaction.
+        The review case itself is not updated.
+        """
+        validate_review_case_id(review_case_id)
+        action_identity = build_coordination_action_identity(review_case_id)
+        request_id = str(self._id_factory())
+        created_at = utc_timestamp(self._clock)
+        try:
+            with self._connection_scope() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                case_row = connection.execute(
+                    "SELECT protocol_id FROM follow_up_review_cases WHERE id = ?",
+                    (review_case_id,),
+                ).fetchone()
+                if case_row is None:
+                    connection.rollback()
+                    raise ReviewCaseNotFound
+                protocol_id = persistable_protocol_id(str(case_row["protocol_id"]))
+                connection.execute(
+                    """
+                    INSERT INTO follow_up_coordination_requests (
+                        id, action_identity, review_case_id, protocol_id,
+                        action_type, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(action_identity) DO NOTHING
+                    """,
+                    (
+                        request_id,
+                        action_identity,
+                        review_case_id,
+                        protocol_id,
+                        CoordinationActionType.CREATE_FOLLOW_UP_COORDINATION_REQUEST.value,
+                        CoordinationRequestStatus.REQUESTED.value,
+                        created_at,
+                    ),
+                )
+                stored = connection.execute(
+                    """
+                    SELECT * FROM follow_up_coordination_requests
+                    WHERE action_identity = ?
+                    """,
+                    (action_identity,),
+                ).fetchone()
+                connection.commit()
+            if stored is None:
+                raise ReviewPersistenceUnavailable
+            return _coordination_request_from_row(stored)
+        except (
+            ReviewCaseNotFound,
+            CoordinationRequestNotPersistable,
+            ReviewPersistenceUnavailable,
+        ):
+            raise
+        except (sqlite3.DatabaseError, OSError, ValueError) as exc:
+            raise ReviewPersistenceUnavailable from exc
+
+    def get_follow_up_coordination_request(
+        self, review_case_id: str
+    ) -> FollowUpCoordinationRequest | None:
+        validate_review_case_id(review_case_id)
+        try:
+            with self._connection_scope() as connection:
+                row = connection.execute(
+                    """
+                    SELECT * FROM follow_up_coordination_requests
+                    WHERE review_case_id = ? AND action_type = ?
+                    """,
+                    (
+                        review_case_id,
+                        CoordinationActionType.CREATE_FOLLOW_UP_COORDINATION_REQUEST.value,
+                    ),
+                ).fetchone()
+            return None if row is None else _coordination_request_from_row(row)
+        except (sqlite3.DatabaseError, OSError, ValueError) as exc:
+            raise ReviewPersistenceUnavailable from exc
+
     @contextmanager
     def _connection_scope(self) -> Iterator[sqlite3.Connection]:
         connection = self._connect()
@@ -372,6 +466,7 @@ def _migration_schema_contract() -> tuple[object, ...]:
     try:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.executescript(_MIGRATION.read_text(encoding="utf-8"))
+        connection.executescript(_COORDINATION_REQUEST_MIGRATION.read_text(encoding="utf-8"))
         return _schema_contract(connection)
     finally:
         connection.close()
@@ -440,6 +535,32 @@ def _normalize_schema_sql(value: object) -> str | None:
     if not isinstance(value, str):
         raise ReviewStoreInitializationError("review database schema is invalid")
     return value.strip()
+
+
+def _apply_migration(connection: sqlite3.Connection, path: Path) -> None:
+    try:
+        connection.executescript(path.read_text(encoding="utf-8"))
+    except sqlite3.DatabaseError:
+        if connection.in_transaction:
+            connection.rollback()
+        raise
+
+
+def _coordination_request_from_row(row: sqlite3.Row) -> FollowUpCoordinationRequest:
+    raw_id = str(row["id"])
+    raw_review_case_id = str(row["review_case_id"])
+    request = FollowUpCoordinationRequest(
+        id=validate_review_case_id(raw_id),
+        action_identity=str(row["action_identity"]),
+        review_case_id=validate_review_case_id(raw_review_case_id),
+        protocol_id=str(row["protocol_id"]),
+        action_type=CoordinationActionType(row["action_type"]),
+        status=CoordinationRequestStatus(row["status"]),
+        created_at=str(row["created_at"]),
+    )
+    if request.id != raw_id or request.review_case_id != raw_review_case_id:
+        raise ValueError("persisted coordination request identifiers are not canonical")
+    return validate_coordination_request(request)
 
 
 def _json_array(values: tuple[str, ...]) -> str:

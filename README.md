@@ -38,7 +38,7 @@ Start here:
 
 ## Implemented versus not implemented
 
-Implemented development capabilities include FHIR R4 client operations, local HAPI, sandbox SMART integrations, controlled Java projections, the Python internal APIs, bounded HAPI reads, deterministic follow-up review, durable single-instance operational review cases and a gated Gemini narrative flow.
+Implemented development capabilities include FHIR R4 client operations, local HAPI, sandbox SMART integrations, controlled Java projections, the Python internal APIs, bounded HAPI reads, deterministic follow-up review, durable single-instance operational review cases, a gated Gemini narrative flow, and one internal follow-up coordination request after an explicit human POST.
 
 The repository does not establish production IAM/RBAC, tenancy, human assignment or verified reviewer identity, clinical decision support, autonomous treatment, multi-replica review persistence, production deployment, regulatory certification, or production processing approval for real patient data.
 

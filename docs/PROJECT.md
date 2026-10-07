@@ -39,6 +39,7 @@ Currently implemented:
 - an authorized legacy/narrative LangGraph/Gemini subflow;
 - `INSTITUTIONAL_KNOWLEDGE_RETRIEVAL_V1`, a synthetic institutional-procedure index retrieved with Gemini embeddings;
 - `AI_ASSISTED_REVIEW_V1`, an on-demand explanation for an open review case. It does not store the model output and does not choose the human outcome.
+- `CONTROLLED_ACTION_V1`, one internal follow-up coordination request after a closed case whose outcome is follow-up coordination planned. Closing the case does not create it. Gemini does not authorize it.
 
 Healthcare AI does not have arbitrary FHIR access. Current follow-up reads are case-bound, GET-only, resource-constrained, bounded, completeness-aware and fail-closed. See [ADR-085](adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) and the [V1 contract](contracts/post-consultation-result-review-v1.md).
 
@@ -59,6 +60,7 @@ Optional composition does not merge their security perimeters or make every inte
 - The human review demo is presentation only. It does not authenticate a person, and the browser does not receive `X-Service-Token`. Generate AI assistance is a separate signed POST. It is not a login and it does not close the case.
 - `INSTITUTIONAL_KNOWLEDGE_RETRIEVAL_V1` retrieves repository-controlled synthetic procedures. It does not change protocol output, FHIR reads or review cases. Gemini embeddings support that retrieval.
 - `AI_ASSISTED_REVIEW_V1` may call Gemini once for an explanation after explicit generation. Observation values and patient identity stay out of that model input. Retrieval with no relevant guidance, or an unavailable index, does not call Gemini. The explanation is not stored.
+- `CONTROLLED_ACTION_V1` records one internal coordination request from the durable review case. It does not call Gemini, retrieval, or FHIR, and it does not authenticate a reviewer.
 - FHIR-derived data may reach Gemini only through explicitly authorized contracts. Institutional retrieval does not embed FHIR or patient data.
 - No current Clinical Follow-up Review path writes FHIR or executes an autonomous external action.
 

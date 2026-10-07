@@ -54,7 +54,13 @@ Open review case, explicit Generate AI assistance
         -> trusted citation projection on the same HTML page
 ```
 
-These flows do not require the Java process merely to obtain FHIR context when an authorized FHIR endpoint is configured. They do not authorize arbitrary FHIR access or writes. `MISSED_FOLLOW_UP_REVIEW_V1` does not call Gemini or LangGraph during protocol evaluation. Institutional retrieval uses Gemini embeddings only. AI-assisted review may then make one structured generation call. It does not use LangGraph. See [ADR-089](../adr/ADR-089-missed-follow-up-review.md), [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md) and [ADR-091](../adr/ADR-091-ai-assisted-review.md).
+```text
+Closed review case, outcome follow-up coordination planned, explicit Create coordination request
+        -> deterministic coordination policy
+        -> one durable internal coordination request
+```
+
+These flows do not require the Java process merely to obtain FHIR context when an authorized FHIR endpoint is configured. They do not authorize arbitrary FHIR access or writes. `MISSED_FOLLOW_UP_REVIEW_V1` does not call Gemini or LangGraph during protocol evaluation. Institutional retrieval uses Gemini embeddings only. AI-assisted review may then make one structured generation call. It does not use LangGraph. The coordination request does not call Gemini, retrieval, or FHIR. See [ADR-089](../adr/ADR-089-missed-follow-up-review.md), [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md), [ADR-091](../adr/ADR-091-ai-assisted-review.md) and [ADR-092](../adr/ADR-092-controlled-action.md).
 
 ## Authority boundaries
 
@@ -69,6 +75,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 - The synthetic review demo is server-rendered HTML inside Healthcare AI. It presents the existing review contracts and does not give the browser `X-Service-Token`. Close forms are signed with `HUMAN_REVIEW_FORM_SIGNING_SECRET`, not the service token. See [ADR-088](../adr/ADR-088-server-rendered-human-review-demo.md).
 - Institutional retrieval returns procedure text and provenance. It does not own protocol evaluation or review-case state. Query embedding and new-chunk embedding both depend on the embedding provider. See [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md).
 - AI-assisted review explains an open case on demand. FHIR facts, the deterministic protocol and the human outcome stay authoritative. Observation values and patient identity are not sent to Gemini. `NO_RELEVANT_GUIDANCE` and retrieval `UNAVAILABLE` do not call Gemini. Output is not stored. See [ADR-091](../adr/ADR-091-ai-assisted-review.md).
+- A closed review case with follow-up coordination planned can record one internal coordination request through a second explicit POST. That request is not a message, a FHIR write, or a scheduled appointment. Gemini and retrieval do not authorize it. See [ADR-092](../adr/ADR-092-controlled-action.md).
 
 ## Authoritative documents
 
@@ -77,6 +84,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 - [Missed follow-up review V1 contract](../contracts/missed-follow-up-review-v1.md)
 - [Institutional knowledge retrieval V1 contract](../contracts/institutional-knowledge-retrieval-v1.md)
 - [AI-assisted review V1 contract](../contracts/ai-assisted-review-v1.md)
+- [Controlled action V1 contract](../contracts/controlled-action-v1.md)
 - [Operational Follow-up Review Workflow V1 contract](../contracts/follow-up-review-workflow-v1.md)
 - [Healthcare Interoperability architecture](../fhir/fhir-architecture.md)
 - [Healthcare AI runbook](../../services/ai-service/README.md)
@@ -102,6 +110,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-089](../adr/ADR-089-missed-follow-up-review.md) | Accepted current decision for missed follow-up review on the shared review case. |
 | [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md) | Accepted current decision for synthetic institutional procedure retrieval. Not production RAG. |
 | [ADR-091](../adr/ADR-091-ai-assisted-review.md) | Accepted current decision for on-demand explanatory review assistance. Not production-ready and not clinically certified. |
+| [ADR-092](../adr/ADR-092-controlled-action.md) | Accepted current decision for one internal follow-up coordination request after an explicit human POST. Not external execution and not authenticated approval. |
 
 ## Historical governance artifacts
 

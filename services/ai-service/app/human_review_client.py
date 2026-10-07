@@ -47,6 +47,13 @@ from app.clinical_review_context_http import clinical_context_service
 from app.config import Settings
 from app.institutional_knowledge import UnavailableInstitutionalKnowledge
 from app.review_reason_explanations import REASON_EXPLANATIONS
+from app.followup_coordination_action import (
+    PERSISTABLE_PROTOCOL_IDS,
+    CoordinationActionDenied,
+    CoordinationActionType,
+    FollowUpCoordinationActionService,
+    FollowUpCoordinationRequest,
+)
 from app.followup_review import (
     FollowUpReviewCase,
     FollowUpReviewCaseEvent,
@@ -103,6 +110,10 @@ MSG_ORIGIN_INVALID = "This close form was not sent from this demo."
 MSG_ASSISTANCE_REQUEST_INVALID = "This AI assistance request was not valid."
 MSG_ASSISTANCE_TOKEN_INVALID = "This AI assistance request is no longer valid."
 MSG_ASSISTANCE_ORIGIN_INVALID = "This AI assistance request was not sent from this demo."
+MSG_ACTION_INVALID = "This coordination request was not valid."
+MSG_ACTION_TOKEN_INVALID = "This coordination request is no longer valid."
+MSG_ACTION_ORIGIN_INVALID = "This coordination request was not sent from this demo."
+MSG_ACTION_DENIED = "This coordination request cannot be created."
 MSG_NOT_CONFIGURED = "This demo is not configured."
 MSG_CHANGED = "This case changed. Review the current version before closing."
 MSG_CONTEXT_SCOPE = "Current clinical context is a current read. It does not re-run the original protocol."
@@ -228,6 +239,41 @@ def assistance_token_is_valid(
         return False
 
 
+def issue_controlled_action_token(
+    *,
+    secret: str,
+    review_case_id: str,
+    now: int | None = None,
+) -> tuple[str, int] | None:
+    """Sign a controlled-action request. The purpose is not a close or assistance signature."""
+    if not secret:
+        return None
+    issued_at = _now() if now is None else now
+    expiry = issued_at + FORM_TTL_SECONDS
+    return _sign_controlled_action(secret, review_case_id, expiry), expiry
+
+
+def controlled_action_token_is_valid(
+    *,
+    secret: str,
+    review_case_id: str,
+    expiry: int,
+    token: str,
+    now: int | None = None,
+) -> bool:
+    """Accept only a controlled-action signature for this case, action and expiry."""
+    if not secret or not token:
+        return False
+    current = _now() if now is None else now
+    if expiry > current + FORM_TTL_SECONDS or current >= expiry:
+        return False
+    expected = _sign_controlled_action(secret, review_case_id, expiry)
+    try:
+        return hmac.compare_digest(expected, token)
+    except TypeError:
+        return False
+
+
 def render_review_queue(request: Request, settings: Settings) -> Response:
     started = time.perf_counter()
     status = 200
@@ -279,11 +325,23 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
             message = MSG_NOT_FOUND if failure == 404 else MSG_REVIEW_UNAVAILABLE
             return _html(_page("Review case", _error(message) + _queue_home()), status)
         assert detail is not None
+        coordination, coordination_failure = _load_coordination_request(request, review_case_id)
+        if coordination_failure is not None:
+            status = coordination_failure
+            return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
         notice = MSG_CHANGED if request.query_params.get("notice") == "changed" else ""
         context, context_message = _load_context(request, detail.case)
         ticket = request.cookies.get(_HANDOFF_COOKIE)
         assistance = _ASSISTANCE_HANDOFF.take(ticket, review_case_id) if ticket else None
-        body = _case_body(detail, context, context_message, settings, notice, assistance=assistance)
+        body = _case_body(
+            detail,
+            context,
+            context_message,
+            settings,
+            notice,
+            assistance=assistance,
+            coordination=coordination,
+        )
         response = _html(_page("Review case", body))
         response.delete_cookie(_HANDOFF_COOKIE, path=_handoff_path(review_case_id))
         return response
@@ -442,6 +500,62 @@ def submit_ai_assistance(
         _log(request, "/review-cases/{reviewCaseId}/ai-assistance", status, started, review_case_id)
 
 
+def submit_controlled_action(
+    request: Request,
+    settings: Settings,
+    review_case_id: str,
+    raw_body: bytes,
+    content_type: str | None,
+) -> Response:
+    started = time.perf_counter()
+    status = 400
+    try:
+        try:
+            review_case_id = validate_review_case_id(review_case_id)
+        except ValueError:
+            status = 422
+            return _html(_page("Review case", _error(MSG_INVALID_LINK) + _queue_home()), status)
+        if not _same_origin(request):
+            return _html(_page("Review case", _error(MSG_ACTION_ORIGIN_INVALID) + _queue_home()), status)
+        fields = _controlled_action_form_fields(raw_body, content_type)
+        if fields is None:
+            return _html(_page("Review case", _error(MSG_ACTION_INVALID) + _queue_home()), status)
+        expiry = _expiry(fields.get("actionExpiry"))
+        token = fields.get("actionToken", "")
+        if expiry is None:
+            return _html(_page("Review case", _error(MSG_ACTION_INVALID) + _queue_home()), status)
+        if not settings.human_review_form_signing_secret:
+            return _html(_page("Review case", _error(MSG_NOT_CONFIGURED) + _queue_home()), status)
+        if not controlled_action_token_is_valid(
+            secret=settings.human_review_form_signing_secret,
+            review_case_id=review_case_id,
+            expiry=expiry,
+            token=token,
+        ):
+            return _html(_page("Review case", _error(MSG_ACTION_TOKEN_INVALID) + _queue_home()), status)
+        repository = _repository(request)
+        if repository is None:
+            status = 503
+            return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        try:
+            FollowUpCoordinationActionService(repository).ensure_follow_up_coordination_request(
+                review_case_id
+            )
+        except ReviewCaseNotFound:
+            status = 404
+            return _html(_page("Review case", _error(MSG_NOT_FOUND) + _queue_home()), status)
+        except CoordinationActionDenied:
+            status = 409
+            return _html(_page("Review case", _error(MSG_ACTION_DENIED) + _queue_home()), status)
+        except ReviewPersistenceUnavailable:
+            status = 503
+            return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        status = 303
+        return _redirect(review_case_id)
+    finally:
+        _log(request, "/review-cases/{reviewCaseId}/controlled-action", status, started, review_case_id)
+
+
 def render_observation_value(content: object) -> str:
     """Deterministic HTML for one bounded observation value. Input models only."""
     if isinstance(content, NotProjectedContent) or not hasattr(content, "kind"):
@@ -477,6 +591,12 @@ def _sign_assistance(secret: str, review_case_id: str, expiry: int) -> str:
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
+def _sign_controlled_action(secret: str, review_case_id: str, expiry: int) -> str:
+    action_type = CoordinationActionType.CREATE_FOLLOW_UP_COORDINATION_REQUEST.value
+    message = f"controlled-action|{review_case_id}|{action_type}|{expiry}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -497,6 +617,18 @@ def _assistance_provider(request: Request, settings: Settings):
         getattr(request.app.state, "ai_assistance_provider", None),
         settings,
     )
+
+
+def _load_coordination_request(
+    request: Request, review_case_id: str
+) -> tuple[FollowUpCoordinationRequest | None, int | None]:
+    repository = _repository(request)
+    if repository is None:
+        return None, 503
+    try:
+        return repository.get_follow_up_coordination_request(review_case_id), None
+    except ReviewPersistenceUnavailable:
+        return None, 503
 
 
 def _load_detail(request: Request, review_case_id: str) -> tuple[ReviewCaseDetail | None, int | None]:
@@ -545,6 +677,10 @@ def _form_fields(raw_body: bytes, content_type: str | None) -> dict[str, str] | 
 
 def _assistance_form_fields(raw_body: bytes, content_type: str | None) -> dict[str, str] | None:
     return _exact_fields(raw_body, content_type, {"assistanceExpiry", "assistanceToken"})
+
+
+def _controlled_action_form_fields(raw_body: bytes, content_type: str | None) -> dict[str, str] | None:
+    return _exact_fields(raw_body, content_type, {"actionExpiry", "actionToken"})
 
 
 def _exact_fields(
@@ -635,6 +771,7 @@ def _case_body(
     settings: Settings,
     notice: str,
     assistance: AssistanceResult | None,
+    coordination: FollowUpCoordinationRequest | None,
 ) -> str:
     case = detail.case
     parts = [_demo_banner(), _queue_home()]
@@ -646,7 +783,52 @@ def _case_body(
     parts.append(_history_section(detail.events))
     parts.append(_assistance_section(case, settings, assistance))
     parts.append(_outcome_section(case, settings))
+    parts.append(_controlled_action_section(case, settings, coordination))
     return "".join(parts)
+
+
+def _controlled_action_eligible(case: FollowUpReviewCase) -> bool:
+    return (
+        case.status is ReviewCaseStatus.CLOSED
+        and case.outcome is ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED
+        and case.protocol_id in PERSISTABLE_PROTOCOL_IDS
+    )
+
+
+def _controlled_action_section(
+    case: FollowUpReviewCase,
+    settings: Settings,
+    coordination: FollowUpCoordinationRequest | None,
+) -> str:
+    if coordination is not None:
+        return (
+            "<section><h2>Controlled action</h2>"
+            "<p>Coordination request created.</p>"
+            "<dl>"
+            f"<dt>Request identifier</dt><dd>{esc(coordination.id)}</dd>"
+            f"<dt>Status</dt><dd>{esc(coordination.status.value)}</dd>"
+            f"<dt>Created</dt><dd>{esc(coordination.created_at)}</dd>"
+            "</dl></section>"
+        )
+    if not _controlled_action_eligible(case):
+        return ""
+    issued = issue_controlled_action_token(
+        secret=settings.human_review_form_signing_secret,
+        review_case_id=case.id,
+    )
+    if issued is None:
+        return "<section><h2>Controlled action</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"
+    token, expiry = issued
+    action = "/review-cases/" + quote(case.id, safe="") + "/controlled-action"
+    return (
+        "<section><h2>Controlled action</h2>"
+        "<p>Create an internal follow-up coordination request.</p>"
+        f'<form method="post" action="{esc(action)}">'
+        f'<input type="hidden" name="actionExpiry" value="{esc(str(expiry))}">'
+        f'<input type="hidden" name="actionToken" value="{esc(token)}">'
+        '<button type="submit">Create coordination request</button>'
+        "</form></section>"
+    )
 
 
 def _assistance_section(

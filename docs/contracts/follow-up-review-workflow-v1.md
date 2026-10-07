@@ -170,4 +170,6 @@ Standard SQLite is not encrypted at rest. Real-clinical-data environments requir
 
 ## 14. Non-goals
 
+Closing a case records the operational outcome only. It does not create a follow-up coordination request. That later explicit POST is [CONTROLLED_ACTION_V1](controlled-action-v1.md).
+
 The contract does not provide clinical interpretation, urgency, diagnosis, treatment, FHIR writes, messaging, reviewer identity, assignment, claiming, reopen, escalation, frontend, multi-tenancy, production IAM/RBAC, multi-replica operation or durable security/LLM audit.
