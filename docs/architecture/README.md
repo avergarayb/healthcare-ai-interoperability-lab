@@ -85,6 +85,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 - [Institutional knowledge retrieval V1 contract](../contracts/institutional-knowledge-retrieval-v1.md)
 - [AI-assisted review V1 contract](../contracts/ai-assisted-review-v1.md)
 - [Controlled action V1 contract](../contracts/controlled-action-v1.md)
+- [Human identity V1 contract](../contracts/human-identity-v1.md) — accepted laboratory contract. The review demo requires a development session. Not production identity.
 - [Operational Follow-up Review Workflow V1 contract](../contracts/follow-up-review-workflow-v1.md)
 - [Healthcare Interoperability architecture](../fhir/fhir-architecture.md)
 - [Healthcare AI runbook](../../services/ai-service/README.md)
@@ -111,6 +112,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md) | Accepted current decision for synthetic institutional procedure retrieval. Not production RAG. |
 | [ADR-091](../adr/ADR-091-ai-assisted-review.md) | Accepted current decision for on-demand explanatory review assistance. Not production-ready and not clinically certified. |
 | [ADR-092](../adr/ADR-092-controlled-action.md) | Accepted current decision for one internal follow-up coordination request after an explicit human POST. Not external execution and not authenticated approval. |
+| [ADR-093](../adr/ADR-093-human-review-session.md) | Accepted current decision for a development-only human session. Not production identity, IAM, SSO or RBAC. |
 
 ## Historical governance artifacts
 

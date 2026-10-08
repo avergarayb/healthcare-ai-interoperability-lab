@@ -6,6 +6,7 @@ import inspect
 import json
 import logging
 import sqlite3
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -26,6 +27,9 @@ from app.ai_assisted_review import (
 )
 from app.clinical_review_context import ClinicalReviewContextResponse
 from app.config import Settings
+from app.human_development_auth import SESSION_COOKIE
+from app.human_session import HumanSessionService
+from app.human_session_sqlite import SQLiteHumanSessionRepository
 from app.followup_review import (
     FollowUpReviewCase,
     FollowUpReviewCaseService,
@@ -61,7 +65,9 @@ from app.post_consultation_review import (
 from app.review_reason_explanations import REASON_EXPLANATIONS
 
 SIGNING_SECRET = "synthetic-form-signing-secret-b"
-ORIGIN = {"origin": "http://testserver"}
+DEV_SECRET = "development-secret-value-32chars-min"
+TOKEN_SESSION = "11111111-1111-4111-8111-111111111111"
+ORIGIN = {"origin": "http://127.0.0.1"}
 CASE = "SENTINEL-CASE"
 PATIENT = "SENTINEL-PATIENT"
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
@@ -203,6 +209,11 @@ def _settings(**overrides) -> Settings:
         ai_review_db_path="unused-by-explicit-test-repository.sqlite3",
         gemini_api_key="",
         gemini_model="gemini-flash-latest",
+        human_session_db_path="unused-human-session-overridden-by-state.sqlite3",
+        human_review_development_auth_enabled=True,
+        human_review_development_auth_secret=DEV_SECRET,
+        human_review_development_principal_id="lab-reviewer",
+        human_review_development_principal_display_name="Lab reviewer",
     )
     values.update(overrides)
     return Settings(**values)
@@ -342,6 +353,8 @@ def _clean_state():
         "clinical_context_fhir_client",
         "institutional_knowledge",
         "ai_assistance_provider",
+        "human_session_repository",
+        "human_session_clock",
     ):
         if hasattr(app.state, name):
             delattr(app.state, name)
@@ -352,9 +365,38 @@ def _clean_state():
         "clinical_context_fhir_client",
         "institutional_knowledge",
         "ai_assistance_provider",
+        "human_session_repository",
+        "human_session_clock",
     ):
         if hasattr(app.state, name):
             delattr(app.state, name)
+
+
+def _prepare_session(repository) -> None:
+    path = getattr(repository, "database_path", None)
+    directory = Path(path).parent if path is not None else Path(tempfile.mkdtemp(prefix="review-session-"))
+    store = SQLiteHumanSessionRepository(directory / "human-session.sqlite3")
+    store.initialize()
+    app.state.human_session_repository = store
+
+
+def _login(client: TestClient) -> None:
+    response = client.post(
+        "/review-login",
+        content=urlencode({"developmentSecret": DEV_SECRET}),
+        headers={**ORIGIN, "content-type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303, response.text
+
+
+def _session_id(client: TestClient) -> str:
+    token = client.cookies.get(SESSION_COOKIE)
+    assert token
+    return HumanSessionService(
+        app.state.human_session_repository,
+        clock=lambda: datetime.now(timezone.utc),
+    ).resolve(token).session_id
 
 
 def _client(repository, fhir=None, knowledge=None, provider=None, settings=None):
@@ -365,8 +407,11 @@ def _client(repository, fhir=None, knowledge=None, provider=None, settings=None)
         app.state.institutional_knowledge = knowledge
     if provider is not None:
         app.state.ai_assistance_provider = provider
+    _prepare_session(repository)
     app.dependency_overrides[get_settings] = lambda: settings or _settings()
-    return TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
+    _login(client)
+    return client
 
 
 def _assistance_fields(html: str) -> dict[str, str]:
@@ -642,11 +687,13 @@ def test_tokens_are_purpose_separated():
         secret=SIGNING_SECRET,
         review_case_id=review_case_id,
         expected_version=1,
+        session_id=TOKEN_SESSION,
         now=1_000,
     )
     assistance_token, assistance_expiry = issue_assistance_token(
         secret=SIGNING_SECRET,
         review_case_id=review_case_id,
+        session_id=TOKEN_SESSION,
         now=1_000,
     )
     assert expiry == assistance_expiry
@@ -657,6 +704,7 @@ def test_tokens_are_purpose_separated():
         review_case_id=review_case_id,
         expiry=expiry,
         token=assistance_token,
+        session_id=TOKEN_SESSION,
         now=expiry - 1,
     )
     assert not assistance_token_is_valid(
@@ -664,6 +712,7 @@ def test_tokens_are_purpose_separated():
         review_case_id=review_case_id,
         expiry=expiry,
         token=assistance_token,
+        session_id=TOKEN_SESSION,
         now=expiry,
     )
     assert not assistance_token_is_valid(
@@ -671,6 +720,7 @@ def test_tokens_are_purpose_separated():
         review_case_id=other_case_id,
         expiry=expiry,
         token=assistance_token,
+        session_id=TOKEN_SESSION,
         now=1_000,
     )
     assert expiry == 1_000 + FORM_TTL_SECONDS
@@ -679,6 +729,7 @@ def test_tokens_are_purpose_separated():
         review_case_id=review_case_id,
         expiry=expiry,
         token=close_token,
+        session_id=TOKEN_SESSION,
         now=1_000,
     )
     assert not form_token_is_valid(
@@ -687,6 +738,7 @@ def test_tokens_are_purpose_separated():
         expected_version=1,
         expiry=expiry,
         token=assistance_token,
+        session_id=TOKEN_SESSION,
         now=1_000,
     )
 
@@ -1195,12 +1247,14 @@ def test_failures_leave_close_available(tmp_path):
     assert FollowUpReviewCaseService(repository).get(case.id).status is ReviewCaseStatus.OPEN
     unavailable = FakeKnowledge(status="UNAVAILABLE")
     client_unavailable = _client(repository, fhir, unavailable, provider)
-    again = _post_assistance(client_unavailable, case.id, page.text)
+    unavailable_page = client_unavailable.get(f"/review-cases/{case.id}")
+    again = _post_assistance(client_unavailable, case.id, unavailable_page.text)
     assert "Institutional guidance is temporarily unavailable." in again.text
     assert provider.calls == []
     invalid = FakeProvider(text="not-json")
     client_invalid = _client(repository, fhir, FakeKnowledge(chunks=(_chunk(),)), invalid)
-    rejected = _post_assistance(client_invalid, case.id, page.text)
+    invalid_page = client_invalid.get(f"/review-cases/{case.id}")
+    rejected = _post_assistance(client_invalid, case.id, invalid_page.text)
     assert "AI assistance could not be shown." in rejected.text
     assert FollowUpReviewCaseService(repository).get(case.id).version == case.version
 
@@ -1217,7 +1271,9 @@ def test_closed_post_and_missing_secret_do_not_call_providers(tmp_path):
     assert "Generate AI assistance" not in closed_page.text
     assert "Not generated." in closed_page.text
     assert fhir.calls == []
-    token, expiry = issue_assistance_token(secret=SIGNING_SECRET, review_case_id=case.id)
+    token, expiry = issue_assistance_token(
+        secret=SIGNING_SECRET, review_case_id=case.id, session_id=_session_id(client)
+    )
     posted = client.post(
         f"/review-cases/{case.id}/ai-assistance",
         content=urlencode({"assistanceExpiry": expiry, "assistanceToken": token}),

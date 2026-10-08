@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -23,6 +24,9 @@ from app.clinical_review_context import (
     StringContent,
 )
 from app.config import Settings
+from app.human_development_auth import SESSION_COOKIE
+from app.human_session import HumanSessionService
+from app.human_session_sqlite import SQLiteHumanSessionRepository
 from app.followup_review import (
     FollowUpReviewCaseService,
     ReviewCaseConflict,
@@ -63,9 +67,11 @@ from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 
 SERVICE_TOKEN = "synthetic-service-token-a"
 SIGNING_SECRET = "synthetic-form-signing-secret-b"
+DEV_SECRET = "development-secret-value-32chars-min"
+TOKEN_SESSION = "11111111-1111-4111-8111-111111111111"
 CASE = "SYN-FOLLOWUP-008"
 PATIENT = "SYN-PATIENT-008"
-ORIGIN = {"origin": "http://testserver"}
+ORIGIN = {"origin": "http://127.0.0.1"}
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
 
 
@@ -90,6 +96,11 @@ def _settings() -> Settings:
         port=8090,
         followup_agent_enabled=True,
         ai_review_db_path="unused-by-explicit-test-repository.sqlite3",
+        human_session_db_path="unused-human-session-overridden-by-state.sqlite3",
+        human_review_development_auth_enabled=True,
+        human_review_development_auth_secret=DEV_SECRET,
+        human_review_development_principal_id="lab-reviewer",
+        human_review_development_principal_display_name="Lab reviewer",
     )
 
 
@@ -187,22 +198,64 @@ def _appointment(status: str, start: str, appointment_id: str = "appointment-008
 @pytest.fixture(autouse=True)
 def _clean_state():
     app.dependency_overrides.clear()
-    for name in ("followup_review_repository", "clinical_context_fhir_client"):
+    for name in (
+        "followup_review_repository",
+        "clinical_context_fhir_client",
+        "human_session_repository",
+        "human_session_clock",
+    ):
         if hasattr(app.state, name):
             delattr(app.state, name)
     yield
     app.dependency_overrides.clear()
-    for name in ("followup_review_repository", "clinical_context_fhir_client"):
+    for name in (
+        "followup_review_repository",
+        "clinical_context_fhir_client",
+        "human_session_repository",
+        "human_session_clock",
+    ):
         if hasattr(app.state, name):
             delattr(app.state, name)
+
+
+def _prepare_session(repository) -> None:
+    path = getattr(repository, "database_path", None)
+    if path is None:
+        path = getattr(getattr(repository, "inner", None), "database_path", None)
+    directory = Path(path).parent if path is not None else Path(tempfile.mkdtemp(prefix="review-session-"))
+    store = SQLiteHumanSessionRepository(directory / "human-session.sqlite3")
+    store.initialize()
+    app.state.human_session_repository = store
+
+
+def _login(client: TestClient) -> None:
+    response = client.post(
+        "/review-login",
+        content=urlencode({"developmentSecret": DEV_SECRET}),
+        headers={**ORIGIN, "content-type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303, response.text
+
+
+def _session_id(client: TestClient) -> str:
+    token = client.cookies.get(SESSION_COOKIE)
+    assert token
+    return HumanSessionService(
+        app.state.human_session_repository,
+        clock=lambda: datetime.now(timezone.utc),
+    ).resolve(token).session_id
 
 
 def _client(repository, fhir: ScriptedFhir | None = None) -> TestClient:
     app.state.followup_review_repository = repository
     if fhir is not None:
         app.state.clinical_context_fhir_client = lambda: fhir
+    _prepare_session(repository)
     app.dependency_overrides[get_settings] = _settings
-    return TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
+    _login(client)
+    return client
 
 
 def _fields(html: str) -> dict[str, str]:
@@ -405,10 +458,9 @@ def test_context_unavailable_keeps_the_close_form(tmp_path):
     def fail():
         raise ReadClientError("secret-fhir-failure")
 
-    app.state.followup_review_repository = repository
+    client = _client(repository)
     app.state.clinical_context_fhir_client = fail
-    app.dependency_overrides[get_settings] = _settings
-    response = TestClient(app).get(f"/review-cases/{case.id}")
+    response = client.get(f"/review-cases/{case.id}")
     assert MSG_CONTEXT_UNAVAILABLE in response.text
     assert "Close review" in response.text
     assert "secret-fhir-failure" not in response.text
@@ -454,7 +506,13 @@ def test_same_outcome_close_does_not_append_another_event(tmp_path):
     page = client.get(f"/review-cases/{case.id}")
     _post_close(client, case.id, page.text, "review_completed_no_operational_action")
     stored = repository.get(case.id)
-    issued = issue_form_token(secret=SIGNING_SECRET, review_case_id=case.id, expected_version=stored.version, now=1_000)
+    issued = issue_form_token(
+        secret=SIGNING_SECRET,
+        review_case_id=case.id,
+        expected_version=stored.version,
+        session_id=_session_id(client),
+        now=1_000,
+    )
     assert issued is not None
     token, expiry = issued
     app.dependency_overrides[get_settings] = _settings
@@ -541,6 +599,7 @@ def test_conflict_then_closed_and_conflict_then_open(tmp_path):
         expected_version=2,
         expiry=int(refreshed_fields["formExpiry"]),
         token=refreshed_fields["formToken"],
+        session_id=_session_id(client),
     )
     assert not form_token_is_valid(
         secret=SIGNING_SECRET,
@@ -548,6 +607,7 @@ def test_conflict_then_closed_and_conflict_then_open(tmp_path):
         expected_version=1,
         expiry=int(refreshed_fields["formExpiry"]),
         token=refreshed_fields["formToken"],
+        session_id=_session_id(client),
     )
 
     class Guard:
@@ -626,16 +686,19 @@ def test_wrong_case_and_wrong_version_tokens_do_not_close(tmp_path):
     client = _client(repository, ScriptedFhir())
     page = client.get(f"/review-cases/{case.id}")
     fields = _fields(page.text)
+    session_id = _session_id(client)
     other_token = issue_form_token(
         secret=SIGNING_SECRET,
         review_case_id=other.id,
         expected_version=1,
+        session_id=session_id,
         now=int(fields["formExpiry"]) - FORM_TTL_SECONDS,
     )
     version_token = issue_form_token(
         secret=SIGNING_SECRET,
         review_case_id=case.id,
         expected_version=9,
+        session_id=session_id,
         now=int(fields["formExpiry"]) - FORM_TTL_SECONDS,
     )
     assert other_token is not None and version_token is not None
@@ -661,14 +724,17 @@ def test_wrong_case_and_wrong_version_tokens_do_not_close(tmp_path):
 def test_signing_secret_is_separate_from_the_service_token(tmp_path):
     repository = _repository(tmp_path)
     case = _create(repository)
-    response = _client(repository, ScriptedFhir()).get(f"/review-cases/{case.id}")
+    client = _client(repository, ScriptedFhir())
+    response = client.get(f"/review-cases/{case.id}")
     fields = _fields(response.text)
+    session_id = _session_id(client)
     assert form_token_is_valid(
         secret=SIGNING_SECRET,
         review_case_id=case.id,
         expected_version=int(fields["expectedVersion"]),
         expiry=int(fields["formExpiry"]),
         token=fields["formToken"],
+        session_id=session_id,
     )
     assert not form_token_is_valid(
         secret=SERVICE_TOKEN,
@@ -676,6 +742,7 @@ def test_signing_secret_is_separate_from_the_service_token(tmp_path):
         expected_version=int(fields["expectedVersion"]),
         expiry=int(fields["formExpiry"]),
         token=fields["formToken"],
+        session_id=session_id,
     )
     assert SIGNING_SECRET not in response.text
     assert SERVICE_TOKEN not in response.text
@@ -701,16 +768,29 @@ def test_blank_signing_secret_does_not_fall_back_to_the_service_token(tmp_path, 
             followup_agent_enabled=True,
             ai_review_db_path=configured.ai_review_db_path,
             human_review_form_signing_secret="",
+            human_session_db_path=configured.human_session_db_path,
+            human_review_development_auth_enabled=True,
+            human_review_development_auth_secret=configured.human_review_development_auth_secret,
+            human_review_development_principal_id=configured.human_review_development_principal_id,
+            human_review_development_principal_display_name=configured.human_review_development_principal_display_name,
         )
 
     app.state.followup_review_repository = repository
     app.state.clinical_context_fhir_client = lambda: ScriptedFhir()
+    _prepare_session(repository)
     app.dependency_overrides[get_settings] = settings
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
+    _login(client)
     page = client.get(f"/review-cases/{case.id}")
     assert MSG_NOT_CONFIGURED in page.text
     assert 'name="formToken"' not in page.text
-    issued = issue_form_token(secret=SERVICE_TOKEN, review_case_id=case.id, expected_version=1, now=1_000)
+    issued = issue_form_token(
+        secret=SERVICE_TOKEN,
+        review_case_id=case.id,
+        expected_version=1,
+        session_id=TOKEN_SESSION,
+        now=1_000,
+    )
     assert issued is not None
     monkeypatch.setattr("app.human_review_client._now", lambda: 1_000)
     response = client.post(
@@ -839,7 +919,13 @@ def test_nested_projected_strings_are_escaped(tmp_path):
 
 
 def test_expired_token_is_rejected():
-    issued = issue_form_token(secret=SIGNING_SECRET, review_case_id="00000000-0000-4000-8000-000000000000", expected_version=1, now=1_000)
+    issued = issue_form_token(
+        secret=SIGNING_SECRET,
+        review_case_id="00000000-0000-4000-8000-000000000000",
+        expected_version=1,
+        session_id=TOKEN_SESSION,
+        now=1_000,
+    )
     assert issued is not None
     token, expiry = issued
     assert form_token_is_valid(
@@ -848,6 +934,7 @@ def test_expired_token_is_rejected():
         expected_version=1,
         expiry=expiry,
         token=token,
+        session_id=TOKEN_SESSION,
         now=1_000,
     )
     assert not form_token_is_valid(
@@ -856,6 +943,7 @@ def test_expired_token_is_rejected():
         expected_version=1,
         expiry=expiry,
         token=token,
+        session_id=TOKEN_SESSION,
         now=expiry,
     )
 

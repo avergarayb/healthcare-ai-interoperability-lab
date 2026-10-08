@@ -6,6 +6,7 @@ import math
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlencode
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,6 +34,7 @@ from app.institutional_knowledge import (
 from app.institutional_knowledge_sqlite import (
     SQLiteInstitutionalKnowledgeIndex,
 )
+from app.human_session_sqlite import SQLiteHumanSessionRepository
 from app.main import app, get_settings
 from app.post_consultation_review import evaluate_post_consultation_review
 from app.missed_follow_up_review import evaluate_missed_follow_up
@@ -707,6 +709,13 @@ def test_failed_knowledge_startup_does_not_block_review_startup(tmp_path, settin
         tmp_path,
         institutional_knowledge_db_path=str(tmp_path / "knowledge.sqlite3"),
         followup_agent_enabled=False,
+        ai_review_db_path=str(tmp_path / "review.sqlite3"),
+        human_session_db_path=str(tmp_path / "human-session.sqlite3"),
+        human_review_form_signing_secret="synthetic-form-signing-secret-b",
+        human_review_development_auth_enabled=True,
+        human_review_development_auth_secret="development-secret-value-32chars-min",
+        human_review_development_principal_id="lab-reviewer",
+        human_review_development_principal_display_name="Lab reviewer",
     )
     attach_institutional_knowledge(application, configured, corpus_root=tmp_path / "missing-corpus")
     result = application.state.institutional_knowledge.retrieve(_request())
@@ -717,9 +726,12 @@ def test_failed_knowledge_startup_does_not_block_review_startup(tmp_path, settin
         assert connection.execute("SELECT COUNT(*) FROM follow_up_review_cases").fetchone()[0] == 0
     finally:
         connection.close()
+    session_store = SQLiteHumanSessionRepository(tmp_path / "human-session.sqlite3")
+    session_store.initialize()
     app.dependency_overrides[get_settings] = lambda: configured
     app.state.institutional_knowledge = application.state.institutional_knowledge
     app.state.followup_review_repository = review
+    app.state.human_session_repository = session_store
     try:
         response = TestClient(app).post(
             "/internal/agent/follow-up",
@@ -728,7 +740,15 @@ def test_failed_knowledge_startup_does_not_block_review_startup(tmp_path, settin
         )
         assert response.status_code == 503
         assert response.json()["detail"] == "Follow-up agent is disabled"
-        page = TestClient(app).get("/review-cases")
+        client = TestClient(app, base_url="http://127.0.0.1")
+        signed_in = client.post(
+            "/review-login",
+            content=urlencode({"developmentSecret": "development-secret-value-32chars-min"}),
+            headers={"origin": "http://127.0.0.1", "content-type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+        assert signed_in.status_code == 303
+        page = client.get("/review-cases")
         assert page.status_code == 200
         assert "knowledge/retrieve" not in page.text
         assert "institutional" not in page.text.casefold()
@@ -736,6 +756,8 @@ def test_failed_knowledge_startup_does_not_block_review_startup(tmp_path, settin
         app.dependency_overrides.clear()
         if hasattr(app.state, "institutional_knowledge"):
             del app.state.institutional_knowledge
+        if hasattr(app.state, "human_session_repository"):
+            del app.state.human_session_repository
         if previous_repository is None:
             if hasattr(app.state, "followup_review_repository"):
                 del app.state.followup_review_repository

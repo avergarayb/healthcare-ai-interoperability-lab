@@ -18,6 +18,11 @@ from app.experimental_service import load_json_body, run_experimental_summary
 from app.followup_service import run_followup_http
 from app.missed_follow_up_service import run_missed_follow_up_http
 from app.clinical_review_context_http import get_clinical_review_context_http
+from app.human_development_auth import (
+    render_development_login,
+    submit_development_login,
+    submit_development_logout,
+)
 from app.human_review_client import (
     close_review_case,
     render_review_case,
@@ -76,6 +81,37 @@ def get_llm_provider(settings: Settings = Depends(get_settings)) -> LLMProvider 
     if not settings.gemini_api_key or not settings.gemini_model:
         return None
     return GeminiProvider(api_key=settings.gemini_api_key, model=settings.gemini_model)
+
+
+@app.get("/review-login")
+def review_login(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_development_login(request, settings)
+
+
+@app.post("/review-login")
+async def review_login_submit(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_development_login(
+        request,
+        settings,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
+
+
+@app.post("/review-logout")
+async def review_logout(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_development_logout(
+        request,
+        settings,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
 
 
 @app.get("/review-cases")

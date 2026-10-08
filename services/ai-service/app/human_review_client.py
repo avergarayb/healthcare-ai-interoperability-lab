@@ -22,6 +22,8 @@ from urllib.parse import parse_qsl, quote
 from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from app.human_development_auth import require_human_session
+
 from app.clinical_review_context import (
     ClinicalContextClosed,
     ClinicalContextUnavailable,
@@ -121,8 +123,8 @@ MSG_CLOSE_SCOPE = (
     "This records an operational review outcome. It is not a diagnosis or a treatment decision."
 )
 MSG_DEMO = (
-    "Controlled synthetic demo. This page is not a user login. "
-    "Anyone who can reach this demo can view synthetic review cases. "
+    "Controlled synthetic laboratory. These pages require a development session. "
+    "That session is not production identity, IAM, SSO, or role-based access. "
     "caseId is an operational identifier, not a patient identity."
 )
 MSG_PATIENT_HIDDEN = "Patient identity is not shown in this view."
@@ -172,6 +174,7 @@ def issue_form_token(
     secret: str,
     review_case_id: str,
     expected_version: int,
+    session_id: str,
     now: int | None = None,
 ) -> tuple[str, int] | None:
     """Sign the close parameters for a short window. Returns None without a server secret."""
@@ -179,7 +182,7 @@ def issue_form_token(
         return None
     issued_at = _now() if now is None else now
     expiry = issued_at + FORM_TTL_SECONDS
-    return _sign(secret, review_case_id, expected_version, expiry), expiry
+    return _sign(secret, review_case_id, expected_version, expiry, session_id), expiry
 
 
 def form_token_is_valid(
@@ -189,6 +192,7 @@ def form_token_is_valid(
     expected_version: int,
     expiry: int,
     token: str,
+    session_id: str,
     now: int | None = None,
 ) -> bool:
     """Check that this presentation layer issued the submitted case, version and expiry."""
@@ -197,7 +201,7 @@ def form_token_is_valid(
     current = _now() if now is None else now
     if expiry > current + FORM_TTL_SECONDS or current >= expiry:
         return False
-    expected = _sign(secret, review_case_id, expected_version, expiry)
+    expected = _sign(secret, review_case_id, expected_version, expiry, session_id)
     try:
         return hmac.compare_digest(expected, token)
     except TypeError:
@@ -208,6 +212,7 @@ def issue_assistance_token(
     *,
     secret: str,
     review_case_id: str,
+    session_id: str,
     now: int | None = None,
 ) -> tuple[str, int] | None:
     """Sign an AI-assistance request. The purpose is not a close-form signature."""
@@ -215,7 +220,7 @@ def issue_assistance_token(
         return None
     issued_at = _now() if now is None else now
     expiry = issued_at + FORM_TTL_SECONDS
-    return _sign_assistance(secret, review_case_id, expiry), expiry
+    return _sign_assistance(secret, review_case_id, expiry, session_id), expiry
 
 
 def assistance_token_is_valid(
@@ -224,6 +229,7 @@ def assistance_token_is_valid(
     review_case_id: str,
     expiry: int,
     token: str,
+    session_id: str,
     now: int | None = None,
 ) -> bool:
     """Accept only an AI-assistance signature for this case and expiry."""
@@ -232,7 +238,7 @@ def assistance_token_is_valid(
     current = _now() if now is None else now
     if expiry > current + FORM_TTL_SECONDS or current >= expiry:
         return False
-    expected = _sign_assistance(secret, review_case_id, expiry)
+    expected = _sign_assistance(secret, review_case_id, expiry, session_id)
     try:
         return hmac.compare_digest(expected, token)
     except TypeError:
@@ -243,6 +249,7 @@ def issue_controlled_action_token(
     *,
     secret: str,
     review_case_id: str,
+    session_id: str,
     now: int | None = None,
 ) -> tuple[str, int] | None:
     """Sign a controlled-action request. The purpose is not a close or assistance signature."""
@@ -250,7 +257,7 @@ def issue_controlled_action_token(
         return None
     issued_at = _now() if now is None else now
     expiry = issued_at + FORM_TTL_SECONDS
-    return _sign_controlled_action(secret, review_case_id, expiry), expiry
+    return _sign_controlled_action(secret, review_case_id, expiry, session_id), expiry
 
 
 def controlled_action_token_is_valid(
@@ -259,6 +266,7 @@ def controlled_action_token_is_valid(
     review_case_id: str,
     expiry: int,
     token: str,
+    session_id: str,
     now: int | None = None,
 ) -> bool:
     """Accept only a controlled-action signature for this case, action and expiry."""
@@ -267,7 +275,7 @@ def controlled_action_token_is_valid(
     current = _now() if now is None else now
     if expiry > current + FORM_TTL_SECONDS or current >= expiry:
         return False
-    expected = _sign_controlled_action(secret, review_case_id, expiry)
+    expected = _sign_controlled_action(secret, review_case_id, expiry, session_id)
     try:
         return hmac.compare_digest(expected, token)
     except TypeError:
@@ -278,6 +286,10 @@ def render_review_queue(request: Request, settings: Settings) -> Response:
     started = time.perf_counter()
     status = 200
     try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
         cursor = request.query_params.get("cursor")
         if len(request.query_params.getlist("cursor")) > 1:
             status = 422
@@ -314,6 +326,10 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
     started = time.perf_counter()
     status = 200
     try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
         try:
             review_case_id = validate_review_case_id(review_case_id)
         except ValueError:
@@ -341,6 +357,7 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
             notice,
             assistance=assistance,
             coordination=coordination,
+            session_id=session.session_id,
         )
         response = _html(_page("Review case", body))
         response.delete_cookie(_HANDOFF_COOKIE, path=_handoff_path(review_case_id))
@@ -359,6 +376,10 @@ def close_review_case(
     started = time.perf_counter()
     status = 400
     try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
         try:
             review_case_id = validate_review_case_id(review_case_id)
         except ValueError:
@@ -383,6 +404,7 @@ def close_review_case(
             expected_version=version,
             expiry=expiry,
             token=token,
+            session_id=session.session_id,
         ):
             return _html(_page("Review case", _error(MSG_FORM_INVALID) + _queue_home()), status)
         repository = _repository(request)
@@ -427,6 +449,10 @@ def submit_ai_assistance(
     started = time.perf_counter()
     status = 400
     try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
         try:
             review_case_id = validate_review_case_id(review_case_id)
         except ValueError:
@@ -448,6 +474,7 @@ def submit_ai_assistance(
             review_case_id=review_case_id,
             expiry=expiry,
             token=token,
+            session_id=session.session_id,
         ):
             return _html(_page("Review case", _error(MSG_ASSISTANCE_TOKEN_INVALID) + _queue_home()), status)
         detail, failure = _load_detail(request, review_case_id)
@@ -510,6 +537,10 @@ def submit_controlled_action(
     started = time.perf_counter()
     status = 400
     try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
         try:
             review_case_id = validate_review_case_id(review_case_id)
         except ValueError:
@@ -531,6 +562,7 @@ def submit_controlled_action(
             review_case_id=review_case_id,
             expiry=expiry,
             token=token,
+            session_id=session.session_id,
         ):
             return _html(_page("Review case", _error(MSG_ACTION_TOKEN_INVALID) + _queue_home()), status)
         repository = _repository(request)
@@ -581,19 +613,19 @@ def render_observation_value(content: object) -> str:
     return _p(MSG_VALUE_HIDDEN)
 
 
-def _sign(secret: str, review_case_id: str, expected_version: int, expiry: int) -> str:
-    message = f"{review_case_id}|{expected_version}|{expiry}".encode("utf-8")
+def _sign(secret: str, review_case_id: str, expected_version: int, expiry: int, session_id: str) -> str:
+    message = f"{review_case_id}|{expected_version}|{expiry}|{session_id}".encode("utf-8")
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
-def _sign_assistance(secret: str, review_case_id: str, expiry: int) -> str:
-    message = f"ai-assistance|{review_case_id}|{expiry}".encode("utf-8")
+def _sign_assistance(secret: str, review_case_id: str, expiry: int, session_id: str) -> str:
+    message = f"ai-assistance|{review_case_id}|{expiry}|{session_id}".encode("utf-8")
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
-def _sign_controlled_action(secret: str, review_case_id: str, expiry: int) -> str:
+def _sign_controlled_action(secret: str, review_case_id: str, expiry: int, session_id: str) -> str:
     action_type = CoordinationActionType.CREATE_FOLLOW_UP_COORDINATION_REQUEST.value
-    message = f"controlled-action|{review_case_id}|{action_type}|{expiry}".encode("utf-8")
+    message = f"controlled-action|{review_case_id}|{action_type}|{expiry}|{session_id}".encode("utf-8")
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
@@ -772,6 +804,7 @@ def _case_body(
     notice: str,
     assistance: AssistanceResult | None,
     coordination: FollowUpCoordinationRequest | None,
+    session_id: str,
 ) -> str:
     case = detail.case
     parts = [_demo_banner(), _queue_home()]
@@ -781,9 +814,9 @@ def _case_body(
     parts.append(_provenance_section(case))
     parts.append(_context_section(context, context_message))
     parts.append(_history_section(detail.events))
-    parts.append(_assistance_section(case, settings, assistance))
-    parts.append(_outcome_section(case, settings))
-    parts.append(_controlled_action_section(case, settings, coordination))
+    parts.append(_assistance_section(case, settings, assistance, session_id))
+    parts.append(_outcome_section(case, settings, session_id))
+    parts.append(_controlled_action_section(case, settings, coordination, session_id))
     return "".join(parts)
 
 
@@ -799,6 +832,7 @@ def _controlled_action_section(
     case: FollowUpReviewCase,
     settings: Settings,
     coordination: FollowUpCoordinationRequest | None,
+    session_id: str,
 ) -> str:
     if coordination is not None:
         return (
@@ -815,6 +849,7 @@ def _controlled_action_section(
     issued = issue_controlled_action_token(
         secret=settings.human_review_form_signing_secret,
         review_case_id=case.id,
+        session_id=session_id,
     )
     if issued is None:
         return "<section><h2>Controlled action</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"
@@ -835,12 +870,14 @@ def _assistance_section(
     case: FollowUpReviewCase,
     settings: Settings,
     assistance: AssistanceResult | None,
+    session_id: str,
 ) -> str:
     open_case = case.status is ReviewCaseStatus.OPEN
     token = (
         issue_assistance_token(
             secret=settings.human_review_form_signing_secret,
             review_case_id=case.id,
+            session_id=session_id,
         )
         if open_case
         else None
@@ -1078,7 +1115,7 @@ def _history_section(events: tuple[FollowUpReviewCaseEvent, ...]) -> str:
     )
 
 
-def _outcome_section(case: FollowUpReviewCase, settings: Settings) -> str:
+def _outcome_section(case: FollowUpReviewCase, settings: Settings, session_id: str) -> str:
     if case.status is not ReviewCaseStatus.OPEN:
         return (
             "<section><h2>Operational outcome</h2>"
@@ -1089,6 +1126,7 @@ def _outcome_section(case: FollowUpReviewCase, settings: Settings) -> str:
         secret=settings.human_review_form_signing_secret,
         review_case_id=case.id,
         expected_version=case.version,
+        session_id=session_id,
     )
     if issued is None:
         return "<section><h2>Operational outcome</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"

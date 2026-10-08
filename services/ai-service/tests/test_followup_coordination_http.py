@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import sqlite3
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -13,6 +14,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.human_development_auth import SESSION_COOKIE
+from app.human_session import HumanSessionService
+from app.human_session_sqlite import SQLiteHumanSessionRepository
 from app.followup_coordination_action import FollowUpCoordinationRequest
 from app.followup_review import FollowUpReviewCaseService, ReviewCaseStatus, ReviewOutcome
 from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
@@ -40,7 +44,9 @@ from app.post_consultation_review import (
 
 
 SIGNING_SECRET = "synthetic-form-signing-secret-b"
-ORIGIN = {"origin": "http://testserver"}
+DEV_SECRET = "development-secret-value-32chars-min"
+TOKEN_SESSION = "11111111-1111-4111-8111-111111111111"
+ORIGIN = {"origin": "http://127.0.0.1"}
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
 APP = Path(__file__).resolve().parents[1] / "app"
 
@@ -66,6 +72,11 @@ def _settings(*, secret: str = SIGNING_SECRET) -> Settings:
         port=8090,
         followup_agent_enabled=True,
         ai_review_db_path="unused-by-explicit-test-repository.sqlite3",
+        human_session_db_path="unused-human-session-overridden-by-state.sqlite3",
+        human_review_development_auth_enabled=True,
+        human_review_development_auth_secret=DEV_SECRET,
+        human_review_development_principal_id="lab-reviewer",
+        human_review_development_principal_display_name="Lab reviewer",
     )
 
 
@@ -106,10 +117,40 @@ def _close(repository, case, outcome=ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNE
     return repository.close(case.id, expected_version=1, outcome=outcome)
 
 
+def _prepare_session(repository) -> None:
+    path = getattr(repository, "database_path", None)
+    directory = Path(path).parent if path is not None else Path(tempfile.mkdtemp(prefix="review-session-"))
+    store = SQLiteHumanSessionRepository(directory / "human-session.sqlite3")
+    store.initialize()
+    app.state.human_session_repository = store
+
+
+def _login(client: TestClient) -> None:
+    response = client.post(
+        "/review-login",
+        content=urlencode({"developmentSecret": DEV_SECRET}),
+        headers={**ORIGIN, "content-type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303, response.text
+
+
+def _session_id(client: TestClient) -> str:
+    token = client.cookies.get(SESSION_COOKIE)
+    assert token
+    return HumanSessionService(
+        app.state.human_session_repository,
+        clock=lambda: datetime.now(timezone.utc),
+    ).resolve(token).session_id
+
+
 def _client(repository, *, secret: str = SIGNING_SECRET) -> TestClient:
     app.state.followup_review_repository = repository
+    _prepare_session(repository)
     app.dependency_overrides[get_settings] = lambda: _settings(secret=secret)
-    return TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
+    _login(client)
+    return client
 
 
 def _action_fields(html: str) -> dict[str, str]:
@@ -170,12 +211,22 @@ def _section(html: str) -> str:
 @pytest.fixture(autouse=True)
 def _clean_state():
     app.dependency_overrides.clear()
-    for name in ("followup_review_repository", "clinical_context_fhir_client"):
+    for name in (
+        "followup_review_repository",
+        "clinical_context_fhir_client",
+        "human_session_repository",
+        "human_session_clock",
+    ):
         if hasattr(app.state, name):
             delattr(app.state, name)
     yield
     app.dependency_overrides.clear()
-    for name in ("followup_review_repository", "clinical_context_fhir_client"):
+    for name in (
+        "followup_review_repository",
+        "clinical_context_fhir_client",
+        "human_session_repository",
+        "human_session_clock",
+    ):
         if hasattr(app.state, name):
             delattr(app.state, name)
 
@@ -305,12 +356,14 @@ def test_concurrent_posts_create_one_request(tmp_path):
     closed = _close(repository, _create(repository, case_id="SYN-FOLLOWUP-005"))
     client = _client(repository)
     fields = _action_fields(client.get(f"/review-cases/{closed.id}").text)
+    session_cookie = client.cookies.get(SESSION_COOKIE)
     workers = 8
     barrier = threading.Barrier(workers)
 
     def post(_index):
         barrier.wait(timeout=10)
-        local = _client(repository)
+        local = TestClient(app, base_url="http://127.0.0.1")
+        local.cookies.set(SESSION_COOKIE, session_cookie)
         return _post_action(local, closed.id, fields)
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -326,26 +379,34 @@ def test_cross_case_expired_close_and_assistance_tokens_are_rejected(tmp_path):
     other = "10000000-0000-4000-8000-000000000044"
     client = _client(repository)
     page_fields = _action_fields(client.get(f"/review-cases/{closed.id}").text)
-    foreign = issue_controlled_action_token(secret=SIGNING_SECRET, review_case_id=other)
-    expired = issue_controlled_action_token(secret=SIGNING_SECRET, review_case_id=closed.id, now=1)
+    session_id = _session_id(client)
+    foreign = issue_controlled_action_token(secret=SIGNING_SECRET, review_case_id=other, session_id=session_id)
+    expired = issue_controlled_action_token(
+        secret=SIGNING_SECRET, review_case_id=closed.id, session_id=session_id, now=1
+    )
     close = issue_form_token(
         secret=SIGNING_SECRET,
         review_case_id=closed.id,
         expected_version=2,
+        session_id=session_id,
     )
-    assistance = issue_assistance_token(secret=SIGNING_SECRET, review_case_id=closed.id)
+    assistance = issue_assistance_token(
+        secret=SIGNING_SECRET, review_case_id=closed.id, session_id=session_id
+    )
     assert foreign is not None and expired is not None and close is not None and assistance is not None
     assert not controlled_action_token_is_valid(
         secret=SIGNING_SECRET,
         review_case_id=closed.id,
         expiry=close[1],
         token=close[0],
+        session_id=session_id,
     )
     assert assistance_token_is_valid(
         secret=SIGNING_SECRET,
         review_case_id=closed.id,
         expiry=assistance[1],
         token=assistance[0],
+        session_id=session_id,
     )
     rejected = [
         {"actionExpiry": str(foreign[1]), "actionToken": foreign[0]},
@@ -438,11 +499,14 @@ def test_direct_post_against_ineligible_case_fails(tmp_path, case_id, protocol, 
     repository = _repository(tmp_path)
     created = _create(repository, case_id=case_id, protocol=protocol)
     case = created if outcome is None else _close(repository, created, outcome)
-    issued = issue_controlled_action_token(secret=SIGNING_SECRET, review_case_id=case.id)
+    client = _client(repository)
+    issued = issue_controlled_action_token(
+        secret=SIGNING_SECRET, review_case_id=case.id, session_id=_session_id(client)
+    )
     assert issued is not None
     before = _snapshot(repository.database_path, case.id)
     response = _post_action(
-        _client(repository),
+        client,
         case.id,
         {"actionExpiry": str(issued[1]), "actionToken": issued[0]},
     )
@@ -456,10 +520,13 @@ def test_direct_post_against_ineligible_case_fails(tmp_path, case_id, protocol, 
 def test_unknown_case_returns_not_found(tmp_path):
     repository = _repository(tmp_path)
     missing = "10000000-0000-4000-8000-000000000099"
-    issued = issue_controlled_action_token(secret=SIGNING_SECRET, review_case_id=missing)
+    client = _client(repository)
+    issued = issue_controlled_action_token(
+        secret=SIGNING_SECRET, review_case_id=missing, session_id=_session_id(client)
+    )
     assert issued is not None
     response = _post_action(
-        _client(repository),
+        client,
         missing,
         {"actionExpiry": str(issued[1]), "actionToken": issued[0]},
     )
