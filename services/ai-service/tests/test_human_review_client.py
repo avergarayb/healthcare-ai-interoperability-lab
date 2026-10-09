@@ -5,7 +5,7 @@ from __future__ import annotations
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,6 +27,7 @@ from app.config import Settings
 from app.human_development_auth import SESSION_COOKIE
 from app.human_session import HumanSessionService
 from app.human_session_sqlite import SQLiteHumanSessionRepository
+from app.followup_coordination_action import FollowUpCoordinationActionService
 from app.followup_review import (
     FollowUpReviewCaseService,
     ReviewCaseConflict,
@@ -53,6 +54,7 @@ from app.human_review_client import (
     form_token_is_valid,
     issue_form_token,
     render_observation_value,
+    _readable_utc,
 )
 from app.langgraph_fhir_client import BoundedSearchResult, BoundedSearchStatus, CASE_IDENTIFIER_SYSTEM, ReadClientError
 from app.main import app, get_settings
@@ -150,6 +152,7 @@ class ScriptedFhir:
             "valueString": "synthetic-result",
         }
         self.appointments = [_appointment("booked", "2099-01-01T00:00:00Z")]
+        self.exact_appointments: list[dict] = []
         self.patient_status = BoundedSearchStatus.COMPLETE
         self.appointment_status = BoundedSearchStatus.COMPLETE
         self.missing: set[str] = set()
@@ -157,10 +160,15 @@ class ScriptedFhir:
     def search(self, path: str, expected_resource_type: str):
         self.calls.append(("search", expected_resource_type, path))
         if expected_resource_type == "Patient":
+            case_id = CASE
+            if "identifier=" in path:
+                token = unquote(path.split("identifier=", 1)[1].split("&", 1)[0])
+                if "|" in token:
+                    case_id = token.split("|", 1)[1]
             patient = {
                 "resourceType": "Patient",
                 "id": PATIENT,
-                "identifier": [{"system": CASE_IDENTIFIER_SYSTEM, "value": CASE}],
+                "identifier": [{"system": CASE_IDENTIFIER_SYSTEM, "value": case_id}],
             }
             return BoundedSearchResult(self.patient_status, (patient,))
         return BoundedSearchResult(self.appointment_status, tuple(self.appointments))
@@ -176,7 +184,7 @@ class ScriptedFhir:
         if resource_type == "Observation":
             return dict(self.observation)
         if resource_type == "Appointment":
-            for item in self.appointments:
+            for item in (*self.exact_appointments, *self.appointments):
                 if item.get("id") == resource_id:
                     return dict(item)
             from app.langgraph_fhir_hapi import ExactResourceNotFound
@@ -294,8 +302,8 @@ def test_queue_lists_open_cases_and_hides_patient_identity(tmp_path):
     assert case.protocol_id in response.text
     assert ">open<" in response.text
     assert f'href="/review-cases/{case.id}"' in response.text
-    assert "Operational case id" in response.text
-    assert "not a patient identity" in response.text
+    assert "<th>Caso</th>" in response.text
+    assert "no es la identidad del paciente" in response.text
     assert PATIENT not in response.text
     assert SIGNING_SECRET not in response.text
     assert SIGNING_SECRET not in response.headers.values()
@@ -311,7 +319,7 @@ def test_queue_cursor_links_to_the_next_page(tmp_path):
     for index in range(26):
         _create(repository, case_id=f"SYN-FOLLOWUP-{index:03d}", suffix=f"{index:03d}")
     first = _client(repository).get("/review-cases")
-    assert "Older cases" in first.text
+    assert "Casos más antiguos" in first.text
     href = first.text.split('href="/review-cases?cursor=', 1)[1].split('"', 1)[0]
     second = _client(repository).get(f"/review-cases?cursor={href}")
     assert second.status_code == 200
@@ -338,23 +346,25 @@ def test_open_case_page_separates_sections_and_renders_context(tmp_path):
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     for heading in (
-        "Operational case",
-        "Why this case was created",
-        "Current clinical context",
-        "Review history",
-        "Operational outcome",
+        "Resumen del caso",
+        "Por qué está en revisión",
+        "Contexto clínico actual",
+        "Historial operativo",
+        "Resultado operativo",
     ):
         assert f"<h2>{heading}</h2>" in response.text
-    assert "does not re-run the original protocol" in response.text
-    assert "A post-consultation result was selected for operational review." in response.text
-    assert "Technical provenance" in response.text
-    assert "Encounter/encounter-008" in response.text
+    assert "No vuelve a ejecutar la regla que creó el caso." in response.text
+    assert "Quedó registrado un resultado posterior a la consulta" in response.text
+    visible, technical = response.text.split("<details>", 1)
+    assert "Technical provenance" not in response.text
+    assert "Encounter/encounter-008" not in visible
+    assert "Encounter/encounter-008" in technical
     assert "&lt;b&gt;unsafe&lt;/b&gt;" in response.text
     assert "<b>unsafe</b>" not in response.text
-    assert "finished" in response.text
-    assert "Upcoming, confirmed" in response.text
-    assert "Follow-up coordination planned" in response.text
-    assert "not a diagnosis" in response.text
+    assert "finished" in visible
+    assert "Próxima y confirmada" in response.text
+    assert 'value="follow_up_coordination_planned"' in response.text
+    assert "No es un diagnóstico" in response.text
     assert PATIENT not in response.text
     assert "resourceType" not in response.text
     assert SIGNING_SECRET not in response.text
@@ -388,17 +398,17 @@ def test_missing_resources_hidden_values_and_no_appointments(tmp_path):
     fhir = ScriptedFhir()
     fhir.appointments = []
     none = _client(repository, fhir).get(f"/review-cases/{case.id}")
-    assert "No appointments were returned." in none.text
+    assert "No se obtuvo ninguna cita." in none.text
 
 
 @pytest.mark.parametrize(
     ("status", "start", "label"),
     [
-        ("booked", "2099-01-01T00:00:00Z", "Upcoming, confirmed"),
-        ("proposed", "2099-01-01T00:00:00Z", "Upcoming, not confirmed"),
-        ("cancelled", "2099-01-01T00:00:00Z", "Cancelled"),
-        ("fulfilled", "2020-01-01T00:00:00Z", "Past"),
-        ("noshow", "2099-01-01T00:00:00Z", "Other appointment status"),
+        ("booked", "2099-01-01T00:00:00Z", "Próxima y confirmada"),
+        ("proposed", "2099-01-01T00:00:00Z", "Próxima y no confirmada"),
+        ("cancelled", "2099-01-01T00:00:00Z", "Cancelada"),
+        ("fulfilled", "2020-01-01T00:00:00Z", "Pasada"),
+        ("noshow", "2099-01-01T00:00:00Z", "Estado operativo de la cita no clasificado"),
     ],
 )
 def test_appointment_classifications_stay_operational(tmp_path, status, start, label):
@@ -408,7 +418,16 @@ def test_appointment_classifications_stay_operational(tmp_path, status, start, l
     fhir.appointments = [_appointment(status, start)]
     response = _client(repository, fhir).get(f"/review-cases/{case.id}")
     assert label in response.text
-    assert "clinically" not in response.text.lower()
+    assert "Other appointment status" not in response.text
+    assert "Cita que originó el caso" not in response.text
+    lowered = response.text.lower()
+    for banned in ("clinically", "clínicamente", "reschedul", "reprogram"):
+        assert banned not in lowered
+    if status == "noshow":
+        visible, technical = response.text.split("<details>", 1)
+        assert ">OTHER<" in technical
+        assert ">noshow<" in technical
+        assert ">OTHER<" not in visible
 
 
 @pytest.mark.parametrize(
@@ -462,9 +481,9 @@ def test_context_unavailable_keeps_the_close_form(tmp_path):
     app.state.clinical_context_fhir_client = fail
     response = client.get(f"/review-cases/{case.id}")
     assert MSG_CONTEXT_UNAVAILABLE in response.text
-    assert "Close review" in response.text
+    assert "Cerrar la revisión" in response.text
     assert "secret-fhir-failure" not in response.text
-    assert "Operational case" in response.text
+    assert "Resumen del caso" in response.text
 
 
 def test_invalid_and_missing_case(tmp_path):
@@ -488,12 +507,11 @@ def test_close_success_then_closed_page_and_queue(tmp_path):
     assert closed.status_code == 303
     assert SIGNING_SECRET not in closed.headers.values()
     detail = client.get(closed.headers["location"])
-    assert "This case is closed." in detail.text
-    assert "Follow-up coordination planned" in detail.text
+    assert detail.text.count("Coordinación interna planificada. Solicitud pendiente de registro.") == 1
     assert "closed" in detail.text
     assert 'name="outcome"' not in detail.text
     assert MSG_CONTEXT_UNAVAILABLE not in detail.text
-    assert "Current clinical context is not available for a closed case." in detail.text
+    assert "El contexto clínico actual no se muestra cuando el caso está cerrado." in detail.text
     queue = client.get("/review-cases")
     assert case.case_id not in queue.text
     assert repository.events(case.id)[-1].event_type.value == "closed"
@@ -576,7 +594,7 @@ def test_conflict_then_closed_and_conflict_then_open(tmp_path):
     assert conflict_closed.status_code == 303
     assert "notice" not in conflict_closed.headers["location"]
     closed_page = client.get(conflict_closed.headers["location"])
-    assert "This case is closed." in closed_page.text
+    assert "Coordinación interna planificada. Solicitud pendiente de registro." in closed_page.text
 
     repository = _repository(tmp_path, "open-review.sqlite3")
     case = _create(repository)
@@ -969,9 +987,8 @@ def test_direct_closed_case_has_history_without_a_form(tmp_path):
     repository.close(case.id, expected_version=1, outcome=ReviewOutcome.REVIEW_COMPLETED_NO_OPERATIONAL_ACTION)
     fhir = ScriptedFhir()
     response = _client(repository, fhir).get(f"/review-cases/{case.id}")
-    assert "This case is closed." in response.text
-    assert "Review completed, no operational action recorded" in response.text
-    assert "<th>Event</th>" in response.text
+    assert response.text.count("Revisión finalizada sin acción operativa registrada.") == 1
+    assert "<th>Evento</th>" in response.text
     assert 'name="outcome"' not in response.text
     assert fhir.calls == []
 
@@ -1001,21 +1018,21 @@ def test_queue_and_case_page_cover_missed_follow_up_without_encounter(tmp_path):
     client = _client(repository, fhir)
     queue = client.get("/review-cases")
     assert queue.status_code == 200
-    assert "Missed follow-up review" in queue.text
+    assert "Revisión de un seguimiento no realizado" in queue.text
     assert MISSED_FOLLOW_UP_REVIEW_V1 in queue.text
     assert POST_CONSULTATION_RESULT_REVIEW_V1 in queue.text
     assert SIGNING_SECRET not in queue.text
     assert SERVICE_TOKEN not in queue.text
     page = client.get(f"/review-cases/{missed.id}")
     assert page.status_code == 200
-    assert "Missed follow-up review" in page.text
-    assert "Follow-up appointment was not completed." in page.text
-    assert "No confirmed future follow-up was recorded at the time the case was created." in page.text
-    assert "Appointment/noshow-008" in page.text
+    assert "Revisión de un seguimiento no realizado" in page.text
+    assert "La cita de seguimiento no se completó" in page.text
+    assert "no había otra cita futura confirmada" in page.text
+    assert "Appointment/noshow-008" in page.text.split("<details>", 1)[1]
     assert "not rescheduled" not in page.text
     assert "<h3>Encounter</h3>" not in page.text
     assert "<h3>Observation</h3>" not in page.text
-    assert "Upcoming, confirmed" in page.text
+    assert "Próxima y confirmada" in page.text
     assert "<img" not in page.text
     assert "&lt;img src=x onerror=alert(1)&gt;" in page.text
     assert PATIENT not in page.text
@@ -1024,9 +1041,190 @@ def test_queue_and_case_page_cover_missed_follow_up_without_encounter(tmp_path):
     first_page = client.get(f"/review-cases/{first.id}")
     assert "<h3>Encounter</h3>" in first_page.text
     assert "<h3>Observation</h3>" in first_page.text
+    assert "Cita que originó el caso" not in first_page.text
     closed = _post_close(client, missed.id, page.text, "follow_up_coordination_planned")
     assert closed.status_code == 303
     stored = repository.get(missed.id)
     assert stored is not None
     assert stored.status is ReviewCaseStatus.CLOSED
     assert stored.outcome is ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED
+
+
+_PENDING = "Coordinación interna planificada. Solicitud pendiente de registro."
+_RECORDED = "Solicitud interna de coordinación registrada."
+_NO_ACTION = "Revisión finalizada sin acción operativa registrada."
+_NO_EXTERNAL = "Esto no envía un mensaje, no escribe FHIR y no agenda una cita."
+_RULE = "La regla operativa de revisión se cumplió. Esto no es un diagnóstico ni una recomendación clínica."
+
+
+def test_readable_utc_keeps_the_instant_and_invalid_text():
+    original = "2026-09-30T17:04:05.123456Z"
+    assert _readable_utc(original) == "30 de septiembre de 2026, 17:04:05 UTC"
+    assert "17:04:05" in _readable_utc(original)
+    for unchanged in ("2026-09-30T17:04:05Z", "not-a-date", "2026-13-30T00:00:00.000000Z"):
+        assert _readable_utc(unchanged) == unchanged
+
+
+def test_slice1_queue_detail_and_coordination_sentences(tmp_path):
+    repository = _repository(tmp_path)
+    post = _create(repository)
+    missed = FollowUpReviewCaseService(repository).ensure_for_protocol(
+        "SYN-FOLLOWUP-009",
+        ProtocolReviewResult(
+            id=MISSED_FOLLOW_UP_REVIEW_V1,
+            evaluation_status=ProtocolEvaluationStatus.MATCHED,
+            reason_codes=("missed_follow_up_without_confirmed_replacement",),
+            matched_resources=("Appointment/noshow-009",),
+            human_review_status="required",
+            human_review_reason="deterministic_missed_follow_up_protocol_match",
+            action_status="proposed",
+            action_type="review_follow_up_case",
+        ),
+    )
+    assert missed is not None
+    client = _client(repository, ScriptedFhir())
+    queue = client.get("/review-cases")
+    assert 'lang="es"' in queue.text
+    assert "Revisión de un resultado posterior a la consulta" in queue.text
+    assert POST_CONSULTATION_RESULT_REVIEW_V1 in queue.text
+    assert "Revisión de un seguimiento no realizado" in queue.text
+    assert MISSED_FOLLOW_UP_REVIEW_V1 in queue.text
+    assert _readable_utc(post.created_at) in queue.text
+    assert post.created_at in queue.text
+    assert "Demostración sintética de laboratorio" in queue.text
+    assert "no es una identidad clínica verificada" in queue.text
+
+    page = client.get(f"/review-cases/{post.id}")
+    visible, technical = page.text.split("<details>", 1)
+    assert technical.startswith("<summary>Detalles técnicos</summary>")
+    assert "<details open" not in page.text
+    assert _RULE in visible
+    assert _RULE not in technical
+    assert "matched" not in visible
+    assert ">matched<" in technical
+    assert "Encounter/encounter-008" not in visible
+    assert "Encounter/encounter-008" in technical
+    assert "Observation/observation-008" in technical
+    assert "<h2>Historial operativo</h2>" in visible
+    assert "<h2>Atribución de desarrollo</h2>" in visible
+    assert "<h2>Historial operativo</h2>" not in technical
+    assert "<h2>Atribución de desarrollo</h2>" not in technical
+    assert "Los identificadores mostrados son principales sintéticos de desarrollo" in visible
+    assert "Cierre del caso: aún no está cerrado." in visible
+    assert "AI-assisted review" in visible
+    assert page.text.count(_PENDING) == 1
+    assert page.text.count(_NO_ACTION) == 1
+    assert 'name="outcome" value="follow_up_coordination_planned"' in page.text
+    assert 'name="outcome" value="review_completed_no_operational_action"' in page.text
+    assert _readable_utc(post.created_at) in visible
+    assert post.created_at not in visible
+    assert post.created_at in technical
+    session_id = _session_id(client)
+    cookie = client.cookies.get(SESSION_COOKIE)
+    assert cookie is not None
+    for secret in (SIGNING_SECRET, SERVICE_TOKEN, DEV_SECRET, cookie, session_id):
+        assert secret not in page.text
+    login = client.get("/review-login")
+    assert "Sign in" in login.text
+    assert 'lang="en"' in login.text
+
+    repository.close(
+        post.id,
+        expected_version=1,
+        outcome=ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED,
+    )
+    planned = client.get(f"/review-cases/{post.id}")
+    assert planned.text.count(_PENDING) == 1
+    assert _RECORDED not in planned.text
+    assert "Cierre del caso: no se registró atribución de desarrollo." in planned.text
+    assert 'name="outcome"' not in planned.text
+
+    FollowUpCoordinationActionService(repository).ensure_follow_up_coordination_request(post.id)
+    requested = client.get(f"/review-cases/{post.id}")
+    assert requested.text.count(_RECORDED) == 1
+    assert "Solicitud pendiente de registro." not in requested.text
+    assert _NO_EXTERNAL in requested.text
+    assert "No se registró atribución de desarrollo para esta operación." in requested.text
+    stored = repository.get_follow_up_coordination_request(post.id)
+    assert stored is not None
+    requested_visible, requested_technical = requested.text.split("<details>", 1)
+    assert stored.id not in requested_visible
+    assert stored.id in requested_technical
+    assert ">requested<" in requested_technical
+
+    no_action_case = _create(repository, case_id="SYN-FOLLOWUP-010", suffix="010")
+    repository.close(
+        no_action_case.id,
+        expected_version=1,
+        outcome=ReviewOutcome.REVIEW_COMPLETED_NO_OPERATIONAL_ACTION,
+    )
+    no_action = client.get(f"/review-cases/{no_action_case.id}")
+    assert no_action.text.count(_NO_ACTION) == 1
+    assert _PENDING not in no_action.text
+    assert "Registrar solicitud de coordinación interna" not in no_action.text
+
+
+def _missed_case(repository, case_id: str, appointment_id: str):
+    case = FollowUpReviewCaseService(repository).ensure_for_protocol(
+        case_id,
+        ProtocolReviewResult(
+            id=MISSED_FOLLOW_UP_REVIEW_V1,
+            evaluation_status=ProtocolEvaluationStatus.MATCHED,
+            reason_codes=("missed_follow_up_without_confirmed_replacement",),
+            matched_resources=(f"Appointment/{appointment_id}",),
+            human_review_status="required",
+            human_review_reason="deterministic_missed_follow_up_protocol_match",
+            action_status="proposed",
+            action_type="review_follow_up_case",
+        ),
+    )
+    assert case is not None
+    return case
+
+
+def test_slice2_origin_appointment_is_shown_once_and_other_stays_technical(tmp_path):
+    repository = _repository(tmp_path)
+    post = _create(repository)
+    missed = _missed_case(repository, "SYN-FOLLOWUP-013", "noshow-013")
+    separate = _missed_case(repository, "SYN-FOLLOWUP-014", "noshow-014")
+    fhir = ScriptedFhir()
+    fhir.appointments = [
+        _appointment("noshow", "2026-01-01T00:00:00Z", "noshow-013"),
+        _appointment("booked", "2099-01-01T00:00:00Z", "appointment-013"),
+    ]
+    fhir.exact_appointments = [_appointment("noshow", "2026-02-01T00:00:00Z", "noshow-014")]
+    client = _client(repository, fhir)
+
+    page = client.get(f"/review-cases/{missed.id}")
+    visible, technical = page.text.split("<details>", 1)
+    origin, appointments = visible.split("<h3>Appointments</h3>", 1)
+    assert origin.count("<h3>Cita que originó el caso</h3>") == 1
+    assert origin.count("Appointment/noshow-013") == 1
+    assert "Appointment/noshow-013" not in appointments
+    assert "La cita que originó este caso está arriba." in appointments
+    assert appointments.count("Estado operativo de la cita no clasificado") == 1
+    assert "Próxima y confirmada" in appointments
+    assert "Other appointment status" not in page.text
+    assert "Recorded appointment" not in page.text
+    lowered = visible.lower()
+    for banned in ("clinically", "clínicamente", "reschedul", "reprogram"):
+        assert banned not in lowered
+    assert ">OTHER<" in technical
+    assert ">noshow<" in technical
+    assert ">OTHER<" not in visible
+    assert "<h3>Encounter</h3>" not in page.text
+    assert "<h3>Observation</h3>" not in page.text
+
+    post_page = client.get(f"/review-cases/{post.id}")
+    assert "<h3>Encounter</h3>" in post_page.text
+    assert "<h3>Observation</h3>" in post_page.text
+    assert "Cita que originó el caso" not in post_page.text
+    assert "La cita que originó este caso está arriba." not in post_page.text
+
+    alone = client.get(f"/review-cases/{separate.id}")
+    alone_visible = alone.text.split("<details>", 1)[0]
+    alone_origin, alone_list = alone_visible.split("<h3>Appointments</h3>", 1)
+    assert alone_origin.count("Appointment/noshow-014") == 1
+    assert "Appointment/noshow-014" not in alone_list
+    assert "La cita que originó este caso está arriba." not in alone.text
+    assert "<h3>Cita que originó el caso</h3>" in alone_origin

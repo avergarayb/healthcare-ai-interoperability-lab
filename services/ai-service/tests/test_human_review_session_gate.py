@@ -310,9 +310,9 @@ def test_authenticated_queue_and_detail_render(tmp_path):
     assert queue.status_code == detail.status_code == 200
     assert queue.headers["cache-control"] == detail.headers["cache-control"] == "no-store"
     assert case.case_id in queue.text
-    assert "Close review" in detail.text
-    assert "These pages require a development session." in queue.text
-    assert "not production identity" in detail.text
+    assert "Cerrar la revisión" in detail.text
+    assert "Estas páginas exigen una sesión de desarrollo." in queue.text
+    assert "no es una identidad clínica verificada" in detail.text
     assert "Anyone who can reach this demo" not in queue.text
     assert "This page is not a user login." not in detail.text
     assert assisted.DEV_SECRET not in detail.text

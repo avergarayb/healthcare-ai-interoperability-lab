@@ -37,6 +37,8 @@ V1 is authentication and session lifetime. A valid session is not clinician auth
 
 Each HMAC message covers the session id, so a form issued to one session fails under another. Manual validation and deterministic regression passed for this development session. Production identity, attribution and security audit remain deferred.
 
+Later, [HUMAN_ATTRIBUTION_V1](../contracts/human-attribution-v1.md) and [ADR-094](ADR-094-human-attribution.md) accepted laboratory attribution for specific human operations. HUMAN_IDENTITY_V1 did not implement that attribution. A development session is still not verified clinical identity, a valid session is still not clinician authorization, and laboratory attribution is not a security audit. Security audit remains deferred.
+
 ## Consequences
 
 Local demonstration of the review pages requires the development guard and a session. The authenticator stays off unless the accepted socket is loopback, so `--host 0.0.0.0` does not expose login. `/health` and `/internal/*` stay as they are. Gemini, retrieval, FHIR reads and protocol evaluation are unchanged. The session file is unencrypted SQLite for one process. A reverse proxy in front of loopback is not a covered deployment. This is not a production network boundary, enterprise IAM or institutional SSO.

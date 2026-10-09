@@ -182,8 +182,8 @@ def test_http_close_records_the_server_session_principal(tmp_path):
     _login(client)
     session = _session(client)
     page = client.get(f"/review-cases/{case.id}")
-    assert "Case closure: not closed." in page.text
-    assert "Coordination request: none." in page.text
+    assert "Cierre del caso: aún no está cerrado." in page.text
+    assert "Solicitud interna de coordinación registrada." not in page.text
     assert "lab-reviewer" not in page.text
     assert session.session_id not in page.text
     closed = _post_form(
@@ -198,9 +198,9 @@ def test_http_close_records_the_server_session_principal(tmp_path):
     )
     assert closed.status_code == 303
     detail = client.get(closed.headers["location"])
-    assert "synthetic development principal lab-reviewer" in detail.text
-    assert "Recorded " in detail.text
-    assert "not verified clinical identity" in detail.text
+    assert "principal sintético de desarrollo lab-reviewer" in detail.text
+    assert "Registrado " in detail.text
+    assert "no una identidad clínica verificada" in detail.text
     assert session.session_id not in detail.text
     assert DEV_SECRET not in detail.text
     assert SIGNING_SECRET not in detail.text
@@ -350,8 +350,8 @@ def test_http_coordination_records_one_attribution_and_repeat_does_not_duplicate
     assert created.status_code == 303
     shown = client.get(created.headers["location"])
     assert shown.text.count(repository.get_follow_up_coordination_request(case.id).id) == 1
-    assert "No development attribution was recorded for this operation." not in shown.text
-    assert "synthetic development principal lab-reviewer" in shown.text
+    assert "No se registró atribución de desarrollo para esta operación." not in shown.text
+    assert "principal sintético de desarrollo lab-reviewer" in shown.text
     assert session.session_id not in shown.text
     issued = issue_controlled_action_token(
         secret=SIGNING_SECRET,
@@ -408,8 +408,10 @@ def test_internal_close_and_historical_rows_have_no_human_attribution(tmp_path):
     browser = TestClient(app, base_url="http://127.0.0.1")
     _login(browser)
     page = browser.get(f"/review-cases/{historical.id}")
-    assert "Case closure: no development attribution was recorded." in page.text
-    assert "No development attribution was recorded for this operation." in page.text
+    assert "Cierre del caso: no se registró atribución de desarrollo." in page.text
+    assert "No se registró atribución de desarrollo para esta operación." in page.text
+    assert page.text.count("Solicitud interna de coordinación registrada.") == 1
+    assert "Solicitud pendiente de registro." not in page.text
     assert "anonymous" not in page.text.lower()
     assert "lab-reviewer" not in page.text
     assert _attributions(repository.database_path) == []

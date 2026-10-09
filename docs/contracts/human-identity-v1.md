@@ -36,6 +36,8 @@ Authentication, authorization, attribution and security audit stay distinct:
 - Attribution, meaning which principal initiated a close or a coordination request, is deferred. V1 does not add a principal to review events or coordination rows.
 - Security audit, meaning a durable record of security-relevant activity, is deferred. V1 does not add an audit table.
 
+This version does not store attribution. Laboratory attribution for specific human operations was later accepted by [HUMAN_ATTRIBUTION_V1](human-attribution-v1.md) and [ADR-094](../adr/ADR-094-human-attribution.md). A development session is still not verified clinical identity, a valid session is still not clinician authorization, and that laboratory attribution is not a security audit. Security audit remains deferred.
+
 Review Case history remains the operational `created` and `closed` events.
 
 ## Development authenticator

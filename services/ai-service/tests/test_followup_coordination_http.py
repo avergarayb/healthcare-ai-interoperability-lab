@@ -204,8 +204,8 @@ def _snapshot(path, review_case_id: str):
 
 
 def _section(html: str) -> str:
-    start = html.index("<h2>Controlled action</h2>")
-    return html[start:]
+    start = html.index("<h2>Solicitud de coordinación interna</h2>")
+    return html[start:html.index("</section>", start)]
 
 
 @pytest.fixture(autouse=True)
@@ -252,8 +252,8 @@ def test_eligible_closed_case_shows_the_action_button(tmp_path, case_id, protoco
     assert page.status_code == 200
     assert page.headers["cache-control"] == "no-store"
     form = _section(page.text)
-    assert "Create an internal follow-up coordination request." in form
-    assert "Create coordination request" in form
+    assert "Esta acción es un segundo paso. Cerrar el caso no crea la solicitud." in form
+    assert "Registrar solicitud de coordinación interna" in form
     assert f'action="/review-cases/{closed.id}/controlled-action"' in form
     assert 'name="actionExpiry"' in form
     assert 'name="actionToken"' in form
@@ -320,18 +320,21 @@ def test_valid_post_creates_request_and_get_reconstructs_it(tmp_path):
     assert shown.status_code == 200
     assert shown.headers["cache-control"] == "no-store"
     section = _section(shown.text)
-    assert "Coordination request created." in section
+    assert "Solicitud interna de coordinación registrada." in section
+    assert "Esto no envía un mensaje, no escribe FHIR y no agenda una cita." in section
     assert "Create coordination request" not in shown.text
     stored = repository.get_follow_up_coordination_request(closed.id)
     assert stored is not None
-    assert stored.id in section
-    assert ">requested<" in section
-    assert stored.created_at in section
+    technical = shown.text.split("<details>", 1)[1]
+    assert stored.id not in section
+    assert stored.id in technical
+    assert ">requested<" in technical
+    assert stored.created_at in technical
     assert _snapshot(repository.database_path, closed.id) == before
     assert repository.get(closed.id) == closed
     assert len(repository.events(closed.id)) == 2
     refreshed = client.get(f"/review-cases/{closed.id}")
-    assert "Coordination request created." in refreshed.text
+    assert "Solicitud interna de coordinación registrada." in refreshed.text
     assert _count_requests(repository.database_path) == 1
 
 

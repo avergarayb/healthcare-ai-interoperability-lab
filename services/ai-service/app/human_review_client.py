@@ -54,7 +54,6 @@ from app.ai_assisted_review import (
 from app.clinical_review_context_http import clinical_context_service
 from app.config import Settings
 from app.institutional_knowledge import UnavailableInstitutionalKnowledge
-from app.review_reason_explanations import REASON_EXPLANATIONS
 from app.followup_coordination_action import (
     PERSISTABLE_PROTOCOL_IDS,
     CoordinationActionDenied,
@@ -83,30 +82,64 @@ QUEUE_LIMIT = 25
 FORM_TTL_SECONDS = 900
 _CORRELATION = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
-_OUTCOME_LABELS = {
-    ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED: "Follow-up coordination planned",
-    ReviewOutcome.REVIEW_COMPLETED_NO_OPERATIONAL_ACTION: "Review completed, no operational action recorded",
+_SENTENCE_PENDING = "Coordinación interna planificada. Solicitud pendiente de registro."
+_SENTENCE_RECORDED = "Solicitud interna de coordinación registrada."
+_SENTENCE_NO_ACTION = "Revisión finalizada sin acción operativa registrada."
+_SENTENCE_NO_EXTERNAL = "Esto no envía un mensaje, no escribe FHIR y no agenda una cita."
+_RULE_MATCHED = (
+    "La regla operativa de revisión se cumplió. Esto no es un diagnóstico ni una recomendación clínica."
+)
+_HISTORY_OUTCOMES = {
+    ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED: "Coordinación interna planificada",
+    ReviewOutcome.REVIEW_COMPLETED_NO_OPERATIONAL_ACTION: "Sin acción operativa registrada",
 }
 _PROTOCOL_LABELS = {
-    "MISSED_FOLLOW_UP_REVIEW_V1": "Missed follow-up review",
+    "POST_CONSULTATION_RESULT_REVIEW_V1": "Revisión de un resultado posterior a la consulta",
+    "MISSED_FOLLOW_UP_REVIEW_V1": "Revisión de un seguimiento no realizado",
 }
-_REASON_LABELS = REASON_EXPLANATIONS
+_PAGE_REASONS = {
+    "post_consultation_result_requires_review": (
+        "Quedó registrado un resultado posterior a la consulta y el caso se abrió para revisión humana."
+    ),
+    "missed_follow_up_without_confirmed_replacement": (
+        "La cita de seguimiento no se completó y, al crear el caso, no había otra cita futura confirmada."
+    ),
+}
 _APPOINTMENT_LABELS = {
-    "NONE": "No appointments were returned.",
-    "UPCOMING_CONFIRMED": "Upcoming, confirmed",
-    "UPCOMING_UNCONFIRMED": "Upcoming, not confirmed",
-    "CANCELLED": "Cancelled",
-    "PAST": "Past",
-    "OTHER": "Other appointment status",
+    "NONE": "No se obtuvo ninguna cita.",
+    "UPCOMING_CONFIRMED": "Próxima y confirmada",
+    "UPCOMING_UNCONFIRMED": "Próxima y no confirmada",
+    "CANCELLED": "Cancelada",
+    "PAST": "Pasada",
+    "OTHER": "Estado operativo de la cita no clasificado",
 }
+_ORIGIN_APPOINTMENT = "Cita que originó el caso"
+_ORIGIN_POINTER = "La cita que originó este caso está arriba."
+_MONTHS = (
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+)
+_REVIEW_TIMESTAMP = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{6}Z$"
+)
 
-MSG_EMPTY = "There are no open review cases."
+MSG_EMPTY = "No hay casos de revisión abiertos."
 MSG_CURSOR = "This page link is no longer valid."
 MSG_REVIEW_UNAVAILABLE = "Review service is unavailable."
 MSG_NOT_FOUND = "This review case was not found."
 MSG_INVALID_LINK = "This review link is not valid."
-MSG_CONTEXT_UNAVAILABLE = "Current clinical context is temporarily unavailable."
-MSG_CONTEXT_CLOSED = "Current clinical context is not available for a closed case."
+MSG_CONTEXT_UNAVAILABLE = "El contexto clínico actual no está disponible en este momento."
+MSG_CONTEXT_CLOSED = "El contexto clínico actual no se muestra cuando el caso está cerrado."
 MSG_ENCOUNTER_MISSING = "The recorded encounter was not found."
 MSG_OBSERVATION_MISSING = "The recorded observation was not found."
 MSG_APPOINTMENT_MISSING = "The recorded appointment was not found."
@@ -124,16 +157,18 @@ MSG_ACTION_ORIGIN_INVALID = "This coordination request was not sent from this de
 MSG_ACTION_DENIED = "This coordination request cannot be created."
 MSG_NOT_CONFIGURED = "This demo is not configured."
 MSG_CHANGED = "This case changed. Review the current version before closing."
-MSG_CONTEXT_SCOPE = "Current clinical context is a current read. It does not re-run the original protocol."
+MSG_CONTEXT_SCOPE = (
+    "El contexto clínico actual es una lectura de ahora. No vuelve a ejecutar la regla que creó el caso."
+)
 MSG_CLOSE_SCOPE = (
-    "This records an operational review outcome. It is not a diagnosis or a treatment decision."
+    "Esto registra un resultado operativo de la revisión. No es un diagnóstico ni una decisión de tratamiento."
 )
 MSG_DEMO = (
-    "Controlled synthetic laboratory. These pages require a development session. "
-    "That session is not production identity, IAM, SSO, or role-based access. "
-    "caseId is an operational identifier, not a patient identity."
+    "Demostración sintética de laboratorio. Estas páginas exigen una sesión de desarrollo. "
+    "Esa sesión no es una identidad clínica verificada, ni IAM, ni SSO, ni acceso por roles. "
+    "El identificador del caso es operativo y no es la identidad del paciente."
 )
-MSG_PATIENT_HIDDEN = "Patient identity is not shown in this view."
+MSG_PATIENT_HIDDEN = "La identidad del paciente no se muestra."
 _HANDOFF_COOKIE = "ai_assistance_once"
 _HANDOFF_TTL_SECONDS = 60
 
@@ -323,7 +358,7 @@ def render_review_queue(request: Request, settings: Settings) -> Response:
         except ReviewPersistenceUnavailable:
             status = 503
             return _html(_page("Review queue", _error(MSG_REVIEW_UNAVAILABLE)), status)
-        return _html(_page("Review queue", _queue_body(page.items, page.next_position)))
+        return _html(_page("Casos abiertos", _queue_body(page.items, page.next_position)))
     finally:
         _log(request, "/review-cases", status, started)
 
@@ -370,7 +405,7 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
             attributions=attributions,
             session_id=session.session_id,
         )
-        response = _html(_page("Review case", body))
+        response = _html(_page("Caso de revisión", body))
         response.delete_cookie(_HANDOFF_COOKIE, path=_handoff_path(review_case_id))
         return response
     finally:
@@ -809,8 +844,30 @@ def _expiry(value: str | None) -> int | None:
     return int(value)
 
 
+def _readable_utc(value: str) -> str:
+    """Readable UTC for a review timestamp. Any other string stays unchanged."""
+    match = _REVIEW_TIMESTAMP.fullmatch(value)
+    if match is None:
+        return value
+    year, month, day, hour, minute, second = (int(part) for part in match.groups())
+    if not (1 <= month <= 12 and 1 <= day <= 31 and hour <= 23 and minute <= 59 and second <= 59):
+        return value
+    return f"{day} de {_MONTHS[month - 1]} de {year}, {hour:02d}:{minute:02d}:{second:02d} UTC"
+
+
+def _status_label(value: str) -> str:
+    if value == ReviewCaseStatus.OPEN.value:
+        return "Abierto"
+    if value == ReviewCaseStatus.CLOSED.value:
+        return "Cerrado"
+    return value
+
+
 def _queue_body(items: tuple[FollowUpReviewCase, ...], next_position: tuple[str, str] | None) -> str:
-    parts = [_demo_banner(), "<p>Open review cases, oldest first.</p>"]
+    parts = [
+        _demo_banner(),
+        "<p>Casos de revisión abiertos, del más antiguo al más reciente.</p>",
+    ]
     if not items:
         parts.append(_p(MSG_EMPTY))
     else:
@@ -818,28 +875,38 @@ def _queue_body(items: tuple[FollowUpReviewCase, ...], next_position: tuple[str,
         for case in items:
             href = "/review-cases/" + quote(case.id, safe="")
             label = _PROTOCOL_LABELS.get(case.protocol_id)
-            label_html = f"{esc(label)} " if label else ""
+            protocol_cell = (
+                f"{esc(label)}<br>{esc(case.protocol_id)}"
+                if label
+                else esc(case.protocol_id)
+            )
+            created = _readable_utc(case.created_at)
+            created_cell = (
+                f"{esc(created)}<br>{esc(case.created_at)}"
+                if created != case.created_at
+                else esc(case.created_at)
+            )
             rows.append(
                 "<tr>"
                 f"<td><a href=\"{esc(href)}\">{esc(case.case_id)}</a></td>"
-                f"<td>{label_html}{esc(case.protocol_id)}</td>"
-                f"<td>{esc(case.created_at)}</td>"
-                f"<td>{esc(case.status.value)}</td>"
+                f"<td>{protocol_cell}</td>"
+                f"<td>{created_cell}</td>"
+                f"<td>{esc(_status_label(case.status.value))}<br>{esc(case.status.value)}</td>"
                 "</tr>"
             )
         parts.append(
             "<table>"
-            "<caption>Open operational review cases</caption>"
+            "<caption>Casos abiertos</caption>"
             "<thead><tr>"
-            "<th>Operational case id</th><th>Protocol</th><th>Created</th><th>Status</th>"
+            "<th>Caso</th><th>Motivo de revisión</th><th>Creado</th><th>Estado</th>"
             "</tr></thead><tbody>"
             + "".join(rows)
             + "</tbody></table>"
         )
     if next_position is not None:
         cursor = encode_cursor(next_position, status=ReviewCaseStatus.OPEN, case_id=None)
-        parts.append(f'<p><a href="/review-cases?cursor={quote(cursor, safe="")}">Older cases</a></p>')
-    parts.append('<p><a href="/review-cases">Refresh queue</a></p>')
+        parts.append(f'<p><a href="/review-cases?cursor={quote(cursor, safe="")}">Casos más antiguos</a></p>')
+    parts.append('<p><a href="/review-cases">Actualizar la cola</a></p>')
     return "".join(parts)
 
 
@@ -862,10 +929,11 @@ def _case_body(
     parts.append(_provenance_section(case))
     parts.append(_context_section(context, context_message))
     parts.append(_history_section(detail.events))
-    parts.append(_attribution_section(case, coordination, attributions))
+    parts.append(_attribution_section(case, attributions))
     parts.append(_assistance_section(case, settings, assistance, session_id))
-    parts.append(_outcome_section(case, settings, session_id))
+    parts.append(_outcome_section(case, settings, coordination, session_id))
     parts.append(_controlled_action_section(case, settings, coordination, attributions, session_id))
+    parts.append(_technical_details(detail, context, coordination))
     return "".join(parts)
 
 
@@ -888,32 +956,25 @@ def _attribution_for(
 
 def _attribution_section(
     case: FollowUpReviewCase,
-    coordination: FollowUpCoordinationRequest | None,
     attributions: tuple[StoredDevelopmentAttribution, ...],
 ) -> str:
     closure = _attribution_for(attributions, REVIEW_CASE_CLOSED)
     if case.status is not ReviewCaseStatus.CLOSED:
-        closure_line = "Case closure: not closed."
+        closure_line = "Cierre del caso: aún no está cerrado."
     elif closure is None:
-        closure_line = "Case closure: no development attribution was recorded."
+        closure_line = "Cierre del caso: no se registró atribución de desarrollo."
     else:
         closure_line = (
-            f"Case closure: synthetic development principal {closure.principal_id}. "
-            f"Recorded {closure.occurred_at}."
+            f"Cierre del caso: principal sintético de desarrollo {closure.principal_id}. "
+            f"Registrado {_readable_utc(closure.occurred_at)}."
         )
-    if coordination is None:
-        coordination_line = "Coordination request: none."
-    else:
-        coordination_line = ""
-    lines = [
-        "<section><h2>Development attribution</h2>",
-        "<p>Shown principal ids are synthetic development principals, not verified clinical identity.</p>",
-        f"<p>{esc(closure_line)}</p>",
-    ]
-    if coordination_line:
-        lines.append(f"<p>{esc(coordination_line)}</p>")
-    lines.append("</section>")
-    return "".join(lines)
+    return (
+        "<section><h2>Atribución de desarrollo</h2>"
+        "<p>Los identificadores mostrados son principales sintéticos de desarrollo, "
+        "no una identidad clínica verificada.</p>"
+        f"<p>{esc(closure_line)}</p>"
+        "</section>"
+    )
 
 
 def _controlled_action_section(
@@ -926,21 +987,18 @@ def _controlled_action_section(
     if coordination is not None:
         recorded = _attribution_for(attributions, COORDINATION_REQUEST_CREATED)
         if recorded is None:
-            attribution_line = "No development attribution was recorded for this operation."
+            attribution_line = "No se registró atribución de desarrollo para esta operación."
         else:
             attribution_line = (
-                f"Synthetic development principal {recorded.principal_id}. "
-                f"Recorded {recorded.occurred_at}."
+                f"Principal sintético de desarrollo {recorded.principal_id}. "
+                f"Registrado {_readable_utc(recorded.occurred_at)}."
             )
         return (
-            "<section><h2>Controlled action</h2>"
-            "<p>Coordination request created.</p>"
-            "<dl>"
-            f"<dt>Request identifier</dt><dd>{esc(coordination.id)}</dd>"
-            f"<dt>Status</dt><dd>{esc(coordination.status.value)}</dd>"
-            f"<dt>Created</dt><dd>{esc(coordination.created_at)}</dd>"
-            f"<dt>Development attribution</dt><dd>{esc(attribution_line)}</dd>"
-            "</dl></section>"
+            "<section><h2>Solicitud de coordinación interna</h2>"
+            f"<p>{esc(_SENTENCE_RECORDED)}</p>"
+            f"<p>{esc(_SENTENCE_NO_EXTERNAL)}</p>"
+            f"<p>{esc(attribution_line)}</p>"
+            "</section>"
         )
     if not _controlled_action_eligible(case):
         return ""
@@ -950,16 +1008,16 @@ def _controlled_action_section(
         session_id=session_id,
     )
     if issued is None:
-        return "<section><h2>Controlled action</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"
+        return "<section><h2>Solicitud de coordinación interna</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"
     token, expiry = issued
     action = "/review-cases/" + quote(case.id, safe="") + "/controlled-action"
     return (
-        "<section><h2>Controlled action</h2>"
-        "<p>Create an internal follow-up coordination request.</p>"
+        "<section><h2>Solicitud de coordinación interna</h2>"
+        "<p>Esta acción es un segundo paso. Cerrar el caso no crea la solicitud.</p>"
         f'<form method="post" action="{esc(action)}">'
         f'<input type="hidden" name="actionExpiry" value="{esc(str(expiry))}">'
         f'<input type="hidden" name="actionToken" value="{esc(token)}">'
-        '<button type="submit">Create coordination request</button>'
+        '<button type="submit">Registrar solicitud de coordinación interna</button>'
         "</form></section>"
     )
 
@@ -989,61 +1047,45 @@ def _assistance_section(
 
 
 def _operational_section(case: FollowUpReviewCase) -> str:
-    outcome = _OUTCOME_LABELS[case.outcome] if case.outcome is not None else "None"
-    closed = case.closed_at or "None"
+    closed = _readable_utc(case.closed_at) if case.closed_at else "Ninguno"
     return (
-        "<section><h2>Operational case</h2>"
+        "<section><h2>Resumen del caso</h2>"
         "<dl>"
-        f"<dt>Operational case id</dt><dd>{esc(case.case_id)}</dd>"
-        f"<dt>Status</dt><dd>{esc(case.status.value)}</dd>"
-        f"<dt>Version</dt><dd>{esc(str(case.version))}</dd>"
-        f"<dt>Created</dt><dd>{esc(case.created_at)}</dd>"
-        f"<dt>Updated</dt><dd>{esc(case.updated_at)}</dd>"
-        f"<dt>Closed</dt><dd>{esc(closed)}</dd>"
-        f"<dt>Outcome</dt><dd>{esc(outcome)}</dd>"
+        f"<dt>Caso</dt><dd>{esc(case.case_id)}</dd>"
+        f"<dt>Estado</dt><dd>{esc(_status_label(case.status.value))}</dd>"
+        f"<dt>Creado</dt><dd>{esc(_readable_utc(case.created_at))}</dd>"
+        f"<dt>Cerrado</dt><dd>{esc(closed)}</dd>"
         "</dl></section>"
     )
 
 
 def _provenance_section(case: FollowUpReviewCase) -> str:
+    label = _PROTOCOL_LABELS.get(case.protocol_id, case.protocol_id)
     reasons = []
     for reason in case.reason_codes:
-        label = _REASON_LABELS.get(reason, reason)
-        reasons.append(f"<li>{esc(label)}</li>")
-    resources = "".join(f"<li>{esc(resource)}</li>" for resource in case.matched_resources)
-    matched = "The original review rule matched." if case.protocol_evaluation_status == "matched" else ""
+        reasons.append(f"<li>{esc(_PAGE_REASONS.get(reason, reason))}</li>")
+    matched = f"<p>{esc(_RULE_MATCHED)}</p>" if case.protocol_evaluation_status == "matched" else ""
     return (
-        "<section><h2>Why this case was created</h2>"
-        "<p>This section is the original trigger recorded when the case was created.</p>"
-        "<dl>"
-        + (
-            f"<dt>Review</dt><dd>{esc(_PROTOCOL_LABELS[case.protocol_id])}</dd>"
-            if case.protocol_id in _PROTOCOL_LABELS
-            else ""
-        )
-        + f"<dt>Protocol</dt><dd>{esc(case.protocol_id)}</dd>"
-        f"<dt>Evaluation status</dt><dd>{esc(case.protocol_evaluation_status)}</dd>"
-        "</dl>"
-        f"<p>{esc(matched)}</p>"
-        "<h3>Reason</h3><ul>"
+        "<section><h2>Por qué está en revisión</h2>"
+        f"<p>{esc(label)}</p>"
+        "<ul>"
         + "".join(reasons)
         + "</ul>"
-        "<h3>Technical provenance</h3><ul>"
-        + resources
-        + "</ul></section>"
+        + matched
+        + "</section>"
     )
 
 
 def _context_section(context: ClinicalReviewContextResponse | None, message: str) -> str:
     parts = [
-        "<section><h2>Current clinical context</h2>",
+        "<section><h2>Contexto clínico actual</h2>",
         f"<p>{esc(MSG_CONTEXT_SCOPE)}</p>",
         f"<p>{esc(MSG_PATIENT_HIDDEN)}</p>",
     ]
     if message:
         parts.append(_p(message))
     if context is not None:
-        parts.append(f"<p>Retrieved {esc(context.retrieval.retrieved_at)}</p>")
+        parts.append(f"<p>Leído {esc(_readable_utc(context.retrieval.retrieved_at))}</p>")
         if context.current_context.encounter is not None:
             parts.append(_encounter_html(context))
         if context.current_context.observation is not None:
@@ -1066,8 +1108,7 @@ def _encounter_html(context: ClinicalReviewContextResponse) -> str:
             end = encounter.period.end or "None"
             period = f"<dt>Period start</dt><dd>{esc(start)}</dd><dt>Period end</dt><dd>{esc(end)}</dd>"
         body = f"<dl><dt>Status</dt><dd>{esc(encounter.status)}</dd>{period}</dl>"
-    technical = f"<p>Technical reference: {esc(encounter.reference)}</p>"
-    return "<h3>Encounter</h3>" + body + technical
+    return "<h3>Encounter</h3>" + body
 
 
 def _observation_html(context: ClinicalReviewContextResponse) -> str:
@@ -1086,8 +1127,7 @@ def _observation_html(context: ClinicalReviewContextResponse) -> str:
             + "<h4>Value</h4>"
             + render_observation_value(observation.content)
         )
-    technical = f"<p>Technical reference: {esc(observation.reference)}</p>"
-    return "<h3>Observation</h3>" + body + technical
+    return "<h3>Observation</h3>" + body
 
 
 def _trigger_appointment_html(context: ClinicalReviewContextResponse) -> str:
@@ -1105,19 +1145,25 @@ def _trigger_appointment_html(context: ClinicalReviewContextResponse) -> str:
             "</dl>"
         )
     return (
-        "<h3>Recorded appointment</h3>"
+        f"<h3>{esc(_ORIGIN_APPOINTMENT)}</h3>"
         + body
-        + f"<p>Technical reference: {esc(trigger.reference)}</p>"
+        + f"<p>{esc(trigger.reference)}</p>"
     )
 
 
 def _appointments_html(context: ClinicalReviewContextResponse) -> str:
     appointments = context.current_context.appointments
+    trigger = context.current_context.trigger_appointment
+    trigger_reference = trigger.reference if trigger is not None else None
     labels = []
     for classification in appointments.classifications:
         labels.append(f"<li>{esc(_APPOINTMENT_LABELS.get(classification, classification))}</li>")
     items = []
+    omitted_origin = False
     for item in appointments.items:
+        if trigger_reference is not None and item.reference == trigger_reference:
+            omitted_origin = True
+            continue
         start = item.start or "None"
         items.append(
             "<li>"
@@ -1126,14 +1172,15 @@ def _appointments_html(context: ClinicalReviewContextResponse) -> str:
             f"<dt>Status</dt><dd>{esc(item.status)}</dd>"
             f"<dt>Start</dt><dd>{esc(start)}</dd>"
             "</dl>"
-            f"<p>Technical reference: {esc(item.reference)}</p>"
             "</li>"
         )
     item_html = "<ul>" + "".join(items) + "</ul>" if items else ""
+    pointer = _p(_ORIGIN_POINTER) if omitted_origin else ""
     return (
         "<h3>Appointments</h3><ul>"
         + "".join(labels)
         + "</ul>"
+        + pointer
         + item_html
     )
 
@@ -1193,31 +1240,45 @@ def _range_html(content: RangeContent) -> str:
 def _history_section(events: tuple[FollowUpReviewCaseEvent, ...]) -> str:
     rows = []
     for event in events:
-        outcome = _OUTCOME_LABELS[event.outcome] if event.outcome is not None else "None"
-        source = event.from_status.value if event.from_status is not None else "None"
+        outcome = _HISTORY_OUTCOMES[event.outcome] if event.outcome is not None else "Ninguno"
+        source = _status_label(event.from_status.value) if event.from_status is not None else "Ninguno"
+        label = "Creado" if event.event_type.value == "created" else "Cerrado"
         rows.append(
             "<tr>"
-            f"<td>{esc(event.event_type.value)}</td>"
+            f"<td>{esc(label)}</td>"
             f"<td>{esc(source)}</td>"
-            f"<td>{esc(event.to_status.value)}</td>"
+            f"<td>{esc(_status_label(event.to_status.value))}</td>"
             f"<td>{esc(outcome)}</td>"
-            f"<td>{esc(event.occurred_at)}</td>"
+            f"<td>{esc(_readable_utc(event.occurred_at))}</td>"
             "</tr>"
         )
     return (
-        "<section><h2>Review history</h2><table>"
-        "<thead><tr><th>Event</th><th>From</th><th>To</th><th>Outcome</th><th>When</th></tr></thead>"
+        "<section><h2>Historial operativo</h2><table>"
+        "<thead><tr><th>Evento</th><th>Desde</th><th>Hasta</th><th>Resultado</th><th>Cuándo</th></tr></thead>"
         "<tbody>"
         + "".join(rows)
         + "</tbody></table></section>"
     )
 
 
-def _outcome_section(case: FollowUpReviewCase, settings: Settings, session_id: str) -> str:
+def _outcome_section(
+    case: FollowUpReviewCase,
+    settings: Settings,
+    coordination: FollowUpCoordinationRequest | None,
+    session_id: str,
+) -> str:
     if case.status is not ReviewCaseStatus.OPEN:
+        if coordination is not None:
+            return ""
+        if case.outcome is ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED:
+            sentence = _SENTENCE_PENDING
+        elif case.outcome is ReviewOutcome.REVIEW_COMPLETED_NO_OPERATIONAL_ACTION:
+            sentence = _SENTENCE_NO_ACTION
+        else:
+            return ""
         return (
-            "<section><h2>Operational outcome</h2>"
-            f"<p>This case is closed. {esc(_OUTCOME_LABELS[case.outcome]) if case.outcome else ''}</p>"
+            "<section><h2>Resultado operativo</h2>"
+            f"<p>{esc(sentence)}</p>"
             "</section>"
         )
     issued = issue_form_token(
@@ -1227,28 +1288,117 @@ def _outcome_section(case: FollowUpReviewCase, settings: Settings, session_id: s
         session_id=session_id,
     )
     if issued is None:
-        return "<section><h2>Operational outcome</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"
+        return "<section><h2>Resultado operativo</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"
     token, expiry = issued
     action = "/review-cases/" + quote(case.id, safe="") + "/close"
-    options = []
-    for outcome, label in _OUTCOME_LABELS.items():
-        options.append(
-            f'<label><input type="radio" name="outcome" value="{esc(outcome.value)}" required> '
-            f"{esc(label)}</label>"
-        )
+    options = [
+        (
+            f'<label><input type="radio" name="outcome" value="{esc(ReviewOutcome.FOLLOW_UP_COORDINATION_PLANNED.value)}" required> '
+            f"{esc(_SENTENCE_PENDING)}</label>"
+        ),
+        (
+            f'<label><input type="radio" name="outcome" value="{esc(ReviewOutcome.REVIEW_COMPLETED_NO_OPERATIONAL_ACTION.value)}" required> '
+            f"{esc(_SENTENCE_NO_ACTION)}</label>"
+        ),
+    ]
     return (
-        "<section><h2>Operational outcome</h2>"
+        "<section><h2>Resultado operativo</h2>"
         f"<p>{esc(MSG_CLOSE_SCOPE)}</p>"
         f'<form method="post" action="{esc(action)}">'
-        '<fieldset><legend>Operational outcome</legend>'
+        '<fieldset><legend>Resultado operativo</legend>'
         + "".join(options)
         + "</fieldset>"
         f'<input type="hidden" name="expectedVersion" value="{esc(str(case.version))}">'
         f'<input type="hidden" name="formExpiry" value="{esc(str(expiry))}">'
         f'<input type="hidden" name="formToken" value="{esc(token)}">'
-        '<button type="submit">Close review</button>'
+        '<button type="submit">Cerrar la revisión</button>'
         "</form></section>"
     )
+
+
+def _technical_details(
+    detail: ReviewCaseDetail,
+    context: ClinicalReviewContextResponse | None,
+    coordination: FollowUpCoordinationRequest | None,
+) -> str:
+    """Original identifiers and timestamps. The group is closed and does not fetch FHIR."""
+    case = detail.case
+    outcome = case.outcome.value if case.outcome is not None else ""
+    parts = [
+        "<details>",
+        "<summary>Detalles técnicos</summary>",
+        "<dl>",
+        f"<dt>Protocolo</dt><dd>{esc(case.protocol_id)}</dd>",
+        f"<dt>Evaluación</dt><dd>{esc(case.protocol_evaluation_status)}</dd>",
+        f"<dt>Versión</dt><dd>{esc(str(case.version))}</dd>",
+        f"<dt>Estado</dt><dd>{esc(case.status.value)}</dd>",
+        f"<dt>Resultado</dt><dd>{esc(outcome)}</dd>",
+        f"<dt>Creado</dt><dd>{esc(case.created_at)}</dd>",
+        f"<dt>Actualizado</dt><dd>{esc(case.updated_at)}</dd>",
+        f"<dt>Cerrado</dt><dd>{esc(case.closed_at or '')}</dd>",
+        "</dl>",
+        "<h3>Códigos de motivo</h3><ul>",
+    ]
+    for reason in case.reason_codes:
+        parts.append(f"<li>{esc(reason)}</li>")
+    parts.append("</ul><h3>Recursos coincidentes</h3><ul>")
+    for resource in case.matched_resources:
+        parts.append(f"<li>{esc(resource)}</li>")
+    parts.append("</ul><h3>Eventos</h3><ul>")
+    for event in detail.events:
+        parts.append(f"<li>{esc(event.event_type.value)} {esc(event.occurred_at)}</li>")
+    parts.append("</ul>")
+    if context is not None:
+        parts.append(f"<p>{esc(context.retrieval.retrieved_at)}</p>")
+        parts.append("<h3>Referencias FHIR</h3><ul>")
+        for reference in _context_references(context):
+            parts.append(f"<li>{esc(reference)}</li>")
+        parts.append("</ul><h3>Códigos</h3><ul>")
+        for code in _context_codes(context):
+            parts.append(f"<li>{esc(code)}</li>")
+        parts.append("</ul>")
+    if coordination is not None:
+        parts.append(
+            "<dl>"
+            f"<dt>Solicitud</dt><dd>{esc(coordination.id)}</dd>"
+            f"<dt>Estado de la solicitud</dt><dd>{esc(coordination.status.value)}</dd>"
+            f"<dt>Creada</dt><dd>{esc(coordination.created_at)}</dd>"
+            "</dl>"
+        )
+    parts.append("</details>")
+    return "".join(parts)
+
+
+def _context_references(context: ClinicalReviewContextResponse) -> list[str]:
+    current = context.current_context
+    references: list[str] = []
+    if current.encounter is not None:
+        references.append(current.encounter.reference)
+    if current.observation is not None:
+        references.append(current.observation.reference)
+        if current.observation.availability == "available":
+            references.append(current.observation.encounter_reference)
+    if current.trigger_appointment is not None:
+        references.append(current.trigger_appointment.reference)
+    for item in current.appointments.items:
+        references.append(item.reference)
+    return references
+
+
+def _context_codes(context: ClinicalReviewContextResponse) -> list[str]:
+    current = context.current_context
+    codes = [str(item) for item in current.appointments.classifications]
+    for item in current.appointments.items:
+        codes.append(item.status)
+        codes.append(str(item.classification))
+    observation = current.observation
+    if observation is not None and observation.availability == "available" and observation.code.coding:
+        for entry in observation.code.coding:
+            if entry.system:
+                codes.append(entry.system)
+            if entry.code:
+                codes.append(entry.code)
+    return codes
 
 
 def _demo_banner() -> str:
@@ -1256,7 +1406,7 @@ def _demo_banner() -> str:
 
 
 def _queue_home() -> str:
-    return '<p><a href="/review-cases">Review queue</a></p>'
+    return '<p><a href="/review-cases">Cola de revisión</a></p>'
 
 
 def _error(message: str) -> str:
@@ -1269,7 +1419,7 @@ def _p(message: str) -> str:
 
 def _page(title: str, body: str) -> str:
     return (
-        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
+        "<!DOCTYPE html>\n<html lang=\"es\">\n<head>\n"
         '<meta charset="utf-8">\n'
         f"<title>{esc(title)}</title>\n"
         '<link rel="stylesheet" href="/review-static/review.css">\n'

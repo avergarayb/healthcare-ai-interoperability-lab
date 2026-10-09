@@ -1178,7 +1178,7 @@ def test_http_generation_escapes_html_and_keeps_the_case(tmp_path, caplog):
     assert "Institutional source." in response.text
     assert "Procedure title" in response.text
     assert "0.9137" not in response.text
-    assert "Close review" in response.text
+    assert "Cerrar la revisión" in response.text
     assert "<script>alert(1)</script>" not in caplog.text
     assert "SENTINEL-OBS-VALUE" not in caplog.text
     assert "SENTINEL-NAME" not in provider.calls[0]["contents"]
@@ -1243,7 +1243,7 @@ def test_failures_leave_close_available(tmp_path):
     assert response.status_code == 200
     assert "No relevant institutional guidance was retrieved." in response.text
     assert provider.calls == []
-    assert "Close review" in response.text
+    assert "Cerrar la revisión" in response.text
     assert FollowUpReviewCaseService(repository).get(case.id).status is ReviewCaseStatus.OPEN
     unavailable = FakeKnowledge(status="UNAVAILABLE")
     client_unavailable = _client(repository, fhir, unavailable, provider)
