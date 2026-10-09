@@ -86,6 +86,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 - [AI-assisted review V1 contract](../contracts/ai-assisted-review-v1.md)
 - [Controlled action V1 contract](../contracts/controlled-action-v1.md)
 - [Human identity V1 contract](../contracts/human-identity-v1.md) — accepted laboratory contract. The review demo requires a development session. Not production identity.
+- [Human attribution V1 contract](../contracts/human-attribution-v1.md) — accepted laboratory contract. The review UI records a synthetic development principal on close and on the first coordination request. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. No retrospective attribution and no FHIR write.
 - [Operational Follow-up Review Workflow V1 contract](../contracts/follow-up-review-workflow-v1.md)
 - [Healthcare Interoperability architecture](../fhir/fhir-architecture.md)
 - [Healthcare AI runbook](../../services/ai-service/README.md)
@@ -113,6 +114,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-091](../adr/ADR-091-ai-assisted-review.md) | Accepted current decision for on-demand explanatory review assistance. Not production-ready and not clinically certified. |
 | [ADR-092](../adr/ADR-092-controlled-action.md) | Accepted current decision for one internal follow-up coordination request after an explicit human POST. Not external execution and not authenticated approval. |
 | [ADR-093](../adr/ADR-093-human-review-session.md) | Accepted current decision for a development-only human session. Not production identity, IAM, SSO or RBAC. |
+| [ADR-094](../adr/ADR-094-human-attribution.md) | Accepted development attribution. The review UI records a synthetic development principal. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. |
 
 ## Historical governance artifacts
 

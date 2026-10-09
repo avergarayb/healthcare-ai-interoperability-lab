@@ -42,18 +42,29 @@ from app.followup_review import (
     validate_review_case_id,
     validate_trigger,
 )
+from app.human_attribution import (
+    COORDINATION_REQUEST_CREATED,
+    REVIEW_CASE_CLOSED,
+    DevelopmentPrincipalSnapshot,
+    StoredDevelopmentAttribution,
+    validate_development_principal_snapshot,
+)
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 BUSY_TIMEOUT_MS = 5_000
 _MIGRATION = Path(__file__).with_name("migrations") / "001_follow_up_review.sql"
 _COORDINATION_REQUEST_MIGRATION = (
     Path(__file__).with_name("migrations") / "002_follow_up_coordination_request.sql"
 )
+_HUMAN_ATTRIBUTION_MIGRATION = (
+    Path(__file__).with_name("migrations") / "003_follow_up_human_attribution.sql"
+)
 _TABLES = (
     "follow_up_review_cases",
     "follow_up_review_case_events",
     "follow_up_coordination_requests",
+    "follow_up_human_attributions",
 )
 
 
@@ -89,6 +100,9 @@ class SQLiteFollowUpReviewCaseRepository:
                     version = int(connection.execute("PRAGMA user_version").fetchone()[0])
                 if version == 1:
                     _apply_migration(connection, _COORDINATION_REQUEST_MIGRATION)
+                    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                if version == 2:
+                    _apply_migration(connection, _HUMAN_ATTRIBUTION_MIGRATION)
                 self._validate_schema(connection)
         except ReviewStoreInitializationError:
             raise
@@ -240,10 +254,13 @@ class SQLiteFollowUpReviewCaseRepository:
         *,
         expected_version: int,
         outcome: ReviewOutcome,
+        attribution: DevelopmentPrincipalSnapshot | None = None,
     ) -> FollowUpReviewCase:
         validate_review_case_id(review_case_id)
         if expected_version < 1:
             raise ValueError("expected version must be positive")
+        if attribution is not None:
+            validate_development_principal_snapshot(attribution)
         closed_at = utc_timestamp(self._clock)
         event_id = str(self._id_factory())
         try:
@@ -301,6 +318,17 @@ class SQLiteFollowUpReviewCaseRepository:
                     """,
                     (event_id, review_case_id, next_version, outcome.value, closed_at),
                 )
+                if attribution is not None:
+                    _insert_human_attribution(
+                        connection,
+                        attribution_id=str(self._id_factory()),
+                        review_case_id=review_case_id,
+                        operation=REVIEW_CASE_CLOSED,
+                        subject_version=next_version,
+                        coordination_request_id=None,
+                        snapshot=attribution,
+                        occurred_at=closed_at,
+                    )
                 updated = connection.execute(
                     "SELECT * FROM follow_up_review_cases WHERE id = ?",
                     (review_case_id,),
@@ -333,14 +361,19 @@ class SQLiteFollowUpReviewCaseRepository:
         return () if detail is None else detail.events
 
     def ensure_follow_up_coordination_request(
-        self, review_case_id: str
+        self,
+        review_case_id: str,
+        attribution: DevelopmentPrincipalSnapshot | None = None,
     ) -> FollowUpCoordinationRequest:
         """Insert one coordination request, or return the row already stored.
 
         protocol_id is copied from the review case row in this transaction.
-        The review case itself is not updated.
+        The review case itself is not updated. A snapshot is stored only when
+        this transaction inserts the request.
         """
         validate_review_case_id(review_case_id)
+        if attribution is not None:
+            validate_development_principal_snapshot(attribution)
         action_identity = build_coordination_action_identity(review_case_id)
         request_id = str(self._id_factory())
         created_at = utc_timestamp(self._clock)
@@ -355,7 +388,7 @@ class SQLiteFollowUpReviewCaseRepository:
                     connection.rollback()
                     raise ReviewCaseNotFound
                 protocol_id = persistable_protocol_id(str(case_row["protocol_id"]))
-                connection.execute(
+                inserted = connection.execute(
                     """
                     INSERT INTO follow_up_coordination_requests (
                         id, action_identity, review_case_id, protocol_id,
@@ -372,7 +405,18 @@ class SQLiteFollowUpReviewCaseRepository:
                         CoordinationRequestStatus.REQUESTED.value,
                         created_at,
                     ),
-                )
+                ).rowcount
+                if inserted == 1 and attribution is not None:
+                    _insert_human_attribution(
+                        connection,
+                        attribution_id=str(self._id_factory()),
+                        review_case_id=review_case_id,
+                        operation=COORDINATION_REQUEST_CREATED,
+                        subject_version=None,
+                        coordination_request_id=request_id,
+                        snapshot=attribution,
+                        occurred_at=created_at,
+                    )
                 stored = connection.execute(
                     """
                     SELECT * FROM follow_up_coordination_requests
@@ -410,6 +454,32 @@ class SQLiteFollowUpReviewCaseRepository:
                     ),
                 ).fetchone()
             return None if row is None else _coordination_request_from_row(row)
+        except (sqlite3.DatabaseError, OSError, ValueError) as exc:
+            raise ReviewPersistenceUnavailable from exc
+
+    def list_human_attributions(
+        self, review_case_id: str
+    ) -> tuple[StoredDevelopmentAttribution, ...]:
+        validate_review_case_id(review_case_id)
+        try:
+            with self._connection_scope() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT operation, principal_id, occurred_at
+                    FROM follow_up_human_attributions
+                    WHERE review_case_id = ?
+                    ORDER BY operation ASC
+                    """,
+                    (review_case_id,),
+                ).fetchall()
+            return tuple(
+                StoredDevelopmentAttribution(
+                    operation=str(row["operation"]),
+                    principal_id=str(row["principal_id"]),
+                    occurred_at=str(row["occurred_at"]),
+                )
+                for row in rows
+            )
         except (sqlite3.DatabaseError, OSError, ValueError) as exc:
             raise ReviewPersistenceUnavailable from exc
 
@@ -467,6 +537,7 @@ def _migration_schema_contract() -> tuple[object, ...]:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.executescript(_MIGRATION.read_text(encoding="utf-8"))
         connection.executescript(_COORDINATION_REQUEST_MIGRATION.read_text(encoding="utf-8"))
+        connection.executescript(_HUMAN_ATTRIBUTION_MIGRATION.read_text(encoding="utf-8"))
         return _schema_contract(connection)
     finally:
         connection.close()
@@ -544,6 +615,39 @@ def _apply_migration(connection: sqlite3.Connection, path: Path) -> None:
         if connection.in_transaction:
             connection.rollback()
         raise
+
+
+def _insert_human_attribution(
+    connection: sqlite3.Connection,
+    *,
+    attribution_id: str,
+    review_case_id: str,
+    operation: str,
+    subject_version: int | None,
+    coordination_request_id: str | None,
+    snapshot: DevelopmentPrincipalSnapshot,
+    occurred_at: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO follow_up_human_attributions (
+            attribution_id, review_case_id, operation, subject_version,
+            coordination_request_id, principal_id, authenticator_id,
+            session_id, occurred_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            attribution_id,
+            review_case_id,
+            operation,
+            subject_version,
+            coordination_request_id,
+            snapshot.principal_id,
+            snapshot.authenticator_id,
+            snapshot.session_id,
+            occurred_at,
+        ),
+    )
 
 
 def _coordination_request_from_row(row: sqlite3.Row) -> FollowUpCoordinationRequest:

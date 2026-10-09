@@ -196,7 +196,7 @@ def test_same_review_case_keeps_action_identity_and_another_case_changes_it():
 def test_fresh_database_applies_both_migrations(tmp_path):
     repository = _repository(tmp_path)
     with sqlite3.connect(repository.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
         tables = {
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -209,6 +209,7 @@ def test_fresh_database_applies_both_migrations(tmp_path):
         "follow_up_review_cases",
         "follow_up_review_case_events",
         "follow_up_coordination_requests",
+        "follow_up_human_attributions",
     } <= tables
     assert columns == APPROVED_COLUMNS
 
@@ -229,7 +230,8 @@ def test_version_one_database_upgrades_without_losing_review_history(tmp_path):
         ReviewEventType.CREATED
     ]
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("SELECT COUNT(*) FROM follow_up_human_attributions").fetchone()[0] == 0
     assert _count_requests(path) == 0
 
 
@@ -242,13 +244,14 @@ def test_version_two_database_initializes_again(tmp_path):
     second.initialize()
     assert second.get(created.id) == created
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
         assert (
             connection.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE name = 'follow_up_coordination_requests'"
             ).fetchone()[0]
             == 1
         )
+        assert connection.execute("SELECT COUNT(*) FROM follow_up_human_attributions").fetchone()[0] == 0
 
 
 def test_future_schema_version_fails_closed_without_rebuilding(tmp_path):
@@ -258,11 +261,11 @@ def test_future_schema_version_fails_closed_without_rebuilding(tmp_path):
     created = _create(repository)
     before = _snapshot(path, created.id)
     with sqlite3.connect(path) as connection:
-        connection.execute("PRAGMA user_version=3")
+        connection.execute("PRAGMA user_version=4")
     with pytest.raises(ReviewStoreInitializationError, match="schema version is unsupported"):
         SQLiteFollowUpReviewCaseRepository(path).initialize()
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
     assert _snapshot(path, created.id) == before
 
 

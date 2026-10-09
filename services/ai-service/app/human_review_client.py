@@ -22,6 +22,12 @@ from urllib.parse import parse_qsl, quote
 from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from app.human_attribution import (
+    COORDINATION_REQUEST_CREATED,
+    REVIEW_CASE_CLOSED,
+    DevelopmentPrincipalSnapshot,
+    StoredDevelopmentAttribution,
+)
 from app.human_development_auth import require_human_session
 
 from app.clinical_review_context import (
@@ -345,6 +351,10 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
         if coordination_failure is not None:
             status = coordination_failure
             return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        attributions, attribution_failure = _load_human_attributions(request, review_case_id)
+        if attribution_failure is not None:
+            status = attribution_failure
+            return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
         notice = MSG_CHANGED if request.query_params.get("notice") == "changed" else ""
         context, context_message = _load_context(request, detail.case)
         ticket = request.cookies.get(_HANDOFF_COOKIE)
@@ -357,6 +367,7 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
             notice,
             assistance=assistance,
             coordination=coordination,
+            attributions=attributions,
             session_id=session.session_id,
         )
         response = _html(_page("Review case", body))
@@ -411,9 +422,19 @@ def close_review_case(
         if repository is None:
             status = 503
             return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        try:
+            attribution = _snapshot_from_session(session)
+        except ValueError:
+            status = 503
+            return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
         service = FollowUpReviewCaseService(repository)
         try:
-            service.close(review_case_id, expected_version=version, outcome=outcome)
+            service.close(
+                review_case_id,
+                expected_version=version,
+                outcome=outcome,
+                attribution=attribution,
+            )
         except ReviewCaseNotFound:
             status = 404
             return _html(_page("Review case", _error(MSG_NOT_FOUND) + _queue_home()), status)
@@ -570,8 +591,14 @@ def submit_controlled_action(
             status = 503
             return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
         try:
+            attribution = _snapshot_from_session(session)
+        except ValueError:
+            status = 503
+            return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        try:
             FollowUpCoordinationActionService(repository).ensure_follow_up_coordination_request(
-                review_case_id
+                review_case_id,
+                attribution=attribution,
             )
         except ReviewCaseNotFound:
             status = 404
@@ -648,6 +675,26 @@ def _assistance_provider(request: Request, settings: Settings):
     return resolve_assistance_provider(
         getattr(request.app.state, "ai_assistance_provider", None),
         settings,
+    )
+
+
+def _load_human_attributions(
+    request: Request, review_case_id: str
+) -> tuple[tuple[StoredDevelopmentAttribution, ...], int | None]:
+    repository = _repository(request)
+    if repository is None:
+        return (), 503
+    try:
+        return repository.list_human_attributions(review_case_id), None
+    except ReviewPersistenceUnavailable:
+        return (), 503
+
+
+def _snapshot_from_session(session: object) -> DevelopmentPrincipalSnapshot:
+    return DevelopmentPrincipalSnapshot(
+        getattr(session, "principal_id"),
+        getattr(session, "authenticator_id"),
+        getattr(session, "session_id"),
     )
 
 
@@ -804,6 +851,7 @@ def _case_body(
     notice: str,
     assistance: AssistanceResult | None,
     coordination: FollowUpCoordinationRequest | None,
+    attributions: tuple[StoredDevelopmentAttribution, ...],
     session_id: str,
 ) -> str:
     case = detail.case
@@ -814,9 +862,10 @@ def _case_body(
     parts.append(_provenance_section(case))
     parts.append(_context_section(context, context_message))
     parts.append(_history_section(detail.events))
+    parts.append(_attribution_section(case, coordination, attributions))
     parts.append(_assistance_section(case, settings, assistance, session_id))
     parts.append(_outcome_section(case, settings, session_id))
-    parts.append(_controlled_action_section(case, settings, coordination, session_id))
+    parts.append(_controlled_action_section(case, settings, coordination, attributions, session_id))
     return "".join(parts)
 
 
@@ -828,13 +877,61 @@ def _controlled_action_eligible(case: FollowUpReviewCase) -> bool:
     )
 
 
+def _attribution_for(
+    attributions: tuple[StoredDevelopmentAttribution, ...], operation: str
+) -> StoredDevelopmentAttribution | None:
+    for item in attributions:
+        if item.operation == operation:
+            return item
+    return None
+
+
+def _attribution_section(
+    case: FollowUpReviewCase,
+    coordination: FollowUpCoordinationRequest | None,
+    attributions: tuple[StoredDevelopmentAttribution, ...],
+) -> str:
+    closure = _attribution_for(attributions, REVIEW_CASE_CLOSED)
+    if case.status is not ReviewCaseStatus.CLOSED:
+        closure_line = "Case closure: not closed."
+    elif closure is None:
+        closure_line = "Case closure: no development attribution was recorded."
+    else:
+        closure_line = (
+            f"Case closure: synthetic development principal {closure.principal_id}. "
+            f"Recorded {closure.occurred_at}."
+        )
+    if coordination is None:
+        coordination_line = "Coordination request: none."
+    else:
+        coordination_line = ""
+    lines = [
+        "<section><h2>Development attribution</h2>",
+        "<p>Shown principal ids are synthetic development principals, not verified clinical identity.</p>",
+        f"<p>{esc(closure_line)}</p>",
+    ]
+    if coordination_line:
+        lines.append(f"<p>{esc(coordination_line)}</p>")
+    lines.append("</section>")
+    return "".join(lines)
+
+
 def _controlled_action_section(
     case: FollowUpReviewCase,
     settings: Settings,
     coordination: FollowUpCoordinationRequest | None,
+    attributions: tuple[StoredDevelopmentAttribution, ...],
     session_id: str,
 ) -> str:
     if coordination is not None:
+        recorded = _attribution_for(attributions, COORDINATION_REQUEST_CREATED)
+        if recorded is None:
+            attribution_line = "No development attribution was recorded for this operation."
+        else:
+            attribution_line = (
+                f"Synthetic development principal {recorded.principal_id}. "
+                f"Recorded {recorded.occurred_at}."
+            )
         return (
             "<section><h2>Controlled action</h2>"
             "<p>Coordination request created.</p>"
@@ -842,6 +939,7 @@ def _controlled_action_section(
             f"<dt>Request identifier</dt><dd>{esc(coordination.id)}</dd>"
             f"<dt>Status</dt><dd>{esc(coordination.status.value)}</dd>"
             f"<dt>Created</dt><dd>{esc(coordination.created_at)}</dd>"
+            f"<dt>Development attribution</dt><dd>{esc(attribution_line)}</dd>"
             "</dl></section>"
         )
     if not _controlled_action_eligible(case):

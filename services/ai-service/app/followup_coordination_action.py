@@ -22,6 +22,10 @@ from app.followup_review import (
     validate_review_case_id,
     validate_utc_timestamp,
 )
+from app.human_attribution import (
+    DevelopmentPrincipalSnapshot,
+    validate_development_principal_snapshot,
+)
 from app.missed_follow_up_review import MISSED_FOLLOW_UP_REVIEW_V1
 from app.post_consultation_review import POST_CONSULTATION_RESULT_REVIEW_V1
 
@@ -164,7 +168,7 @@ class FollowUpCoordinationActionRepository(Protocol):
     def get(self, review_case_id: str) -> FollowUpReviewCase | None: ...
 
     def ensure_follow_up_coordination_request(
-        self, review_case_id: str
+        self, review_case_id: str, attribution: DevelopmentPrincipalSnapshot | None = None
     ) -> FollowUpCoordinationRequest: ...
 
 
@@ -179,9 +183,13 @@ class FollowUpCoordinationActionService:
         self._repository = repository
 
     def ensure_follow_up_coordination_request(
-        self, review_case_id: str
+        self,
+        review_case_id: str,
+        attribution: DevelopmentPrincipalSnapshot | None = None,
     ) -> FollowUpCoordinationRequest:
         validate_review_case_id(review_case_id)
+        if attribution is not None:
+            validate_development_principal_snapshot(attribution)
         case = self._repository.get(review_case_id)
         if case is None:
             raise ReviewCaseNotFound
@@ -191,7 +199,11 @@ class FollowUpCoordinationActionService:
         )
         if decision.decision is not CoordinationPolicyDecision.ALLOW:
             raise CoordinationActionDenied(decision)
-        return self._repository.ensure_follow_up_coordination_request(review_case_id)
+        if attribution is None:
+            return self._repository.ensure_follow_up_coordination_request(review_case_id)
+        return self._repository.ensure_follow_up_coordination_request(
+            review_case_id, attribution=attribution
+        )
 
 
 def _allow() -> CoordinationActionPolicyResult:

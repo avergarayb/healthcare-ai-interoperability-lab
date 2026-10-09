@@ -212,11 +212,15 @@ def test_policy_denies_unsupported_action():
     assert result.reason is CoordinationPolicyDenyReason.ACTION_NOT_SUPPORTED
 
 
-def test_service_signature_accepts_only_the_review_case_id():
+def test_service_signature_accepts_the_review_case_and_optional_snapshot():
     parameters = inspect.signature(
         FollowUpCoordinationActionService.ensure_follow_up_coordination_request
     ).parameters
-    assert list(parameters) == ["self", "review_case_id"]
+    assert list(parameters) == ["self", "review_case_id", "attribution"]
+    assert parameters["attribution"].default is None
+    assert "outcome" not in parameters
+    assert "protocol_id" not in parameters
+    assert "status" not in parameters
 
 
 @pytest.mark.parametrize(

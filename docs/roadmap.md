@@ -35,6 +35,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - On-demand AI-assisted review for an open follow-up case, with one structured Gemini explanation, claim-level citations and no stored model output.
 - One explicit internal follow-up coordination request after a closed review case whose outcome is follow-up coordination planned. The request status `requested` records that internal request. It does not send a message, write FHIR, or schedule an appointment.
 - Development authentication for the synthetic review pages: a server-side session, login and logout, and form signatures bound to that session. It is not production identity, verified reviewer identity, RBAC or institutional SSO.
+- Development attribution for a new Human Review close and for the first coordination request from that UI. The stored principal is a synthetic development principal. Manual validation passed. It is not verified clinical identity, IAM, SSO, RBAC, or a security audit. Historical rows stay unattributed. This service does not write FHIR. Security audit remains a separate later decision.
 - Deterministic, evaluation-harness and opt-in real-HAPI coverage. Live embedding and live AI-assistance checks are separate opt-ins from live Gemini narrative tests.
 
 ## Current product gaps
@@ -68,7 +69,6 @@ Future product decisions may consider:
 - an external adapter that consumes an already recorded internal coordination request. The coordination policy remains the authorization decision;
 - `DEMO_EXPERIENCE_V1`: clearer review-page language and hierarchy. The manual test left protocol ids, the word matched, ISO timestamps, technical provenance, a duplicated missed-follow-up appointment, and the label "Other appointment status" unchanged on purpose.
 - production identity for human review, distinct from the accepted development session.
-
 Each candidate requires a separate product decision, security assessment and acceptance contract. Historical phase names under `docs/tasks/` remain development history rather than current sequencing authority.
 
 ## Current position

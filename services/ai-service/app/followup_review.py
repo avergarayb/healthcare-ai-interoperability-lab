@@ -12,6 +12,10 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable, Protocol, Sequence
 
+from app.human_attribution import (
+    DevelopmentPrincipalSnapshot,
+    validate_development_principal_snapshot,
+)
 from app.post_consultation_review import ProtocolEvaluationStatus, ProtocolReviewResult
 
 
@@ -135,6 +139,7 @@ class FollowUpReviewCaseRepository(Protocol):
         *,
         expected_version: int,
         outcome: ReviewOutcome,
+        attribution: DevelopmentPrincipalSnapshot | None = None,
     ) -> FollowUpReviewCase: ...
 
     def events(self, review_case_id: str) -> tuple[FollowUpReviewCaseEvent, ...]: ...
@@ -442,11 +447,19 @@ class FollowUpReviewCaseService:
         *,
         expected_version: int,
         outcome: ReviewOutcome,
+        attribution: DevelopmentPrincipalSnapshot | None = None,
     ) -> FollowUpReviewCase:
+        if attribution is None:
+            return self._repository.close(
+                review_case_id,
+                expected_version=expected_version,
+                outcome=outcome,
+            )
         return self._repository.close(
             review_case_id,
             expected_version=expected_version,
             outcome=outcome,
+            attribution=validate_development_principal_snapshot(attribution),
         )
 
     def events(self, review_case_id: str) -> tuple[FollowUpReviewCaseEvent, ...]:

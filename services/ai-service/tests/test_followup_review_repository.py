@@ -244,7 +244,7 @@ def test_empty_database_initializes_supported_schema(tmp_path):
     repository = SQLiteFollowUpReviewCaseRepository(path)
     repository.initialize()
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
         tables = {
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -253,6 +253,7 @@ def test_empty_database_initializes_supported_schema(tmp_path):
         "follow_up_review_cases",
         "follow_up_review_case_events",
         "follow_up_coordination_requests",
+        "follow_up_human_attributions",
     } <= tables
 
 
