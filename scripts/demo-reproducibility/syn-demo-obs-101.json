@@ -1,0 +1,16 @@
+{
+  "resourceType": "Observation",
+  "id": "syn-demo-obs-101",
+  "status": "final",
+  "code": {
+    "text": "Synthetic observation"
+  },
+  "subject": {
+    "reference": "Patient/syn-demo-patient-101"
+  },
+  "encounter": {
+    "reference": "Encounter/syn-demo-enc-101"
+  },
+  "issued": "2026-01-15T12:30:00Z",
+  "valueString": "Synthetic observation result"
+}

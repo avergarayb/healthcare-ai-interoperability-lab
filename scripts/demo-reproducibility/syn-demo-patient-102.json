@@ -1,0 +1,16 @@
+{
+  "resourceType": "Patient",
+  "id": "syn-demo-patient-102",
+  "active": true,
+  "identifier": [
+    {
+      "system": "https://lab.local/followup-case",
+      "value": "SYN-DEMO-102"
+    }
+  ],
+  "name": [
+    {
+      "text": "Synthetic demo patient 102"
+    }
+  ]
+}
