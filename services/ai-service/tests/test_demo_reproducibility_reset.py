@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from app.followup_coordination_action import CoordinationRequestStatus
 from app.followup_review import FollowUpReviewTrigger, ReviewOutcome, build_review_identity
 from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.human_attribution import DEVELOPMENT_AUTHENTICATOR_V1, DevelopmentPrincipalSnapshot
@@ -149,6 +150,7 @@ def _preserved_dump(path: Path) -> dict[str, list[tuple]]:
             "follow_up_review_case_events",
             "follow_up_coordination_requests",
             "follow_up_human_attributions",
+            "follow_up_coordination_request_events",
         )
         if not ids:
             children = {table: [] for table in tables}
@@ -349,16 +351,60 @@ def test_referential_integrity_failure_aborts(tmp_path: Path):
     assert _rows(review, "SELECT id FROM follow_up_review_cases WHERE id = ?", (demo.id,))
 
 
-def test_incompatible_schema_is_left_unchanged(tmp_path: Path):
+def test_schema_four_reset_keeps_historical_coordination_history(tmp_path: Path):
+    review = _review_db(tmp_path)
+    repository = SQLiteFollowUpReviewCaseRepository(review)
+    historical_id = _seed_preserved(repository)
+    historical_request = repository.get_follow_up_coordination_request(historical_id)
+    assert historical_request is not None
+    repository.transition_follow_up_coordination_request(
+        historical_request.id,
+        expected_status=CoordinationRequestStatus.REQUESTED,
+        target_status=CoordinationRequestStatus.IN_PROGRESS,
+        attribution=_principal(),
+    )
+    demo = _seed_demo(
+        repository,
+        "SYN-DEMO-101",
+        POST_CONSULTATION_RESULT_REVIEW_V1,
+        "Encounter/syn-demo-enc-101",
+        coordination=True,
+    )
+    demo_request = repository.get_follow_up_coordination_request(demo.id)
+    assert demo_request is not None
+    repository.transition_follow_up_coordination_request(
+        demo_request.id,
+        expected_status=CoordinationRequestStatus.REQUESTED,
+        target_status=CoordinationRequestStatus.IN_PROGRESS,
+        attribution=_principal(),
+    )
+    before = _preserved_dump(review)
+    assert before["follow_up_coordination_request_events"]
+    with sqlite3.connect(review) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+    report = _reset(tmp_path, review)
+    assert report.removed_case_ids == ("SYN-DEMO-101",)
+    assert _preserved_dump(review) == before
+    assert _rows(
+        review,
+        "SELECT event_id FROM follow_up_coordination_request_events WHERE review_case_id = ?",
+        (demo.id,),
+    ) == []
+    with sqlite3.connect(review) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+
+
+@pytest.mark.parametrize("version", [3, 5])
+def test_incompatible_schema_is_left_unchanged(tmp_path: Path, version: int):
     review = _review_db(tmp_path)
     connection = sqlite3.connect(review)
-    connection.execute("PRAGMA user_version = 4")
+    connection.execute(f"PRAGMA user_version = {int(version)}")
     connection.commit()
     connection.close()
     with pytest.raises(reset.DemoResetAborted) as caught:
         _reset(tmp_path, review)
     assert caught.value.reason == "schema_incompatible"
-    assert sqlite3.connect(review).execute("PRAGMA user_version").fetchone()[0] == 4
+    assert sqlite3.connect(review).execute("PRAGMA user_version").fetchone()[0] == version
 
 
 @pytest.mark.parametrize(

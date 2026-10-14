@@ -69,6 +69,7 @@ REVIEW_TABLES = (
     "follow_up_review_case_events",
     "follow_up_coordination_requests",
     "follow_up_human_attributions",
+    "follow_up_coordination_request_events",
 )
 POST_MATCHED = ("Encounter/syn-demo-enc-101", "Observation/syn-demo-obs-101")
 MISSED_MATCHED = ("Appointment/syn-demo-noshow-102",)

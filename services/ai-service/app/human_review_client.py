@@ -58,8 +58,14 @@ from app.followup_coordination_action import (
     PERSISTABLE_PROTOCOL_IDS,
     CoordinationActionDenied,
     CoordinationActionType,
+    CoordinationRequestStatus,
     FollowUpCoordinationActionService,
     FollowUpCoordinationRequest,
+)
+from app.followup_coordination_workflow import (
+    CoordinationRequestDetail,
+    CoordinationRequestNotFound,
+    CoordinationTransitionRejected,
 )
 from app.followup_review import (
     FollowUpReviewCase,
@@ -155,6 +161,8 @@ MSG_ACTION_INVALID = "This coordination request was not valid."
 MSG_ACTION_TOKEN_INVALID = "This coordination request is no longer valid."
 MSG_ACTION_ORIGIN_INVALID = "This coordination request was not sent from this demo."
 MSG_ACTION_DENIED = "This coordination request cannot be created."
+MSG_TRANSITION_INVALID = "Esta transición no es válida."
+MSG_TRANSITION_REJECTED = "La solicitud no admite esta transición."
 MSG_NOT_CONFIGURED = "This demo is not configured."
 MSG_CHANGED = "This case changed. Review the current version before closing."
 MSG_CONTEXT_SCOPE = (
@@ -650,6 +658,201 @@ def submit_controlled_action(
         _log(request, "/review-cases/{reviewCaseId}/controlled-action", status, started, review_case_id)
 
 
+def render_coordination_queue(request: Request, settings: Settings) -> Response:
+    started = time.perf_counter()
+    status = 200
+    try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
+        created_at = request.query_params.get("createdAt")
+        request_id = request.query_params.get("id")
+        if len(request.query_params.getlist("createdAt")) > 1 or len(request.query_params.getlist("id")) > 1:
+            status = 422
+            return _html(_page("Solicitudes de coordinación", _error(MSG_CURSOR) + _queue_home()), status)
+        if (created_at is None) != (request_id is None):
+            status = 422
+            return _html(_page("Solicitudes de coordinación", _error(MSG_CURSOR) + _queue_home()), status)
+        repository = _repository(request)
+        if repository is None:
+            status = 503
+            return _html(_page("Solicitudes de coordinación", _error(MSG_REVIEW_UNAVAILABLE)), status)
+        after = None
+        if created_at is not None and request_id is not None:
+            try:
+                validate_review_case_id(request_id)
+                after = (created_at, request_id)
+            except ValueError:
+                status = 422
+                return _html(_page("Solicitudes de coordinación", _error(MSG_CURSOR) + _queue_home()), status)
+        try:
+            rows = repository.list_follow_up_coordination_requests(limit=QUEUE_LIMIT + 1, after=after)
+        except ReviewPersistenceUnavailable:
+            status = 503
+            return _html(_page("Solicitudes de coordinación", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        except ValueError:
+            status = 422
+            return _html(_page("Solicitudes de coordinación", _error(MSG_CURSOR) + _queue_home()), status)
+        visible = rows[:QUEUE_LIMIT]
+        next_position = None
+        if len(rows) > QUEUE_LIMIT and visible:
+            last = visible[-1].request
+            next_position = (last.created_at, last.id)
+        return _html(_page("Solicitudes de coordinación", _coordination_queue_body(visible, next_position)))
+    finally:
+        _log(request, "/review-coordination-requests", status, started)
+
+
+def open_case_coordination_request(request: Request, settings: Settings, review_case_id: str) -> Response:
+    started = time.perf_counter()
+    status = 303
+    try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
+        try:
+            review_case_id = validate_review_case_id(review_case_id)
+        except ValueError:
+            status = 422
+            return _html(_page("Solicitud de coordinación", _error(MSG_INVALID_LINK) + _queue_home()), status)
+        repository = _repository(request)
+        if repository is None:
+            status = 503
+            return _html(_page("Solicitud de coordinación", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        try:
+            stored = repository.get_follow_up_coordination_request(review_case_id)
+        except ReviewPersistenceUnavailable:
+            status = 503
+            return _html(_page("Solicitud de coordinación", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        if stored is None:
+            status = 404
+            return _html(_page("Solicitud de coordinación", _error(MSG_NOT_FOUND) + _queue_home()), status)
+        return _redirect_coordination(stored.id)
+    finally:
+        _log(request, "/review-cases/{reviewCaseId}/coordination-request", status, started)
+
+
+def render_coordination_request(request: Request, settings: Settings, request_id: str) -> Response:
+    started = time.perf_counter()
+    status = 200
+    try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
+        try:
+            request_id = validate_review_case_id(request_id)
+        except ValueError:
+            status = 422
+            return _html(_page("Solicitud de coordinación", _error(MSG_INVALID_LINK) + _queue_home()), status)
+        repository = _repository(request)
+        if repository is None:
+            status = 503
+            return _html(_page("Solicitud de coordinación", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        try:
+            detail = repository.get_coordination_request_detail(request_id)
+        except ReviewPersistenceUnavailable:
+            status = 503
+            return _html(_page("Solicitud de coordinación", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        if detail is None:
+            status = 404
+            return _html(_page("Solicitud de coordinación", _error(MSG_NOT_FOUND) + _queue_home()), status)
+        return _html(
+            _page(
+                "Solicitud de coordinación",
+                _coordination_detail_body(detail, settings, session.session_id),
+            )
+        )
+    finally:
+        _log(request, "/review-coordination-requests/{requestId}", status, started)
+
+
+def submit_coordination_transition(
+    request: Request,
+    settings: Settings,
+    request_id: str,
+    raw_body: bytes,
+    content_type: str | None,
+) -> Response:
+    started = time.perf_counter()
+    status = 400
+    try:
+        session = require_human_session(request, settings)
+        if isinstance(session, Response):
+            status = session.status_code
+            return session
+        try:
+            request_id = validate_review_case_id(request_id)
+        except ValueError:
+            status = 422
+            return _html(_page("Solicitud de coordinación", _error(MSG_INVALID_LINK) + _queue_home()), status)
+        if not _same_origin(request):
+            return _html(
+                _page("Solicitud de coordinación", _error(MSG_ACTION_ORIGIN_INVALID) + _queue_home()),
+                status,
+            )
+        fields = _coordination_transition_form_fields(raw_body, content_type)
+        if fields is None:
+            return _html(_page("Solicitud de coordinación", _error(MSG_TRANSITION_INVALID) + _queue_home()), status)
+        expiry = _expiry(fields.get("transitionExpiry"))
+        if expiry is None or not settings.human_review_form_signing_secret:
+            message = MSG_NOT_CONFIGURED if not settings.human_review_form_signing_secret else MSG_TRANSITION_INVALID
+            if not settings.human_review_form_signing_secret:
+                status = 503
+            return _html(_page("Solicitud de coordinación", _error(message) + _queue_home()), status)
+        expected_status = fields["expectedStatus"]
+        target_status = fields["targetStatus"]
+        if not coordination_transition_token_is_valid(
+            secret=settings.human_review_form_signing_secret,
+            request_id=request_id,
+            expected_status=expected_status,
+            target_status=target_status,
+            expiry=expiry,
+            token=fields["transitionToken"],
+            session_id=session.session_id,
+        ):
+            return _html(
+                _page("Solicitud de coordinación", _error(MSG_ACTION_TOKEN_INVALID) + _queue_home()),
+                status,
+            )
+        try:
+            expected = CoordinationRequestStatus(expected_status)
+            target = CoordinationRequestStatus(target_status)
+        except ValueError:
+            return _html(_page("Solicitud de coordinación", _error(MSG_TRANSITION_INVALID) + _queue_home()), status)
+        repository = _repository(request)
+        if repository is None:
+            status = 503
+            return _html(_page("Solicitud de coordinación", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        try:
+            attribution = _snapshot_from_session(session)
+        except ValueError:
+            status = 503
+            return _html(_page("Solicitud de coordinación", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        try:
+            repository.transition_follow_up_coordination_request(
+                request_id,
+                expected_status=expected,
+                target_status=target,
+                attribution=attribution,
+            )
+        except CoordinationRequestNotFound:
+            status = 404
+            return _html(_page("Solicitud de coordinación", _error(MSG_NOT_FOUND) + _queue_home()), status)
+        except CoordinationTransitionRejected:
+            status = 409
+            return _html(_page("Solicitud de coordinación", _error(MSG_TRANSITION_REJECTED) + _queue_home()), status)
+        except ReviewPersistenceUnavailable:
+            status = 503
+            return _html(_page("Solicitud de coordinación", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+        status = 303
+        return _redirect_coordination(request_id)
+    finally:
+        _log(request, "/review-coordination-requests/{requestId}/transition", status, started)
+
+
 def render_observation_value(content: object) -> str:
     """Deterministic HTML for one bounded observation value. Input models only."""
     if isinstance(content, NotProjectedContent) or not hasattr(content, "kind"):
@@ -688,6 +891,66 @@ def _sign_assistance(secret: str, review_case_id: str, expiry: int, session_id: 
 def _sign_controlled_action(secret: str, review_case_id: str, expiry: int, session_id: str) -> str:
     action_type = CoordinationActionType.CREATE_FOLLOW_UP_COORDINATION_REQUEST.value
     message = f"controlled-action|{review_case_id}|{action_type}|{expiry}|{session_id}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def issue_coordination_transition_token(
+    *,
+    secret: str,
+    request_id: str,
+    expected_status: str,
+    target_status: str,
+    session_id: str,
+    now: int | None = None,
+) -> tuple[str, int] | None:
+    """Sign one coordination transition. The purpose is not a close-form signature."""
+    if not secret:
+        return None
+    issued_at = _now() if now is None else now
+    expiry = issued_at + FORM_TTL_SECONDS
+    token = _sign_coordination_transition(
+        secret, request_id, expected_status, target_status, expiry, session_id
+    )
+    return token, expiry
+
+
+def coordination_transition_token_is_valid(
+    *,
+    secret: str,
+    request_id: str,
+    expected_status: str,
+    target_status: str,
+    expiry: int,
+    token: str,
+    session_id: str,
+    now: int | None = None,
+) -> bool:
+    """Accept only a transition signature for this request, step and session."""
+    if not secret or not token:
+        return False
+    current = _now() if now is None else now
+    if expiry > current + FORM_TTL_SECONDS or current >= expiry:
+        return False
+    expected = _sign_coordination_transition(
+        secret, request_id, expected_status, target_status, expiry, session_id
+    )
+    try:
+        return hmac.compare_digest(expected, token)
+    except TypeError:
+        return False
+
+
+def _sign_coordination_transition(
+    secret: str,
+    request_id: str,
+    expected_status: str,
+    target_status: str,
+    expiry: int,
+    session_id: str,
+) -> str:
+    message = (
+        f"coordination-transition|{request_id}|{expected_status}|{target_status}|{expiry}|{session_id}"
+    ).encode("utf-8")
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
@@ -797,6 +1060,14 @@ def _controlled_action_form_fields(raw_body: bytes, content_type: str | None) ->
     return _exact_fields(raw_body, content_type, {"actionExpiry", "actionToken"})
 
 
+def _coordination_transition_form_fields(raw_body: bytes, content_type: str | None) -> dict[str, str] | None:
+    return _exact_fields(
+        raw_body,
+        content_type,
+        {"expectedStatus", "targetStatus", "transitionExpiry", "transitionToken"},
+    )
+
+
 def _exact_fields(
     raw_body: bytes,
     content_type: str | None,
@@ -866,6 +1137,7 @@ def _status_label(value: str) -> str:
 def _queue_body(items: tuple[FollowUpReviewCase, ...], next_position: tuple[str, str] | None) -> str:
     parts = [
         _demo_banner(),
+        _queue_home(),
         "<p>Casos de revisión abiertos, del más antiguo al más reciente.</p>",
     ]
     if not items:
@@ -993,11 +1265,13 @@ def _controlled_action_section(
                 f"Principal sintético de desarrollo {recorded.principal_id}. "
                 f"Registrado {_readable_utc(recorded.occurred_at)}."
             )
+        href = "/review-cases/" + quote(case.id, safe="") + "/coordination-request"
         return (
             "<section><h2>Solicitud de coordinación interna</h2>"
             f"<p>{esc(_SENTENCE_RECORDED)}</p>"
             f"<p>{esc(_SENTENCE_NO_EXTERNAL)}</p>"
             f"<p>{esc(attribution_line)}</p>"
+            f'<p><a href="{esc(href)}">Ver la solicitud de coordinación</a></p>'
             "</section>"
         )
     if not _controlled_action_eligible(case):
@@ -1406,7 +1680,160 @@ def _demo_banner() -> str:
 
 
 def _queue_home() -> str:
-    return '<p><a href="/review-cases">Cola de revisión</a></p>'
+    return (
+        '<p><a href="/review-cases">Cola de revisión</a>'
+        ' · <a href="/review-coordination-requests">Solicitudes de coordinación</a></p>'
+    )
+
+
+def _coordination_status_label(value: str) -> str:
+    labels = {
+        CoordinationRequestStatus.REQUESTED.value: "Solicitada",
+        CoordinationRequestStatus.IN_PROGRESS.value: "En curso",
+        CoordinationRequestStatus.COMPLETED.value: "Completada",
+    }
+    return labels.get(value, value)
+
+
+def _coordination_queue_body(items: tuple, next_position: tuple[str, str] | None) -> str:
+    parts = [
+        _demo_banner(),
+        _queue_home(),
+        "<p>Solicitudes internas de coordinación, de la más reciente a la más antigua.</p>",
+        f"<p>{esc(_SENTENCE_NO_EXTERNAL)}</p>",
+    ]
+    if not items:
+        parts.append(_p("No hay solicitudes de coordinación interna."))
+    else:
+        rows = []
+        for item in items:
+            request = item.request
+            href = "/review-coordination-requests/" + quote(request.id, safe="")
+            label = _PROTOCOL_LABELS.get(request.protocol_id, request.protocol_id)
+            created = _readable_utc(request.created_at)
+            rows.append(
+                "<tr>"
+                f"<td>{esc(request.id)}</td>"
+                f"<td>{esc(item.case_id)}</td>"
+                f"<td>{esc(label)}<br>{esc(request.protocol_id)}</td>"
+                f"<td>{esc(_coordination_status_label(request.status.value))}<br>{esc(request.status.value)}</td>"
+                f"<td>{esc(created)}</td>"
+                f'<td><a href="{esc(href)}">Detalle</a></td>'
+                "</tr>"
+            )
+        parts.append(
+            "<table>"
+            "<caption>Solicitudes de coordinación</caption>"
+            "<thead><tr>"
+            "<th>Identificador</th><th>Caso de revisión</th><th>Protocolo</th>"
+            "<th>Estado</th><th>Creada</th><th>Detalle</th>"
+            "</tr></thead><tbody>"
+            + "".join(rows)
+            + "</tbody></table>"
+        )
+    if next_position is not None:
+        older = (
+            "/review-coordination-requests?createdAt="
+            + quote(next_position[0], safe="")
+            + "&id="
+            + quote(next_position[1], safe="")
+        )
+        parts.append(f'<p><a href="{esc(older)}">Solicitudes más antiguas</a></p>')
+    return "".join(parts)
+
+
+def _coordination_detail_body(detail: CoordinationRequestDetail, settings: Settings, session_id: str) -> str:
+    request = detail.request
+    case_href = "/review-cases/" + quote(request.review_case_id, safe="")
+    label = _PROTOCOL_LABELS.get(request.protocol_id, request.protocol_id)
+    parts = [
+        _demo_banner(),
+        _queue_home(),
+        "<section><h2>Solicitud</h2><dl>"
+        f"<dt>Identificador</dt><dd>{esc(request.id)}</dd>"
+        f"<dt>Caso de revisión</dt><dd><a href=\"{esc(case_href)}\">{esc(detail.case_id)}</a></dd>"
+        f"<dt>Estado del caso</dt><dd>{esc(_status_label(detail.review_status))}</dd>"
+        f"<dt>Protocolo</dt><dd>{esc(label)}<br>{esc(request.protocol_id)}</dd>"
+        f"<dt>Estado</dt><dd>{esc(_coordination_status_label(request.status.value))}<br>{esc(request.status.value)}</dd>"
+        f"<dt>Creada</dt><dd>{esc(_readable_utc(request.created_at))}</dd>"
+        "</dl>"
+        f"<p>{esc(_SENTENCE_NO_EXTERNAL)}</p></section>",
+        _coordination_history(detail),
+        _coordination_transition_form(detail, settings, session_id),
+    ]
+    return "".join(parts)
+
+
+def _coordination_history(detail: CoordinationRequestDetail) -> str:
+    if not detail.events:
+        return "<section><h2>Historial</h2><p>Todavía no hay transiciones.</p></section>"
+    rows = []
+    for event in detail.events:
+        rows.append(
+            "<tr>"
+            f"<td>{esc(_coordination_status_label(event.from_status.value))}</td>"
+            f"<td>{esc(_coordination_status_label(event.to_status.value))}</td>"
+            f"<td>{esc(event.principal_id)}</td>"
+            f"<td>{esc(_readable_utc(event.occurred_at))}</td>"
+            "</tr>"
+        )
+    return (
+        "<section><h2>Historial</h2>"
+        "<table><caption>Transiciones registradas</caption>"
+        "<thead><tr><th>Desde</th><th>Hasta</th><th>Principal de desarrollo</th><th>Momento</th></tr></thead>"
+        "<tbody>"
+        + "".join(rows)
+        + "</tbody></table></section>"
+    )
+
+
+def _coordination_transition_form(
+    detail: CoordinationRequestDetail, settings: Settings, session_id: str
+) -> str:
+    request = detail.request
+    steps = {
+        CoordinationRequestStatus.REQUESTED: (
+            CoordinationRequestStatus.IN_PROGRESS,
+            "Pasar la solicitud a en curso",
+        ),
+        CoordinationRequestStatus.IN_PROGRESS: (
+            CoordinationRequestStatus.COMPLETED,
+            "Marcar la solicitud como completada",
+        ),
+    }
+    step = steps.get(request.status)
+    if step is None:
+        return "<section><h2>Transición</h2><p>La solicitud está completada.</p></section>"
+    target, label = step
+    issued = issue_coordination_transition_token(
+        secret=settings.human_review_form_signing_secret,
+        request_id=request.id,
+        expected_status=request.status.value,
+        target_status=target.value,
+        session_id=session_id,
+    )
+    if issued is None:
+        return "<section><h2>Transición</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"
+    token, expiry = issued
+    action = "/review-coordination-requests/" + quote(request.id, safe="") + "/transition"
+    return (
+        "<section><h2>Transición</h2>"
+        f'<form method="post" action="{esc(action)}">'
+        f'<input type="hidden" name="expectedStatus" value="{esc(request.status.value)}">'
+        f'<input type="hidden" name="targetStatus" value="{esc(target.value)}">'
+        f'<input type="hidden" name="transitionExpiry" value="{esc(str(expiry))}">'
+        f'<input type="hidden" name="transitionToken" value="{esc(token)}">'
+        f'<button type="submit">{esc(label)}</button>'
+        "</form></section>"
+    )
+
+
+def _redirect_coordination(request_id: str) -> RedirectResponse:
+    return RedirectResponse(
+        url="/review-coordination-requests/" + quote(request_id, safe=""),
+        status_code=303,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _error(message: str) -> str:

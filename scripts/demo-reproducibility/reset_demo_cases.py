@@ -30,12 +30,14 @@ REVIEW_TABLES = (
     "follow_up_review_case_events",
     "follow_up_coordination_requests",
     "follow_up_human_attributions",
+    "follow_up_coordination_request_events",
 )
 _TABLE_KEY = {
     "follow_up_review_cases": "id",
     "follow_up_review_case_events": "review_case_id",
     "follow_up_coordination_requests": "review_case_id",
     "follow_up_human_attributions": "review_case_id",
+    "follow_up_coordination_request_events": "review_case_id",
 }
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -60,6 +62,7 @@ class _DeletePlan:
     cases: tuple[_DisposableCase, ...]
     attribution_ids: tuple[str, ...]
     coordination_ids: tuple[str, ...]
+    workflow_event_ids: tuple[str, ...]
     event_ids: tuple[str, ...]
 
     @property
@@ -296,6 +299,7 @@ def _plan_deletes(
     events = list(connection.execute("SELECT * FROM follow_up_review_case_events"))
     requests = list(connection.execute("SELECT * FROM follow_up_coordination_requests"))
     attributions = list(connection.execute("SELECT * FROM follow_up_human_attributions"))
+    workflow_events = list(connection.execute("SELECT * FROM follow_up_coordination_request_events"))
     requests_by_id = {str(row["id"]): row for row in requests}
     events_by_case: dict[str, set[int]] = {}
     for row in events:
@@ -303,6 +307,14 @@ def _plan_deletes(
     _require_known_owners(events, known_ids)
     _require_known_owners(requests, known_ids)
     _require_known_owners(attributions, known_ids)
+    _require_known_owners(workflow_events, known_ids)
+    for row in workflow_events:
+        request = requests_by_id.get(str(row["coordination_request_id"]))
+        if request is None or str(request["review_case_id"]) != str(row["review_case_id"]):
+            raise DemoResetAborted(
+                "ambiguous_relation",
+                "coordination history ownership is ambiguous",
+            )
     for row in attributions:
         owner = str(row["review_case_id"])
         request_id = row["coordination_request_id"]
@@ -326,6 +338,9 @@ def _plan_deletes(
         ),
         coordination_ids=tuple(
             str(row["id"]) for row in requests if str(row["review_case_id"]) in selected_ids
+        ),
+        workflow_event_ids=tuple(
+            str(row["event_id"]) for row in workflow_events if str(row["review_case_id"]) in selected_ids
         ),
         event_ids=tuple(
             str(row["event_id"]) for row in events if str(row["review_case_id"]) in selected_ids
@@ -383,6 +398,11 @@ def _delete_disposable(
             "follow_up_human_attributions",
             "attribution_id",
             plan.attribution_ids,
+        ),
+        (
+            "follow_up_coordination_request_events",
+            "event_id",
+            plan.workflow_event_ids,
         ),
         (
             "follow_up_coordination_requests",

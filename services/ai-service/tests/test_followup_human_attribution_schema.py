@@ -144,7 +144,7 @@ def _attribution(
 
 
 def test_migrations_001_and_002_do_not_define_attribution():
-    assert SCHEMA_VERSION == 3
+    assert SCHEMA_VERSION == 4
     first = (APP / "migrations" / "001_follow_up_review.sql").read_bytes()
     second = (APP / "migrations" / "002_follow_up_coordination_request.sql").read_text(encoding="utf-8")
     third = (APP / "migrations" / "003_follow_up_human_attribution.sql").read_text(encoding="utf-8")
@@ -161,7 +161,7 @@ def test_fresh_database_applies_001_002_and_003(tmp_path):
     repository.initialize()
     connection = _connect(path)
     try:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute("SELECT COUNT(*) FROM follow_up_human_attributions").fetchone()[0] == 0
         names = {
             row[0]
@@ -187,7 +187,7 @@ def test_version_two_upgrade_keeps_cases_and_does_not_backfill(tmp_path):
     SQLiteFollowUpReviewCaseRepository(path, clock=lambda: NOW).initialize()
     after = _connect(path)
     try:
-        assert after.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert after.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert [tuple(row) for row in after.execute("SELECT * FROM follow_up_review_cases")] == case_before
         assert [tuple(row) for row in after.execute("SELECT * FROM follow_up_review_case_events")] == event_before
         assert [tuple(row) for row in after.execute("SELECT * FROM follow_up_coordination_requests")] == request_before

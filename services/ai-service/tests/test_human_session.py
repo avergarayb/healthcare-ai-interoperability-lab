@@ -295,7 +295,7 @@ def test_concurrent_resolution_and_revocation(tmp_path):
 
 
 def test_review_migrations_and_http_routes_stay_untouched():
-    assert REVIEW_SCHEMA_VERSION == 3
+    assert REVIEW_SCHEMA_VERSION == 4
     review_migration = (APP / "migrations" / "001_follow_up_review.sql").read_bytes()
     coordination_migration = (APP / "migrations" / "002_follow_up_coordination_request.sql").read_text(
         encoding="utf-8"

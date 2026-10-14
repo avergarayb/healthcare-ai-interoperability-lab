@@ -19,6 +19,16 @@ from app.followup_coordination_action import (
     persistable_protocol_id,
     validate_coordination_request,
 )
+from app.followup_coordination_workflow import (
+    CoordinationQueueItem,
+    CoordinationRequestDetail,
+    CoordinationRequestEvent,
+    CoordinationRequestNotFound,
+    CoordinationTransitionRejected,
+    CoordinationTransitionResult,
+    transition_is_allowed,
+    validate_coordination_event,
+)
 from app.followup_review import (
     FollowUpReviewCase,
     FollowUpReviewCaseEvent,
@@ -41,6 +51,7 @@ from app.followup_review import (
     validate_review_event,
     validate_review_case_id,
     validate_trigger,
+    validate_utc_timestamp,
 )
 from app.human_attribution import (
     COORDINATION_REQUEST_CREATED,
@@ -51,7 +62,7 @@ from app.human_attribution import (
 )
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 BUSY_TIMEOUT_MS = 5_000
 _MIGRATION = Path(__file__).with_name("migrations") / "001_follow_up_review.sql"
 _COORDINATION_REQUEST_MIGRATION = (
@@ -60,11 +71,15 @@ _COORDINATION_REQUEST_MIGRATION = (
 _HUMAN_ATTRIBUTION_MIGRATION = (
     Path(__file__).with_name("migrations") / "003_follow_up_human_attribution.sql"
 )
+_COORDINATION_WORKFLOW_MIGRATION = (
+    Path(__file__).with_name("migrations") / "004_follow_up_coordination_workflow.sql"
+)
 _TABLES = (
     "follow_up_review_cases",
     "follow_up_review_case_events",
     "follow_up_coordination_requests",
     "follow_up_human_attributions",
+    "follow_up_coordination_request_events",
 )
 
 
@@ -103,6 +118,9 @@ class SQLiteFollowUpReviewCaseRepository:
                     version = int(connection.execute("PRAGMA user_version").fetchone()[0])
                 if version == 2:
                     _apply_migration(connection, _HUMAN_ATTRIBUTION_MIGRATION)
+                    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                if version == 3:
+                    _apply_migration(connection, _COORDINATION_WORKFLOW_MIGRATION)
                 self._validate_schema(connection)
         except ReviewStoreInitializationError:
             raise
@@ -457,6 +475,161 @@ class SQLiteFollowUpReviewCaseRepository:
         except (sqlite3.DatabaseError, OSError, ValueError) as exc:
             raise ReviewPersistenceUnavailable from exc
 
+    def list_follow_up_coordination_requests(
+        self,
+        *,
+        limit: int,
+        after: tuple[str, str] | None = None,
+    ) -> tuple[CoordinationQueueItem, ...]:
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise ValueError("coordination queue limit is invalid")
+        parameters: list[object] = []
+        where = ""
+        if after is not None:
+            created_at, request_id = after
+            validate_utc_timestamp(created_at)
+            validate_review_case_id(request_id)
+            where = "WHERE r.created_at < ? OR (r.created_at = ? AND r.id > ?)"
+            parameters.extend((created_at, created_at, request_id))
+        parameters.append(limit)
+        try:
+            with self._connection_scope() as connection:
+                rows = connection.execute(
+                    f"""
+                    SELECT r.*, c.case_id
+                    FROM follow_up_coordination_requests AS r
+                    JOIN follow_up_review_cases AS c ON c.id = r.review_case_id
+                    {where}
+                    ORDER BY r.created_at DESC, r.id ASC
+                    LIMIT ?
+                    """,
+                    parameters,
+                ).fetchall()
+            return tuple(_coordination_queue_item(row) for row in rows)
+        except (sqlite3.DatabaseError, OSError, ValueError) as exc:
+            raise ReviewPersistenceUnavailable from exc
+
+    def get_coordination_request_detail(self, request_id: str) -> CoordinationRequestDetail | None:
+        validate_review_case_id(request_id)
+        try:
+            with self._connection_scope() as connection:
+                row = connection.execute(
+                    """
+                    SELECT r.*, c.case_id, c.status AS review_status
+                    FROM follow_up_coordination_requests AS r
+                    JOIN follow_up_review_cases AS c ON c.id = r.review_case_id
+                    WHERE r.id = ?
+                    """,
+                    (request_id,),
+                ).fetchone()
+                if row is None:
+                    return None
+                event_rows = connection.execute(
+                    """
+                    SELECT * FROM follow_up_coordination_request_events
+                    WHERE coordination_request_id = ?
+                    ORDER BY occurred_at ASC, event_id ASC
+                    """,
+                    (request_id,),
+                ).fetchall()
+            return CoordinationRequestDetail(
+                request=_coordination_request_from_row(row),
+                case_id=str(row["case_id"]),
+                review_status=str(row["review_status"]),
+                events=tuple(_coordination_event_from_row(event) for event in event_rows),
+            )
+        except (sqlite3.DatabaseError, OSError, ValueError) as exc:
+            raise ReviewPersistenceUnavailable from exc
+
+    def transition_follow_up_coordination_request(
+        self,
+        request_id: str,
+        *,
+        expected_status: CoordinationRequestStatus,
+        target_status: CoordinationRequestStatus,
+        attribution: DevelopmentPrincipalSnapshot,
+    ) -> CoordinationTransitionResult:
+        """Move one stored request one allowed step, or return it unchanged.
+
+        A repeat of the same target does not insert another event. Any other
+        status is rejected and leaves the row unchanged.
+        """
+        validate_review_case_id(request_id)
+        validate_development_principal_snapshot(attribution)
+        if not transition_is_allowed(expected_status, target_status):
+            raise CoordinationTransitionRejected
+        occurred_at = utc_timestamp(self._clock)
+        event_id = str(self._id_factory())
+        try:
+            with self._connection_scope() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute(
+                    """
+                    SELECT * FROM follow_up_coordination_requests
+                    WHERE id = ?
+                    """,
+                    (request_id,),
+                ).fetchone()
+                if current is None:
+                    connection.rollback()
+                    raise CoordinationRequestNotFound
+                status = CoordinationRequestStatus(str(current["status"]))
+                if status is target_status:
+                    connection.commit()
+                    return CoordinationTransitionResult(
+                        request=_coordination_request_from_row(current),
+                        applied=False,
+                    )
+                if status is not expected_status:
+                    connection.rollback()
+                    raise CoordinationTransitionRejected
+                updated = connection.execute(
+                    """
+                    UPDATE follow_up_coordination_requests
+                    SET status = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (target_status.value, request_id, expected_status.value),
+                ).rowcount
+                if updated != 1:
+                    connection.rollback()
+                    raise CoordinationTransitionRejected
+                connection.execute(
+                    """
+                    INSERT INTO follow_up_coordination_request_events (
+                        event_id, coordination_request_id, review_case_id,
+                        from_status, to_status, principal_id, authenticator_id,
+                        session_id, occurred_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        request_id,
+                        str(current["review_case_id"]),
+                        expected_status.value,
+                        target_status.value,
+                        attribution.principal_id,
+                        attribution.authenticator_id,
+                        attribution.session_id,
+                        occurred_at,
+                    ),
+                )
+                stored = connection.execute(
+                    "SELECT * FROM follow_up_coordination_requests WHERE id = ?",
+                    (request_id,),
+                ).fetchone()
+                connection.commit()
+            if stored is None:
+                raise ReviewPersistenceUnavailable
+            return CoordinationTransitionResult(
+                request=_coordination_request_from_row(stored),
+                applied=True,
+            )
+        except (CoordinationRequestNotFound, CoordinationTransitionRejected, ReviewPersistenceUnavailable):
+            raise
+        except (sqlite3.DatabaseError, OSError, ValueError) as exc:
+            raise ReviewPersistenceUnavailable from exc
+
     def list_human_attributions(
         self, review_case_id: str
     ) -> tuple[StoredDevelopmentAttribution, ...]:
@@ -538,6 +711,7 @@ def _migration_schema_contract() -> tuple[object, ...]:
         connection.executescript(_MIGRATION.read_text(encoding="utf-8"))
         connection.executescript(_COORDINATION_REQUEST_MIGRATION.read_text(encoding="utf-8"))
         connection.executescript(_HUMAN_ATTRIBUTION_MIGRATION.read_text(encoding="utf-8"))
+        connection.executescript(_COORDINATION_WORKFLOW_MIGRATION.read_text(encoding="utf-8"))
         return _schema_contract(connection)
     finally:
         connection.close()
@@ -665,6 +839,28 @@ def _coordination_request_from_row(row: sqlite3.Row) -> FollowUpCoordinationRequ
     if request.id != raw_id or request.review_case_id != raw_review_case_id:
         raise ValueError("persisted coordination request identifiers are not canonical")
     return validate_coordination_request(request)
+
+
+def _coordination_queue_item(row: sqlite3.Row) -> CoordinationQueueItem:
+    return CoordinationQueueItem(
+        request=_coordination_request_from_row(row),
+        case_id=str(row["case_id"]),
+    )
+
+
+def _coordination_event_from_row(row: sqlite3.Row) -> CoordinationRequestEvent:
+    event = CoordinationRequestEvent(
+        event_id=str(row["event_id"]),
+        coordination_request_id=str(row["coordination_request_id"]),
+        review_case_id=str(row["review_case_id"]),
+        from_status=CoordinationRequestStatus(str(row["from_status"])),
+        to_status=CoordinationRequestStatus(str(row["to_status"])),
+        principal_id=str(row["principal_id"]),
+        authenticator_id=str(row["authenticator_id"]),
+        session_id=str(row["session_id"]),
+        occurred_at=str(row["occurred_at"]),
+    )
+    return validate_coordination_event(event)
 
 
 def _json_array(values: tuple[str, ...]) -> str:

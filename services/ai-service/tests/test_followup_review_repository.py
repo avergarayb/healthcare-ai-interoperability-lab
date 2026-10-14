@@ -244,7 +244,7 @@ def test_empty_database_initializes_supported_schema(tmp_path):
     repository = SQLiteFollowUpReviewCaseRepository(path)
     repository.initialize()
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
         tables = {
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")

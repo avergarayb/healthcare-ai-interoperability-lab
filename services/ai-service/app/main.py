@@ -25,10 +25,14 @@ from app.human_development_auth import (
 )
 from app.human_review_client import (
     close_review_case,
+    open_case_coordination_request,
+    render_coordination_queue,
+    render_coordination_request,
     render_review_case,
     render_review_queue,
     submit_ai_assistance,
     submit_controlled_action,
+    submit_coordination_transition,
 )
 from app.followup_review_http import (
     close_review_case_http,
@@ -114,9 +118,45 @@ async def review_logout(
     )
 
 
+@app.get("/review-coordination-requests")
+def review_coordination_requests(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> Response:
+    return render_coordination_queue(request, settings)
+
+
+@app.get("/review-coordination-requests/{request_id}")
+def review_coordination_request(
+    request_id: str, request: Request, settings: Settings = Depends(get_settings)
+) -> Response:
+    return render_coordination_request(request, settings, request_id)
+
+
+@app.post("/review-coordination-requests/{request_id}/transition")
+async def review_coordination_transition(
+    request_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_coordination_transition(
+        request,
+        settings,
+        request_id,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
+
+
 @app.get("/review-cases")
 def review_cases(request: Request, settings: Settings = Depends(get_settings)) -> Response:
     return render_review_queue(request, settings)
+
+
+@app.get("/review-cases/{review_case_id}/coordination-request")
+def review_case_coordination_request(
+    review_case_id: str, request: Request, settings: Settings = Depends(get_settings)
+) -> Response:
+    return open_case_coordination_request(request, settings, review_case_id)
 
 
 @app.get("/review-cases/{review_case_id}")

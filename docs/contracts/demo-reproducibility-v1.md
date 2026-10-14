@@ -18,7 +18,7 @@ The Healthcare AI service does not write FHIR, does not send a message, and does
 |---|---|
 | Existing deterministic evaluators | Whether a synthetic read matches a protocol |
 | `ensure_for_protocol` | Creating or reusing one durable review case for a matched trigger |
-| Review SQLite, schema version 3 | Cases, events, coordination requests, and development attributions |
+| Review SQLite, schema version 4 | Cases, events, coordination requests, coordination history, and development attributions |
 | Local HAPI | The synthetic Patient, Encounter, Observation, and Appointment resources named by this contract |
 | This contract | Which case ids are disposable, which rows a reset may delete, and when preparation or reset must abort |
 | Browser | Nothing about protocol, outcome, status, or principal |
@@ -105,25 +105,27 @@ On `SYN-DEMO-102`, visual validation of [DEMO_EXPERIENCE_V1](demo-experience-v1.
 
 Reset is a local utility. It is not an HTTP endpoint. It opens only the review database identified below. It does not open the session database and it does not call FHIR.
 
-The utility sets `PRAGMA foreign_keys=ON` and aborts if enforcement is not active. It checks `PRAGMA user_version` is 3, `PRAGMA integrity_check` is `ok`, and `PRAGMA foreign_key_check` returns no rows. It then copies every historical row, and every child row of those historical cases, from:
+The utility sets `PRAGMA foreign_keys=ON` and aborts if enforcement is not active. It checks `PRAGMA user_version` is 4, `PRAGMA integrity_check` is `ok`, and `PRAGMA foreign_key_check` returns no rows. It does not migrate the database. It then copies every historical row, and every child row of those historical cases, from:
 
 - `follow_up_review_cases`
 - `follow_up_review_case_events`
 - `follow_up_coordination_requests`
 - `follow_up_human_attributions`
+- `follow_up_coordination_request_events`
 
-Inside `BEGIN IMMEDIATE` it deletes only disposable rows, in this order, because the foreign keys are `ON DELETE RESTRICT`:
+Inside `BEGIN IMMEDIATE` it deletes only disposable rows, in this order:
 
 1. `follow_up_human_attributions` for the selected review case ids.
-2. `follow_up_coordination_requests` for those ids.
-3. `follow_up_review_case_events` for those ids.
-4. `follow_up_review_cases` for `SYN-DEMO-101` and `SYN-DEMO-102` whose protocol matches the table above.
+2. `follow_up_coordination_request_events` for those ids.
+3. `follow_up_coordination_requests` for those ids.
+4. `follow_up_review_case_events` for those ids.
+5. `follow_up_review_cases` for `SYN-DEMO-101` and `SYN-DEMO-102` whose protocol matches the table above.
 
-The transaction commits only when the historical copy still matches the database, `foreign_key_check` is still empty, and `user_version` is still 3. Otherwise it rolls back. A reset that finds no disposable rows commits only when that historical comparison succeeds. It does not delete SQLite `-wal` or `-shm` files. FHIR resources are left in place.
+The transaction commits only when the historical copy still matches the database, `foreign_key_check` is still empty, and `user_version` is still 4. Otherwise it rolls back. A reset that finds no disposable rows commits only when that historical comparison succeeds. It does not delete SQLite `-wal` or `-shm` files. FHIR resources are left in place.
 
 ## Preconditions and abort conditions
 
-Both utilities require an explicit absolute path to the review database. The path must be the configured local `AI_REVIEW_DB_PATH`, must already exist, and must be schema version 3. The utility aborts if that path is missing, is the session database, is the institutional-knowledge database, or cannot be resolved to one file.
+Both utilities require an explicit absolute path to the review database. The path must be the configured local `AI_REVIEW_DB_PATH`, must already exist, and must be schema version 4. They abort when the version is anything else. They do not migrate it. The utility aborts if that path is missing, is the session database, is the institutional-knowledge database, or cannot be resolved to one file.
 
 Both utilities check that `127.0.0.1:8090` does not accept a connection. That check is necessary and is not sufficient. They also require the exclusive write lock from `BEGIN IMMEDIATE` within the existing busy timeout. If the port check fails, the check itself errors, the lock is not acquired, or any ownership or schema fact is uncertain, the utility aborts and leaves the database unchanged.
 

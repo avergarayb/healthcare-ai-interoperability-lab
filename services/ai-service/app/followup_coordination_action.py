@@ -47,6 +47,8 @@ class CoordinationActionType(str, Enum):
 
 class CoordinationRequestStatus(str, Enum):
     REQUESTED = "requested"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
 
 
 class CoordinationRequestNotPersistable(Exception):
@@ -138,7 +140,11 @@ def validate_coordination_request(
     persistable_protocol_id(request.protocol_id)
     if request.action_type is not CoordinationActionType.CREATE_FOLLOW_UP_COORDINATION_REQUEST:
         raise ValueError("persisted coordination action type is invalid")
-    if request.status is not CoordinationRequestStatus.REQUESTED:
+    if request.status not in {
+        CoordinationRequestStatus.REQUESTED,
+        CoordinationRequestStatus.IN_PROGRESS,
+        CoordinationRequestStatus.COMPLETED,
+    }:
         raise ValueError("persisted coordination status is invalid")
     validate_utc_timestamp(request.created_at)
     return request

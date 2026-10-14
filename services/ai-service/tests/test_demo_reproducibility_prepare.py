@@ -219,6 +219,7 @@ def _historical_dump(path: Path) -> dict[str, list[tuple]]:
             "events": children("follow_up_review_case_events"),
             "coordination": children("follow_up_coordination_requests"),
             "attributions": children("follow_up_human_attributions"),
+            "coordination_history": children("follow_up_coordination_request_events"),
         }
     finally:
         connection.close()
@@ -396,18 +397,18 @@ def test_invalid_review_database_path(tmp_path: Path, path_kind: str, reason: st
     assert gateway.puts == []
 
 
-def test_incompatible_schema_is_left_unchanged(tmp_path: Path):
+@pytest.mark.parametrize("version", [3, 5])
+def test_incompatible_schema_is_left_unchanged(tmp_path: Path, version: int):
     review = _review_db(tmp_path)
     connection = sqlite3.connect(review)
-    connection.execute("PRAGMA user_version = 4")
+    connection.execute(f"PRAGMA user_version = {int(version)}")
     connection.commit()
     connection.close()
     gateway = ScriptedFhir()
     with pytest.raises(prepare.DemoPreparationAborted) as caught:
         _prepare(tmp_path, review, gateway)
     assert caught.value.reason == "schema_incompatible"
-    version = sqlite3.connect(review).execute("PRAGMA user_version").fetchone()[0]
-    assert version == 4
+    assert sqlite3.connect(review).execute("PRAGMA user_version").fetchone()[0] == version
     assert gateway.puts == []
 
 

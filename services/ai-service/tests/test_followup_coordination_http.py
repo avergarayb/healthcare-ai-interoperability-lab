@@ -588,8 +588,14 @@ def test_controlled_action_route_uses_the_service_and_not_a_generic_executor():
         assert token not in human
     assert '/review-cases/{review_case_id}/controlled-action' in main
     assert "POST /actions" not in main
-    migrations = "\n".join(
-        path.read_text(encoding="utf-8") for path in (APP / "migrations").glob("*.sql")
+    older_migrations = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (APP / "migrations").glob("*.sql")
+        if path.name != "004_follow_up_coordination_workflow.sql"
     )
-    assert "follow_up_coordination_request_events" not in migrations
+    workflow_migration = (APP / "migrations" / "004_follow_up_coordination_workflow.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "follow_up_coordination_request_events" not in older_migrations
+    assert "follow_up_coordination_request_events" in workflow_migration
     assert "follow_up_coordination_request_events" not in human
