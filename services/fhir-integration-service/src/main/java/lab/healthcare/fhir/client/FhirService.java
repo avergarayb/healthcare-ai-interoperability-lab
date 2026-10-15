@@ -97,11 +97,12 @@ public class FhirService {
         requireText(system, "Patient identifier system must be provided");
         requireText(value, "Patient identifier value must be provided");
         requirePageSize(pageSize);
-        String token = system.trim() + "|" + value.trim();
+        String identifierSystem = system.trim();
+        String identifierValue = value.trim();
         return execute(
                 () -> fhirClient.search()
                         .forResource(Patient.class)
-                        .where(Patient.IDENTIFIER.exactly().identifier(token))
+                        .where(Patient.IDENTIFIER.exactly().systemAndIdentifier(identifierSystem, identifierValue))
                         .count(pageSize)
                         .returnBundle(Bundle.class)
                         .execute(),
