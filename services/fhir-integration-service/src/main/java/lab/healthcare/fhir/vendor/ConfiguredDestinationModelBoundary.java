@@ -14,9 +14,9 @@ import lab.healthcare.fhir.vendor.oracle.OracleSandboxModelBoundaryService;
 import org.springframework.stereotype.Component;
 
 /**
- * Selects the existing Epic or Oracle projection for the configured FHIR
- * destination. Unsupported destinations return the v1 contract without a FHIR
- * read. Laboratory pages keep their own Oracle provider.
+ * Selects the existing Epic, Oracle, or local HAPI projection for the configured
+ * FHIR destination. Unsupported destinations return the v1 contract without a
+ * FHIR read. Laboratory pages keep their own Oracle provider.
  */
 @Component
 public class ConfiguredDestinationModelBoundary implements ConfiguredModelBoundarySource {
@@ -26,13 +26,15 @@ public class ConfiguredDestinationModelBoundary implements ConfiguredModelBounda
     private final EpicIntegrationProfile epicProfile;
     private final OracleSandboxModelBoundaryService oracleModelBoundary;
     private final OracleHealthIntegrationProfile oracleProfile;
+    private final LocalHapiModelBoundary localHapi;
 
     public ConfiguredDestinationModelBoundary(
             FhirServersProperties servers,
             EpicSandboxClinicalProjectionService epicProjection,
             EpicIntegrationProfile epicProfile,
             OracleSandboxModelBoundaryService oracleModelBoundary,
-            OracleHealthIntegrationProfile oracleProfile) {
+            OracleHealthIntegrationProfile oracleProfile,
+            LocalHapiModelBoundary localHapi) {
         if (servers == null) {
             throw new IllegalArgumentException("FHIR server properties must be provided");
         }
@@ -48,11 +50,15 @@ public class ConfiguredDestinationModelBoundary implements ConfiguredModelBounda
         if (oracleProfile == null) {
             throw new IllegalArgumentException("Oracle Health integration profile must be provided");
         }
+        if (localHapi == null) {
+            throw new IllegalArgumentException("Local HAPI model boundary must be provided");
+        }
         this.servers = servers;
         this.epicProjection = epicProjection;
         this.epicProfile = epicProfile;
         this.oracleModelBoundary = oracleModelBoundary;
         this.oracleProfile = oracleProfile;
+        this.localHapi = localHapi;
     }
 
     @Override
@@ -63,6 +69,9 @@ public class ConfiguredDestinationModelBoundary implements ConfiguredModelBounda
         }
         if (OracleHealthIntegrationProfile.SANDBOX_SERVER.equals(destination)) {
             return oracleModelBoundary.assemble(oracleProfile);
+        }
+        if (LocalHapiModelBoundary.DESTINATION.equals(destination)) {
+            return localHapi.currentContract();
         }
         return new ModelBoundaryContract(
                 ModelBoundaryContractVersion.V1,

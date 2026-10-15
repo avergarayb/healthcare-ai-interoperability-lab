@@ -52,6 +52,9 @@ class ConfiguredDestinationModelBoundaryTest {
     @Mock
     private OracleHealthIntegrationProfile oracleProfile;
 
+    @Mock
+    private LocalHapiModelBoundary localHapi;
+
     @Test
     void epicDestinationReusesEpicProjectionWithoutMedicationRequests() {
         ClinicalProjectionResult projection = projection("epic-sandbox", null);
@@ -65,7 +68,7 @@ class ConfiguredDestinationModelBoundaryTest {
         assertThat(contract.medicationRequests()).isNull();
         assertThat(contract.conditions().records()).hasSize(1);
         verify(epicProjection).assemble(epicProfile);
-        verifyNoInteractions(oracleModelBoundary);
+        verifyNoInteractions(oracleModelBoundary, localHapi);
     }
 
     @Test
@@ -87,11 +90,28 @@ class ConfiguredDestinationModelBoundaryTest {
         assertThat(contract.medicationRequests()).isNotNull();
         assertThat(contract.medicationRequests().records()).hasSize(1);
         verify(oracleModelBoundary).assemble(oracleProfile);
-        verifyNoInteractions(epicProjection);
+        verifyNoInteractions(epicProjection, localHapi);
+    }
+
+    @Test
+    void localHapiDestinationReusesLocalAdapter() {
+        ModelBoundaryContract assembled = ModelBoundaryMapper.from(projection(
+                "local-hapi",
+                ProjectedCollection.retained(
+                        1, 1, false, List.of(new RetainedMedicationRequest("MedicationRequest", "active", "order")))));
+        when(localHapi.currentContract()).thenReturn(assembled);
+
+        ModelBoundaryContract contract = source("local-hapi").currentContract();
+
+        assertThat(contract).isSameAs(assembled);
+        assertThat(contract.contractVersion()).isEqualTo(ModelBoundaryContractVersion.V1);
+        assertThat(contract.medicationRequests()).isNotNull();
+        verify(localHapi).currentContract();
+        verifyNoInteractions(epicProjection, oracleModelBoundary);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"local-hapi", "example-org", "secured-lab", "smart-lab", "unknown"})
+    @ValueSource(strings = {"example-org", "secured-lab", "smart-lab", "unknown"})
     void unsupportedDestinationFailsClosedBeforeFhirReads(String destination) {
         ModelBoundaryContract contract = source(destination).currentContract();
 
@@ -103,7 +123,7 @@ class ConfiguredDestinationModelBoundaryTest {
         assertThat(contract.observations()).isNull();
         assertThat(contract.diagnosticReports()).isNull();
         assertThat(contract.medicationRequests()).isNull();
-        verifyNoInteractions(epicProjection, oracleModelBoundary);
+        verifyNoInteractions(epicProjection, oracleModelBoundary, localHapi);
     }
 
     private ConfiguredDestinationModelBoundary source(String activeServer) {
@@ -112,7 +132,8 @@ class ConfiguredDestinationModelBoundaryTest {
                 epicProjection,
                 epicProfile,
                 oracleModelBoundary,
-                oracleProfile);
+                oracleProfile,
+                localHapi);
     }
 
     private static ClinicalProjectionResult projection(

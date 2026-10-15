@@ -36,6 +36,8 @@ fhir:
       enabled: true
       authentication:
         type: NONE
+      vendor-integration:
+        patient-id: ${LOCAL_HAPI_PATIENT_ID:}
     example-org:
       base-url: https://example.org/fhir
       fhir-version: R4
