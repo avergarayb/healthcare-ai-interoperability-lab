@@ -6,7 +6,7 @@ This is the concise architecture authority and index for the **Healthcare AI & I
 
 | Unit | Runtime | Current responsibility |
 |---|---|---|
-| **Healthcare Interoperability** | Java 21 / Spring Boot | FHIR/SMART connectivity, vendor profiles, routing, resilience, transformations, controlled projections and interoperability contracts. |
+| **Healthcare Interoperability** | Java 21 / Spring Boot | Implemented: FHIR/SMART client, vendor profiles, routing, resilience, transformations, controlled projections and Model Boundary v1. Target, not implemented: independent bidirectional exchange among authorized organizations. |
 | **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, authorized bounded FHIR acquisition for explicit capabilities, deterministic protocol authority and narrative model subflows. |
 
 The units are independently deployable and may be sold separately or composed. Pricing and SKU names are not decided. The commercial connectivity target is [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
@@ -68,11 +68,13 @@ These flows do not require the Java process merely to obtain FHIR context when a
 
 | | Implemented | Target |
 |---|---|---|
-| Customer ingress | FHIR client only: Epic sandbox, Oracle Health sandbox, and laboratory HAPI | FHIR, proprietary REST, SOAP, HL7 v2, or files |
-| Normalization | Java projects FHIR it has already read. It requires a FHIR server for that read | Java connects, transforms, validates, and normalizes clinical data to FHIR R4. A FHIR server is not mandatory for that engine |
-| Python clinical input | Model Boundary v1, plus the bounded FHIR reads in ADR-085 | Normalized clinical data only. No dependency on each HIS protocol |
-| Laboratory FHIR store | HAPI FHIR Docker | Unchanged. It stays the laboratory repository |
-| Mini HIS Simulator | Not in the repository | Own persistence, synthetic data, proprietary REST first; other protocols later |
+| Exchange role | FHIR client for configured destinations. No route among organizations | Independent bidirectional platform. Clinics, hospitals, EPS, insurers, pharmacies, laboratories, and other authorized systems. Each hop is limited by agreement, permission, and remote capability |
+| Connectors | FHIR R4 client: Epic sandbox, Oracle Health sandbox, and laboratory HAPI | FHIR, proprietary REST, SOAP, HL7 v2, and files, inbound and outbound |
+| Transformation | Java projects FHIR it has already read. That read requires a FHIR server | Protocol transformation in both directions. FHIR R4 normalization when the content is clinical. A FHIR server is not mandatory for that engine |
+| Exchange controls | Destination routing, resilience, and FHIR-call audit inside the Java client. Tasks 057–073 are simulations, not authorization of an exchange | Routing, validation, traceability, audit, and authorization controls for organizational exchange |
+| Python clinical input | Model Boundary v1, plus the bounded FHIR reads in ADR-085. v1 is not a clinical API | Normalized clinical data only. No dependency on each HIS protocol. Healthcare AI is an optional consumer, not a dependency of the exchange |
+| FHIR repository | HAPI FHIR Docker is the laboratory repository | Optional repository or endpoint, not a mandatory hop |
+| Mini HIS Simulator | Local proprietary REST process and its own SQLite database. Java does not read it | Possible future proprietary source. Not the exchange platform |
 
 ## Authority boundaries
 
@@ -127,7 +129,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-092](../adr/ADR-092-controlled-action.md) | Accepted current decision for one internal follow-up coordination request after an explicit human POST. Not external execution and not authenticated approval. |
 | [ADR-093](../adr/ADR-093-human-review-session.md) | Accepted current decision for a development-only human session. Not production identity, IAM, SSO or RBAC. |
 | [ADR-094](../adr/ADR-094-human-attribution.md) | Accepted development attribution. The review UI records a synthetic development principal. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. |
-| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted commercial target: Java normalizes customer ingress to FHIR R4; Python consumes normalized data; HAPI Docker stays the laboratory repository. Not implemented beyond the current FHIR client and ADR-085 reads. |
+| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted target: Healthcare Interoperability is an independent bidirectional exchange platform; Java normalizes clinical content to FHIR R4; HAPI and Healthcare AI are optional. Not implemented beyond the current FHIR client and ADR-085 reads. |
 
 ## Historical governance artifacts
 

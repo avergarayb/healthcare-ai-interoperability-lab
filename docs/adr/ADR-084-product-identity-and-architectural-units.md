@@ -89,9 +89,9 @@ Sharing v1 or `MODEL_BOUNDARY_SERVICE_TOKEN` does not merge A and B into one man
 
 ## System-to-System Interoperability
 
-System-to-system integration (including future Clinic ↔ Clinic / Pharmacy / Insurer / Laboratory, and possible HL7/API/SOAP/proprietary hops) belongs **conceptually** to Product A.
+System-to-system integration belongs to Product A. ADR-095 records the target: an independent bidirectional exchange among clinics, hospitals, EPS, insurers, pharmacies, laboratories, and other authorized systems, over FHIR, proprietary REST, SOAP, HL7 v2, and files, with inbound and outbound transformation, FHIR R4 normalization when the content is clinical, and routing, validation, traceability, audit, and authorization. HAPI is an optional repository. Healthcare AI is an optional consumer, not a dependency. Each integration is limited by agreement, permission, and the remote system's capability.
 
-That capability is an **architectural direction**. It is **not implemented**. This ADR does not add HL7, SOAP, or those connectors.
+That capability is **not implemented**. This ADR does not add HL7, SOAP, proprietary connectors, or those routes.
 
 ## Independence
 
