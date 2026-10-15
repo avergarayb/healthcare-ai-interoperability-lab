@@ -4,7 +4,7 @@ import lab.healthcare.fhir.modelboundary.BoundaryCollection;
 import lab.healthcare.fhir.modelboundary.BoundaryCondition;
 import lab.healthcare.fhir.modelboundary.BoundaryPatient;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContract;
-import lab.healthcare.fhir.modelboundary.ModelBoundaryContractProvider;
+import lab.healthcare.fhir.modelboundary.ConfiguredModelBoundarySource;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContractVersion;
 import lab.healthcare.fhir.patient.PatientContextSource;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
@@ -41,7 +41,7 @@ class ModelBoundaryContractControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private ModelBoundaryContractProvider provider;
+    private ConfiguredModelBoundarySource provider;
 
     @Test
     void authenticationRequiredIs401JsonWithoutInventingRecords() throws Exception {

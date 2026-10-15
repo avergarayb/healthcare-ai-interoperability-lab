@@ -1,7 +1,7 @@
 package lab.healthcare.fhir.modelboundary.web;
 
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContract;
-import lab.healthcare.fhir.modelboundary.ModelBoundaryContractProvider;
+import lab.healthcare.fhir.modelboundary.ConfiguredModelBoundarySource;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContractVersion;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryServiceTokenSettings;
 import lab.healthcare.fhir.snapshot.ClinicalSnapshotOutcome;
@@ -32,7 +32,7 @@ class ModelBoundaryServiceAuthFilterTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private ModelBoundaryContractProvider provider;
+    private ConfiguredModelBoundarySource provider;
 
     @Test
     void missingHeaderIs401WithoutContract() throws Exception {
