@@ -9,7 +9,7 @@ This is the concise architecture authority and index for the **Healthcare AI & I
 | **Healthcare Interoperability** | Java 21 / Spring Boot | FHIR/SMART connectivity, vendor profiles, routing, resilience, transformations, controlled projections and interoperability contracts. |
 | **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, authorized bounded FHIR acquisition for explicit capabilities, deterministic protocol authority and narrative model subflows. |
 
-The units are independently deployable and may be composed. Final commercial packaging is not decided.
+The units are independently deployable and may be sold separately or composed. Pricing and SKU names are not decided. The commercial connectivity target is [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
 
 ## Current data flows
 
@@ -62,6 +62,18 @@ Closed review case, outcome follow-up coordination planned, explicit Create coor
 
 These flows do not require the Java process merely to obtain FHIR context when an authorized FHIR endpoint is configured. They do not authorize arbitrary FHIR access or writes. `MISSED_FOLLOW_UP_REVIEW_V1` does not call Gemini or LangGraph during protocol evaluation. Institutional retrieval uses Gemini embeddings only. AI-assisted review may then make one structured generation call. It does not use LangGraph. The coordination request does not call Gemini, retrieval, or FHIR. See [ADR-089](../adr/ADR-089-missed-follow-up-review.md), [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md), [ADR-091](../adr/ADR-091-ai-assisted-review.md) and [ADR-092](../adr/ADR-092-controlled-action.md).
 
+## Commercial connectivity target
+
+[ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) is the target, not a description of the flows above.
+
+| | Implemented | Target |
+|---|---|---|
+| Customer ingress | FHIR client only: Epic sandbox, Oracle Health sandbox, and laboratory HAPI | FHIR, proprietary REST, SOAP, HL7 v2, or files |
+| Normalization | Java projects FHIR it has already read. It requires a FHIR server for that read | Java connects, transforms, validates, and normalizes clinical data to FHIR R4. A FHIR server is not mandatory for that engine |
+| Python clinical input | Model Boundary v1, plus the bounded FHIR reads in ADR-085 | Normalized clinical data only. No dependency on each HIS protocol |
+| Laboratory FHIR store | HAPI FHIR Docker | Unchanged. It stays the laboratory repository |
+| Mini HIS Simulator | Not in the repository | Own persistence, synthetic data, proprietary REST first; other protocols later |
+
 ## Authority boundaries
 
 - The application chooses mandatory FHIR acquisition; the model does not.
@@ -104,7 +116,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-081](../adr/ADR-081-runtime-packaging-boundary.md) | Local support-stack distinction retained; product-unit framing refined by ADR-084. |
 | [ADR-082](../adr/ADR-082-inbound-ai-service-protection.md) | Authentication requirement implemented; effective production network boundary remains unresolved. |
 | [ADR-083](../adr/ADR-083-product-and-local-fhir-packaging.md) | Local-FHIR Support Pack distinction retained; single-runtime wording refined by ADR-084. |
-| [ADR-084](../adr/ADR-084-product-identity-and-architectural-units.md) | Establishes independent product units; Python-FHIR current-state portions superseded by ADR-085. |
+| [ADR-084](../adr/ADR-084-product-identity-and-architectural-units.md) | Establishes independent product units; Python-FHIR current-state portions superseded by ADR-085. Ingress target is ADR-095. |
 | [ADR-085](../adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) | Accepted current decision for bounded Python FHIR reads and model authority. |
 | [ADR-086](../adr/ADR-086-persistent-follow-up-review-workflow-and-operational-authority-boundary.md) | Accepted current decision for durable operational follow-up review state and authority. Its exclusion of live clinical-detail projection is superseded only by ADR-087. |
 | [ADR-087](../adr/ADR-087-case-bound-current-clinical-review-context.md) | Accepted current decision for bounded current clinical context of an open review case. |
@@ -115,6 +127,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-092](../adr/ADR-092-controlled-action.md) | Accepted current decision for one internal follow-up coordination request after an explicit human POST. Not external execution and not authenticated approval. |
 | [ADR-093](../adr/ADR-093-human-review-session.md) | Accepted current decision for a development-only human session. Not production identity, IAM, SSO or RBAC. |
 | [ADR-094](../adr/ADR-094-human-attribution.md) | Accepted development attribution. The review UI records a synthetic development principal. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. |
+| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted commercial target: Java normalizes customer ingress to FHIR R4; Python consumes normalized data; HAPI Docker stays the laboratory repository. Not implemented beyond the current FHIR client and ADR-085 reads. |
 
 ## Historical governance artifacts
 

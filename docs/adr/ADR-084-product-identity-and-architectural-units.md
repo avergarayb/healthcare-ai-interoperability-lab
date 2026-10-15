@@ -153,9 +153,11 @@ ADR-076 remains Accepted for the experimental Gemini path. Its historical “Pro
 
 ## Open Decisions
 
-- Python-direct-FHIR ingestion (whether, what contract, not a client to Epic/Oracle/HAPI)
+ADR-095 accepts the commercial target for customer ingress and Java normalization to FHIR R4. Those connectors are not implemented. ADR-085 remains the implemented Python FHIR-read decision. The items below were open on 2026-09-20; the first and third are no longer open as direction.
+
+- Python-direct-FHIR ingestion — implemented for Follow-up Review by ADR-085; target consumption of normalized data is ADR-095
 - Evolution of the A↔B contract beyond v1
-- HL7 v2 / SOAP / proprietary adapters on Product A
+- HL7 v2 / SOAP / proprietary adapters on Product A — accepted target in ADR-095, including proprietary REST and files; not implemented
 - Legal SKU / pricing / catalog names
 - Network-boundary enforcement (C8 properties; no tool chosen)
 - How Phase B gates G0–G4 apply when A and B are adopted separately
