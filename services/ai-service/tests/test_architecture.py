@@ -22,6 +22,7 @@ LESSON_MODULES = {
 }
 # These modules reuse the FHIR read implementation. They must not import LangGraph or Gemini.
 FHIR_REUSE_MODULES = {
+    "clinical_read_client.py",
     "clinical_review_context.py",
     "clinical_review_context_http.py",
     "missed_follow_up_service.py",

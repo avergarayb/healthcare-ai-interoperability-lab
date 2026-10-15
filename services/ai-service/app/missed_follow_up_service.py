@@ -233,11 +233,14 @@ def _project(
 
 
 def _live_adapter(instant: datetime):
+    from app.clinical_read_client import ClinicalReadClient
     from app.langgraph_fhir_client import ClientFHIRTransport
     from app.langgraph_fhir_followup import FollowUpFHIRAdapter
-    from app.langgraph_fhir_hapi import HapiReadClient
 
-    return FollowUpFHIRAdapter(ClientFHIRTransport(HapiReadClient()), now=lambda: instant)
+    return FollowUpFHIRAdapter(
+        ClientFHIRTransport(ClinicalReadClient.from_settings(Settings.from_env())),
+        now=lambda: instant,
+    )
 
 
 def _utc_now() -> datetime:
