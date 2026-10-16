@@ -57,12 +57,12 @@ from app.langgraph_followup_workflow import (
     MAX_MODEL_TURNS,
     FollowUpWorkflow,
     FollowUpWorkflowResult,
-    build_live_followup_workflow,
 )
 from app.langgraph_gemini_fhir_followup import (
     FINAL_DECISION_REQUEST,
     MODEL_LIMIT_ANSWER,
     followup_message_from_response,
+    gemini_followup_message,
 )
 
 
@@ -930,7 +930,13 @@ def test_live_application_workflow_reads_hapi_before_the_final_answer():
     stored_patient, stored_observation = _ensure_records(base)
     clear_boundary_events()
     sink = InMemoryAuditSink()
-    workflow = build_live_followup_workflow(sink, clock=_clock, run_id="run-live-workflow-001", base_url=base)
+    workflow = FollowUpWorkflow(
+        model=gemini_followup_message,
+        sink=sink,
+        fhir_client=HapiReadClient(base),
+        clock=_clock,
+        run_id="run-live-workflow-001",
+    )
     result = workflow.run(PATIENT_CASE)
     assert result.status == "finish"
     assert result.final_answer

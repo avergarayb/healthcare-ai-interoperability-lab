@@ -35,7 +35,7 @@ FHIRTransport
 FHIRReadClient
         |
         v
-HAPI FHIR
+Clinical Read API
 ```
 
 The application still owns policy, authorization, audit, security, HTTP,
@@ -241,7 +241,6 @@ def build_live_followup_workflow(
     *,
     clock: Callable[[], str],
     run_id: str,
-    base_url: str | None = None,
     policy: Callable[..., Any] = evaluate_tool_policy,
     audit: Callable[..., Any] = record_policy_audit,
     ensure_review_case: Callable[
@@ -249,14 +248,15 @@ def build_live_followup_workflow(
     ]
     | None = None,
 ) -> FollowUpWorkflow:
-    """Compose the live model and the live read client outside the workflow class."""
-    from app.langgraph_fhir_hapi import HapiReadClient
+    """Compose the live model and the Java clinical read client outside the workflow class."""
+    from app.clinical_read_client import ClinicalReadClient
+    from app.config import Settings
     from app.langgraph_gemini_fhir_followup import gemini_followup_message
 
     return FollowUpWorkflow(
         model=gemini_followup_message,
         sink=sink,
-        fhir_client=HapiReadClient(base_url),
+        fhir_client=ClinicalReadClient.from_settings(Settings.from_env()),
         policy=policy,
         audit=audit,
         clock=clock,

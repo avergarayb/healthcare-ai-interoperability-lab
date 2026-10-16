@@ -15,9 +15,11 @@ from app.langgraph_fhir_client import (
     BoundedSearchStatus,
     ClientFHIRTransport,
     ExactResourceNotFound,
+    ReadClientError,
 )
 from app.langgraph_fhir_followup import (
     FollowUpFHIRAdapter,
+    PostConsultationContextReader,
     case_resolution_search_path,
     encounter_search_path,
     patient_resource_path,
@@ -27,7 +29,7 @@ from app.langgraph_fhir_followup import (
 from app.langgraph_followup_workflow import build_live_followup_workflow
 from app.missed_follow_up_review import REASON_MISSED
 from app.missed_follow_up_service import _live_adapter, evaluate_missed_follow_up_case
-from app.post_consultation_review import ProtocolEvaluationStatus
+from app.post_consultation_review import ProtocolEvaluationStatus, evaluate_post_consultation_review
 
 
 TOKEN = "test-model-boundary-token"
@@ -305,7 +307,8 @@ def test_migrated_protocol_matches_a_past_noshow_and_keeps_hapi_for_post_consult
     workflow_source = inspect.getsource(build_live_followup_workflow)
     assert "ClinicalReadClient" in missed_source
     assert "HapiReadClient" not in missed_source
-    assert "HapiReadClient" in workflow_source
+    assert "ClinicalReadClient" in workflow_source
+    assert "HapiReadClient" not in workflow_source
 
 
 def test_encounter_and_observation_reads_keep_fields_and_java_errors():
@@ -462,4 +465,90 @@ def test_encounter_and_observation_reads_keep_fields_and_java_errors():
     client_source = inspect.getsource(ClinicalReadClient)
     assert "HapiReadClient" not in client_source
     assert "8080" not in client_source
-    assert "HapiReadClient" in inspect.getsource(build_live_followup_workflow)
+    assert "ClinicalReadClient" in inspect.getsource(build_live_followup_workflow)
+    assert "HapiReadClient" not in inspect.getsource(build_live_followup_workflow)
+
+
+def test_post_consultation_protocol_reads_java_and_keeps_decisions():
+    patient = _patient()
+    encounter = {
+        "resourceType": "Encounter",
+        "id": "enc-1",
+        "status": "finished",
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "period": {"end": "2026-09-01T16:00:00Z"},
+    }
+    observation = {
+        "resourceType": "Observation",
+        "id": "obs-1",
+        "status": "final",
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "encounter": {"reference": "Encounter/enc-1"},
+        "issued": "2026-09-01T17:00:00Z",
+    }
+
+    def handler(mode: str):
+        def respond(request: httpx.Request) -> httpx.Response:
+            assert request.url.host == "interop.test"
+            assert request.url.path.startswith("/api/clinical-read/v1/")
+            assert "8080" not in str(request.url)
+            path = request.url.path
+            if mode == "not_found" and path.endswith(f"/patients/{PATIENT_ID}"):
+                return httpx.Response(404, json={"error": "not_found"})
+            if mode == "conflict" and path.endswith("/observations"):
+                return httpx.Response(409, json={"error": "operation_not_supported"})
+            if mode == "invalid" and path.endswith("/observations"):
+                return httpx.Response(422, json={"error": "invalid_source"})
+            if mode == "down" and path.endswith("/encounters"):
+                return httpx.Response(503, json={"error": "unavailable"})
+            if mode == "incomplete" and path.endswith("/observations"):
+                return httpx.Response(200, json=_search("Observation", [observation], "incomplete"))
+            if path.endswith("/patients") and "identifierSystem" in request.url.params:
+                return httpx.Response(200, json=_search("Patient", [patient]))
+            if path.endswith(f"/patients/{PATIENT_ID}"):
+                return httpx.Response(200, json=_read(patient))
+            if path.endswith("/encounters"):
+                return httpx.Response(200, json=_search("Encounter", [encounter]))
+            if path.endswith("/observations"):
+                return httpx.Response(200, json=_search("Observation", [observation]))
+            if path.endswith("/appointments"):
+                return httpx.Response(200, json=_search("Appointment", []))
+            raise AssertionError(str(request.url))
+
+        return respond
+
+    def evaluate(mode: str):
+        client, http = _client(handler(mode))
+        adapter = FollowUpFHIRAdapter(ClientFHIRTransport(client), now=lambda: INSTANT)
+        try:
+            with adapter.bind_read(CASE_ID):
+                try:
+                    snapshot = PostConsultationContextReader(adapter).read(CASE_ID)
+                except ReadClientError:
+                    snapshot = adapter.ledger.protocol_snapshot()
+        finally:
+            http.close()
+        return evaluate_post_consultation_review(snapshot)
+
+    matched = evaluate("complete")
+    missing = evaluate("not_found")
+    conflict = evaluate("conflict")
+    invalid = evaluate("invalid")
+    down = evaluate("down")
+    incomplete = evaluate("incomplete")
+
+    assert matched.evaluation_status is ProtocolEvaluationStatus.MATCHED
+    assert matched.reason_codes == ("post_consultation_result_requires_review",)
+    assert matched.matched_resources == ("Encounter/enc-1", "Observation/obs-1")
+    assert missing.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert missing.reason_codes == ("patient_read_unavailable",)
+    assert conflict.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert conflict.reason_codes == ("observation_acquisition_unavailable",)
+    assert conflict.matched_resources == ()
+    assert invalid.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert invalid.reason_codes == ("observation_acquisition_unavailable",)
+    assert down.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert down.reason_codes == ("encounter_acquisition_unavailable",)
+    assert incomplete.evaluation_status is ProtocolEvaluationStatus.INSUFFICIENT
+    assert incomplete.reason_codes == ("observation_search_incomplete",)
+    assert incomplete.matched_resources == ()
