@@ -156,6 +156,21 @@ class MiniHisConnectorTest {
                 exchange.sendResponseHeaders(405, -1);
                 return;
             }
+            if ("/results".equals(path)) {
+                String query = exchange.getRequestURI().getRawQuery();
+                if (query == null || !query.contains("patientId=MHS-PAT-001") || !query.contains("status=final")) {
+                    exchange.sendResponseHeaders(400, -1);
+                    return;
+                }
+                byte[] found = ("[" + resultJson() + "]").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.getResponseHeaders().set("X-More-Results", "false");
+                exchange.sendResponseHeaders(200, found.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(found);
+                }
+                return;
+            }
             byte[] body = switch (path) {
                 case "/patients/MHS-PAT-001" -> patientJson().getBytes(StandardCharsets.UTF_8);
                 case "/patients/MHS-PAT-001/consultations" -> consultationsJson().getBytes(StandardCharsets.UTF_8);
@@ -187,6 +202,8 @@ class MiniHisConnectorTest {
             JsonNode encounter = source.readEncounter("MHS-CON-001");
             int beforeObservation = paths.size();
             JsonNode observation = source.readObservation("MHS-RES-001");
+            int beforeSearch = requests.get();
+            JsonNode observations = source.searchObservations("MHS-PAT-001", "final");
             int beforeUnsupported = requests.get();
 
             assertThat(patient.path("destination").asText()).isEqualTo("mini-his");
@@ -198,7 +215,7 @@ class MiniHisConnectorTest {
             assertThat(encounter.path("resource").path("class").path("code").asText()).isEqualTo("AMB");
             assertThat(encounter.path("resource").path("subject").path("reference").asText())
                     .isEqualTo("Patient/MHS-PAT-001");
-            assertThat(paths.subList(beforeObservation, paths.size())).containsExactly("/results/MHS-RES-001");
+            assertThat(paths.get(beforeObservation)).isEqualTo("/results/MHS-RES-001");
             assertThat(observation.path("resource").path("status").asText()).isEqualTo("final");
             assertThat(observation.path("resource").path("encounter").path("reference").asText())
                     .isEqualTo("Encounter/MHS-CON-001");
@@ -211,10 +228,17 @@ class MiniHisConnectorTest {
                     .isInstanceOf(ClinicalReadException.class)
                     .extracting(ex -> ((ClinicalReadException) ex).code())
                     .isEqualTo("operation_not_supported");
-            assertThatThrownBy(() -> source.searchObservations("MHS-PAT-001", "final"))
-                    .isInstanceOf(ClinicalReadException.class)
-                    .extracting(ex -> ((ClinicalReadException) ex).code())
-                    .isEqualTo("operation_not_supported");
+            assertThat(requests.get()).isEqualTo(beforeSearch + 1);
+            assertThat(paths.get(paths.size() - 1)).isEqualTo("/results");
+            assertThat(observations.path("collectionStatus").asText()).isEqualTo("complete");
+            assertThat(observations.path("resourceType").asText()).isEqualTo("Observation");
+            assertThat(observations.path("resources").get(0).path("status").asText()).isEqualTo("final");
+            assertThat(observations.path("resources").get(0).path("subject").path("reference").asText())
+                    .isEqualTo("Patient/MHS-PAT-001");
+            assertThat(observations.path("resources").get(0).path("encounter").path("reference").asText())
+                    .isEqualTo("Encounter/MHS-CON-001");
+            assertThat(observations.path("resources").get(0).path("category").get(0).path("coding").get(0).path("code").asText())
+                    .isEqualTo("vital-signs");
             assertThat(requests.get()).isEqualTo(beforeUnsupported);
             assertThatThrownBy(() -> source.readObservation("MHS-RES-404"))
                     .isInstanceOf(ClinicalReadException.class)
@@ -229,6 +253,156 @@ class MiniHisConnectorTest {
             server.stop(0);
         }
         verifyNoInteractions(routing);
+    }
+
+    @Test
+    void bloodPressureComponentsStayStructured() throws IOException {
+        MiniHisNormalizer normalizer = new MiniHisNormalizer(json);
+        JsonNode pressure = normalizer.observation(json.readTree(bloodPressureJson()));
+        JsonNode hemoglobin = normalizer.observation(json.readTree(hemoglobinJson()));
+        assertThat(pressure.path("valueQuantity").isMissingNode()).isTrue();
+        assertThat(pressure.path("valueString").isMissingNode()).isTrue();
+        assertThat(pressure.path("status").asText()).isEqualTo("final");
+        assertThat(pressure.path("subject").path("reference").asText()).isEqualTo("Patient/MHS-PAT-001");
+        assertThat(pressure.path("encounter").path("reference").asText()).isEqualTo("Encounter/MHS-CON-001");
+        assertThat(pressure.path("category").get(0).path("coding").get(0).path("code").asText()).isEqualTo("vital-signs");
+        assertThat(pressure.path("component")).hasSize(2);
+        assertThat(pressure.path("component").get(0).path("code").path("text").asText()).isEqualTo("Presion sistolica");
+        assertThat(pressure.path("component").get(0).path("code").path("coding").isMissingNode()).isTrue();
+        assertThat(pressure.path("component").get(0).path("valueQuantity").path("value").decimalValue())
+                .isEqualByComparingTo("120");
+        assertThat(pressure.path("component").get(0).path("valueQuantity").path("unit").asText()).isEqualTo("mmHg");
+        assertThat(pressure.path("component").get(1).path("code").path("text").asText()).isEqualTo("Presion diastolica");
+        assertThat(pressure.path("component").get(1).path("valueQuantity").path("value").decimalValue())
+                .isEqualByComparingTo("80");
+        assertThat(hemoglobin.path("component").isMissingNode()).isTrue();
+        assertThat(hemoglobin.path("valueQuantity").path("value").decimalValue()).isEqualByComparingTo("13.4");
+        assertThat(hemoglobin.path("valueQuantity").path("unit").asText()).isEqualTo("g/dL");
+        assertThatThrownBy(() -> normalizer.observation(json.readTree(bloodPressureJson().replace("\"unit\":\"mmHg\"", "\"unit\":\"\""))))
+                .isInstanceOf(ClinicalReadException.class)
+                .extracting(ex -> ((ClinicalReadException) ex).code())
+                .isEqualTo("invalid_source");
+        assertThatThrownBy(() -> normalizer.observation(json.readTree(
+                bloodPressureJson().replace("\"valueDecimal\":\"120\"", "\"valueDecimal\":\"120/80\""))))
+                .isInstanceOf(ClinicalReadException.class)
+                .extracting(ex -> ((ClinicalReadException) ex).code())
+                .isEqualTo("invalid_source");
+        assertThatThrownBy(() -> normalizer.observation(json.readTree(
+                bloodPressureJson().replace("\"Presion diastolica\"", "\"Presion sistolica\""))))
+                .isInstanceOf(ClinicalReadException.class)
+                .extracting(ex -> ((ClinicalReadException) ex).code())
+                .isEqualTo("invalid_source");
+        assertThatThrownBy(() -> normalizer.observation(json.readTree(
+                bloodPressureJson().replace(
+                        "\"components\":[{\"componentId\":\"MHS-CMP-002-1\",\"name\":\"Presion sistolica\",\"valueDecimal\":\"120\",\"unit\":\"mmHg\"},{\"componentId\":\"MHS-CMP-002-2\",\"name\":\"Presion diastolica\",\"valueDecimal\":\"80\",\"unit\":\"mmHg\"}]",
+                        "\"components\":{\"componentId\":\"MHS-CMP-002-1\"}"))))
+                .isInstanceOf(ClinicalReadException.class)
+                .extracting(ex -> ((ClinicalReadException) ex).code())
+                .isEqualTo("invalid_source");
+
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            String path = exchange.getRequestURI().getPath();
+            String query = exchange.getRequestURI().getRawQuery() == null ? "" : exchange.getRequestURI().getRawQuery();
+            String payload = switch (path) {
+                case "/results/MHS-RES-002" -> bloodPressureJson();
+                case "/results/MHS-RES-001" -> hemoglobinJson();
+                case "/results" -> query.contains("patientId=MHS-PAT-001") && query.contains("status=final")
+                        ? "[" + hemoglobinJson() + "," + bloodPressureJson() + "]"
+                        : "[]";
+                default -> null;
+            };
+            if (payload == null) {
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
+            byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            if ("/results".equals(path)) {
+                exchange.getResponseHeaders().set("X-More-Results", "false");
+            }
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        server.start();
+        try {
+            MiniHisClinicalSource source = source("http://127.0.0.1:" + server.getAddress().getPort());
+            JsonNode exact = source.readObservation("MHS-RES-002");
+            JsonNode found = source.searchObservations("MHS-PAT-001", "final");
+            assertThat(exact.path("resource").path("component")).hasSize(2);
+            assertThat(exact.path("resource").path("valueQuantity").isMissingNode()).isTrue();
+            assertThat(found.path("collectionStatus").asText()).isEqualTo("complete");
+            assertThat(found.path("resources")).hasSize(2);
+            assertThat(found.path("resources").get(0).path("valueQuantity").path("value").decimalValue())
+                    .isEqualByComparingTo("13.4");
+            assertThat(found.path("resources").get(1).path("component").get(0).path("valueQuantity").path("value").decimalValue())
+                    .isEqualByComparingTo("120");
+            assertThat(found.path("resources").get(1).path("component").get(1).path("valueQuantity").path("unit").asText())
+                    .isEqualTo("mmHg");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void observationSearchKeepsLimitsAndRejectsBadRows() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/results", exchange -> {
+            String query = exchange.getRequestURI().getRawQuery() == null ? "" : exchange.getRequestURI().getRawQuery();
+            String payload = "[]";
+            String more = "false";
+            int status = 200;
+            if (query.contains("status=down")) {
+                status = 503;
+                payload = "{\"error\":\"unavailable\"}";
+            } else if (query.contains("status=wrong")) {
+                payload = "[{\"resultId\":\"MHS-RES-009\",\"consultationId\":\"MHS-CON-001\",\"patientId\":\"MHS-PAT-009\",\"resultType\":\"laboratory\",\"displayName\":\"Hemoglobina\",\"valueText\":\"1\",\"status\":\"final\"}]";
+            } else if (query.contains("status=bad")) {
+                payload = "[{\"resultId\":\"MHS-RES-009\",\"consultationId\":\"MHS-CON-001\",\"patientId\":\"MHS-PAT-001\",\"resultType\":\"laboratory\",\"displayName\":\"Hemoglobina\",\"valueText\":\"1\",\"status\":\"preliminary\"}]";
+            } else if (query.contains("status=final")) {
+                payload = "[" + resultJson() + "]";
+                more = "true";
+            }
+            byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.getResponseHeaders().set("X-More-Results", more);
+            exchange.sendResponseHeaders(status, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        server.start();
+        try {
+            MiniHisClinicalSource source = source("http://127.0.0.1:" + server.getAddress().getPort());
+            JsonNode empty = source.searchObservations("MHS-PAT-001", "amended");
+            JsonNode truncated = source.searchObservations("MHS-PAT-001", "final");
+            assertThat(empty.path("collectionStatus").asText()).isEqualTo("complete");
+            assertThat(empty.path("resources")).isEmpty();
+            assertThat(truncated.path("collectionStatus").asText()).isEqualTo("incomplete");
+            assertThat(truncated.path("resources")).hasSize(1);
+            assertThat(truncated.path("resources").get(0).path("id").asText()).isEqualTo("MHS-RES-001");
+            assertThatThrownBy(() -> source.searchObservations("MHS-PAT-001", "wrong"))
+                    .isInstanceOf(ClinicalReadException.class)
+                    .extracting(ex -> ((ClinicalReadException) ex).code())
+                    .isEqualTo("invalid_source");
+            assertThatThrownBy(() -> source.searchObservations("MHS-PAT-001", "bad"))
+                    .isInstanceOf(ClinicalReadException.class)
+                    .extracting(ex -> ((ClinicalReadException) ex).code())
+                    .isEqualTo("invalid_source");
+            assertThatThrownBy(() -> source.searchObservations("MHS-PAT-001", "down"))
+                    .isInstanceOf(ClinicalReadException.class)
+                    .extracting(ex -> ((ClinicalReadException) ex).code())
+                    .isEqualTo("unavailable");
+        } finally {
+            server.stop(0);
+        }
+        MiniHisClinicalSource closed = source("http://127.0.0.1:59992");
+        assertThatThrownBy(() -> closed.searchObservations("MHS-PAT-001", "final"))
+                .isInstanceOf(ClinicalReadException.class)
+                .extracting(ex -> ((ClinicalReadException) ex).code())
+                .isEqualTo("unavailable");
     }
 
     @Test
@@ -366,6 +540,18 @@ class MiniHisConnectorTest {
 
     private static String consultationsJson() {
         return "[" + consultationJson() + "]";
+    }
+
+    private static String hemoglobinJson() {
+        return """
+                {"resultId":"MHS-RES-001","consultationId":"MHS-CON-001","patientId":"MHS-PAT-001","resultType":"laboratory","displayName":"Hemoglobina","valueText":"13.4","unit":"g/dL","observedAt":"2026-09-01T15:10:00Z","status":"final","components":[]}
+                """;
+    }
+
+    private static String bloodPressureJson() {
+        return """
+                {"resultId":"MHS-RES-002","consultationId":"MHS-CON-001","patientId":"MHS-PAT-001","resultType":"vital_sign","displayName":"Presion arterial","valueText":"120/80","unit":"mmHg","observedAt":"2026-09-01T15:20:00Z","status":"final","components":[{"componentId":"MHS-CMP-002-1","name":"Presion sistolica","valueDecimal":"120","unit":"mmHg"},{"componentId":"MHS-CMP-002-2","name":"Presion diastolica","valueDecimal":"80","unit":"mmHg"}]}
+                """;
     }
 
     private static String resultJson() {

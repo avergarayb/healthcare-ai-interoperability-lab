@@ -4,12 +4,14 @@ import lab.healthcare.fhir.clinicalread.ClinicalReadException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -100,7 +102,12 @@ final class MiniHisNormalizer {
         if (observedAt != null) {
             resource.put("effectiveDateTime", instant(observedAt));
         }
-        putValue(resource, optional(source, "valueText"), optional(source, "unit"));
+        JsonNode components = source.get("components");
+        if (components == null || components.isNull() || (components.isArray() && components.isEmpty())) {
+            putValue(resource, optional(source, "valueText"), optional(source, "unit"));
+        } else {
+            putComponents(resource, components);
+        }
         return resource;
     }
 
@@ -132,6 +139,32 @@ final class MiniHisNormalizer {
             return;
         }
         throw ClinicalReadException.invalidSource();
+    }
+
+    private static void putComponents(ObjectNode resource, JsonNode components) {
+        if (!components.isArray()) {
+            throw ClinicalReadException.invalidSource();
+        }
+        Set<String> ids = new HashSet<>();
+        Set<String> names = new HashSet<>();
+        ArrayNode target = resource.putArray("component");
+        for (JsonNode item : components) {
+            if (item == null || !item.isObject()) {
+                throw ClinicalReadException.invalidSource();
+            }
+            String componentId = required(item, "componentId");
+            String name = required(item, "name");
+            String value = required(item, "valueDecimal");
+            String unit = required(item, "unit");
+            if (!DECIMAL.matcher(value).matches() || !ids.add(componentId) || !names.add(name)) {
+                throw ClinicalReadException.invalidSource();
+            }
+            ObjectNode component = target.addObject();
+            component.putObject("code").put("text", name);
+            ObjectNode quantity = component.putObject("valueQuantity");
+            quantity.put("value", new BigDecimal(value));
+            quantity.put("unit", unit);
+        }
     }
 
     private ObjectNode encounterClass(String careClass) {

@@ -108,7 +108,26 @@ final class MiniHisRestSource implements MiniHisClinicalSource {
 
     @Override
     public JsonNode searchObservations(String patientId, String status) {
-        throw ClinicalReadException.operationNotSupported();
+        MiniHisResponse response = client.getList(
+                "/results?patientId=" + MiniHisClient.encode(patientId) + "&status=" + MiniHisClient.encode(status));
+        if (response.status() == 404) {
+            throw ClinicalReadException.notFound();
+        }
+        if (!response.body().isArray()) {
+            throw ClinicalReadException.invalidSource();
+        }
+        ArrayNode resources = json.createArrayNode();
+        for (JsonNode item : response.body()) {
+            if (!patientId.equals(MiniHisNormalizer.required(item, "patientId"))) {
+                throw ClinicalReadException.invalidSource();
+            }
+            ObjectNode observation = normalizer.observation(item);
+            if (!status.equals(observation.path("status").asText())) {
+                throw ClinicalReadException.invalidSource();
+            }
+            resources.add(observation);
+        }
+        return collection("Observation", resources, response.truncated());
     }
 
     @Override

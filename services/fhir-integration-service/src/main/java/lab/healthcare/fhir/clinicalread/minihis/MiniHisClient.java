@@ -74,7 +74,7 @@ final class MiniHisClient {
             throw ClinicalReadException.unavailable();
         }
         JsonNode body = parse(response.body());
-        boolean truncated = list && body.isArray() && body.size() >= ClinicalReadLimits.MAX_RESOURCES;
+        boolean truncated = list && truncated(response, body);
         return new MiniHisResponse(200, body, truncated);
     }
 
@@ -91,6 +91,17 @@ final class MiniHisClient {
         } catch (IOException ex) {
             throw ClinicalReadException.unavailable();
         }
+    }
+
+    private static boolean truncated(HttpResponse<String> response, JsonNode body) {
+        String more = response.headers().firstValue("X-More-Results").orElse("");
+        if ("true".equals(more)) {
+            return true;
+        }
+        if ("false".equals(more)) {
+            return false;
+        }
+        return body.isArray() && body.size() >= ClinicalReadLimits.MAX_RESOURCES;
     }
 
     static String encode(String value) {
