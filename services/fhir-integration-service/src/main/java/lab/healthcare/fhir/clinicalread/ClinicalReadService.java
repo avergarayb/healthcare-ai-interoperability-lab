@@ -3,6 +3,7 @@ package lab.healthcare.fhir.clinicalread;
 import lab.healthcare.fhir.exception.FhirClientException;
 import lab.healthcare.fhir.exception.FhirErrorCategory;
 import lab.healthcare.fhir.exception.FhirErrorClassifier;
+import lab.healthcare.fhir.clinicalread.minihis.MiniHisClinicalSource;
 import lab.healthcare.fhir.routing.RoutingException;
 import lab.healthcare.fhir.routing.RoutingService;
 import lab.healthcare.fhir.server.FhirServersProperties;
@@ -14,6 +15,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.Resource;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -31,11 +35,34 @@ public class ClinicalReadService {
     private static final Pattern STATUS = Pattern.compile("[A-Za-z0-9\\-]{1,64}");
     private static final int MAX_TOKEN_LENGTH = 200;
 
+    private static final String MINI_HIS = "mini-his";
+
     private final RoutingService routing;
     private final FhirServersProperties servers;
     private final ObjectMapper json;
+    private final String source;
+    private final MiniHisClinicalSource miniHis;
 
     public ClinicalReadService(RoutingService routing, FhirServersProperties servers, ObjectMapper json) {
+        this(routing, servers, json, ClinicalReadLimits.DESTINATION, (MiniHisClinicalSource) null);
+    }
+
+    @Autowired
+    public ClinicalReadService(
+            RoutingService routing,
+            FhirServersProperties servers,
+            ObjectMapper json,
+            @Value("${clinical-read.source:local-hapi}") String source,
+            ObjectProvider<MiniHisClinicalSource> miniHis) {
+        this(routing, servers, json, source, miniHis.getIfAvailable());
+    }
+
+    public ClinicalReadService(
+            RoutingService routing,
+            FhirServersProperties servers,
+            ObjectMapper json,
+            String source,
+            MiniHisClinicalSource miniHis) {
         if (routing == null) {
             throw new IllegalArgumentException("Routing service must be provided");
         }
@@ -48,16 +75,25 @@ public class ClinicalReadService {
         this.routing = routing;
         this.servers = servers;
         this.json = json;
+        String selected = source == null ? "" : source.trim();
+        this.source = selected.isEmpty() ? ClinicalReadLimits.DESTINATION : selected;
+        this.miniHis = miniHis;
     }
 
     public JsonNode readPatient(String logicalId) {
         String id = logicalId(logicalId);
+        if (miniHisSelected()) {
+            return miniHis().readPatient(id);
+        }
         return readResource("Patient", () -> routing.readPatientByLogicalId(ClinicalReadLimits.DESTINATION, id), id);
     }
 
     public JsonNode searchPatients(String identifierSystem, String identifierValue) {
         String system = token(identifierSystem);
         String value = token(identifierValue);
+        if (miniHisSelected()) {
+            return miniHis().searchPatients(system, value);
+        }
         return search(
                 "Patient",
                 () -> routing.searchPatientsByIdentifier(
@@ -66,12 +102,18 @@ public class ClinicalReadService {
 
     public JsonNode readEncounter(String logicalId) {
         String id = logicalId(logicalId);
+        if (miniHisSelected()) {
+            return miniHis().readEncounter(id);
+        }
         return readResource("Encounter", () -> routing.readEncounter(ClinicalReadLimits.DESTINATION, id), id);
     }
 
     public JsonNode searchEncounters(String patientId, String status) {
         String patient = logicalId(patientId);
         String encounterStatus = status(status);
+        if (miniHisSelected()) {
+            return miniHis().searchEncounters(patient, encounterStatus);
+        }
         return search(
                 "Encounter",
                 () -> routing.searchEncountersByPatientAndStatus(
@@ -80,6 +122,9 @@ public class ClinicalReadService {
 
     public JsonNode readObservation(String logicalId) {
         String id = logicalId(logicalId);
+        if (miniHisSelected()) {
+            return miniHis().readObservation(id);
+        }
         return readResource(
                 "Observation", () -> routing.readObservationByLogicalId(ClinicalReadLimits.DESTINATION, id), id);
     }
@@ -87,6 +132,9 @@ public class ClinicalReadService {
     public JsonNode searchObservations(String patientId, String status) {
         String patient = logicalId(patientId);
         String observationStatus = status(status);
+        if (miniHisSelected()) {
+            return miniHis().searchObservations(patient, observationStatus);
+        }
         return search(
                 "Observation",
                 () -> routing.searchObservationsByPatientAndStatus(
@@ -95,19 +143,36 @@ public class ClinicalReadService {
 
     public JsonNode readAppointment(String logicalId) {
         String id = logicalId(logicalId);
+        if (miniHisSelected()) {
+            return miniHis().readAppointment(id);
+        }
         return readResource("Appointment", () -> routing.readAppointment(ClinicalReadLimits.DESTINATION, id), id);
     }
 
     public JsonNode searchAppointments(String patientId) {
         String patient = logicalId(patientId);
+        if (miniHisSelected()) {
+            return miniHis().searchAppointments(patient);
+        }
         return search(
                 "Appointment",
                 () -> routing.searchAppointmentsByPatient(
                         ClinicalReadLimits.DESTINATION, patient, ClinicalReadLimits.PAGE_SIZE));
     }
 
+    private boolean miniHisSelected() {
+        return MINI_HIS.equals(source);
+    }
+
+    private MiniHisClinicalSource miniHis() {
+        if (!miniHisSelected() || miniHis == null) {
+            throw ClinicalReadException.unavailable();
+        }
+        return miniHis;
+    }
+
     private JsonNode readResource(String resourceType, Supplier<Resource> read, String logicalId) {
-        requireLocalHapi();
+        requireHapiSource();
         Resource resource = call(read, true);
         if (resource == null
                 || !resourceType.equals(resource.fhirType())
@@ -120,7 +185,7 @@ public class ClinicalReadService {
     }
 
     private JsonNode search(String resourceType, Supplier<Bundle> firstPage) {
-        requireLocalHapi();
+        requireHapiSource();
         Bundle page = call(firstPage, false);
         List<Resource> collected = new ArrayList<>();
         Set<String> seenIds = new HashSet<>();
@@ -174,7 +239,10 @@ public class ClinicalReadService {
         return body;
     }
 
-    private void requireLocalHapi() {
+    private void requireHapiSource() {
+        if (!ClinicalReadLimits.DESTINATION.equals(source)) {
+            throw ClinicalReadException.destinationNotSupported();
+        }
         String active = servers.activeServer() == null ? "" : servers.activeServer().trim();
         if (!ClinicalReadLimits.DESTINATION.equals(active)) {
             throw ClinicalReadException.destinationNotSupported();

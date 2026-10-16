@@ -36,4 +36,12 @@ public final class ClinicalReadException extends RuntimeException {
     public static ClinicalReadException invalidRequest() {
         return new ClinicalReadException("invalid_request", 400);
     }
+
+    public static ClinicalReadException operationNotSupported() {
+        return new ClinicalReadException("operation_not_supported", 409);
+    }
+
+    public static ClinicalReadException invalidSource() {
+        return new ClinicalReadException("invalid_source", 422);
+    }
 }
