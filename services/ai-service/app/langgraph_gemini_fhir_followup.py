@@ -48,7 +48,6 @@ from app.langgraph_fhir_followup import (
     make_appointments_tool,
     make_followup_tool,
 )
-from app.langgraph_fhir_hapi import HapiReadClient
 
 
 # AIMessages already in state, counted before the next model call.
@@ -765,30 +764,12 @@ def build_gemini_fhir_followup(
     )
 
 
-def build_live_gemini_fhir_followup(
-    sink: InMemoryAuditSink,
-    *,
-    clock: Callable[[], str],
-    run_id: str,
-    base_url: str | None = None,
-) -> GeminiFhirFollowUp:
-    """Compose the live model and the live read client outside the graph class."""
-    return build_gemini_fhir_followup(
-        HapiReadClient(base_url),
-        sink,
-        gemini_followup_message,
-        clock=clock,
-        run_id=run_id,
-    )
-
-
 __all__ = [
     "MAX_MODEL_TURNS",
     "MODEL_LIMIT_ANSWER",
     "SAFE_AUDIT_FIELDS",
     "GeminiFhirFollowUp",
     "build_gemini_fhir_followup",
-    "build_live_gemini_fhir_followup",
     "describe_followup_contents",
     "followup_tool_schema",
     "gemini_error_diagnostics",

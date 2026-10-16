@@ -45,7 +45,6 @@ from app.langgraph_gemini_fhir_followup import (
     _contents,
     _gemini_http_options,
     build_gemini_fhir_followup,
-    build_live_gemini_fhir_followup,
     describe_followup_contents,
     followup_message_from_response,
     FINAL_DECISION_REQUEST,
@@ -79,10 +78,6 @@ AUDIT_FORBIDDEN = (
     "diagnosis",
     "AIza",
 )
-
-
-def _live_gemini() -> bool:
-    return os.getenv("RUN_LIVE_GEMINI_TESTS", "false").strip().lower() == "true"
 
 
 def _hapi_enabled() -> bool:
@@ -1276,57 +1271,6 @@ def test_scripted_model_reads_the_synthetic_appointment_with_get_only():
     assert all(path.startswith(("Patient", "Observation", "Appointment")) for path in client.calls)
     assert (APPOINTMENTS_TOOL, f"Appointment/{APPOINTMENT_ID}") in _flat_evidence(result)
     assert "Patient/patient-001" not in json.dumps(result["evidence"])
-
-
-@pytest.mark.skipif(
-    not (_live_gemini() and _hapi_enabled()),
-    reason="set RUN_LIVE_GEMINI_TESTS=true and RUN_HAPI_INTEGRATION_TESTS=true",
-)
-def test_live_gemini_reads_hapi_before_the_final_answer():
-    if not os.getenv("GEMINI_API_KEY", "").strip():
-        pytest.skip("GEMINI_API_KEY is required for live Gemini tests")
-    base = hapi_base_url()
-    stored_patient, stored_observation = _ensure_records(base)
-    clear_boundary_events()
-    sink = InMemoryAuditSink()
-    workflow = build_live_gemini_fhir_followup(sink, clock=_clock, run_id="run-live-gemini-001", base_url=base)
-    result = workflow.invoke()
-    assert workflow.model_calls >= 2
-    assert workflow.model_calls <= MAX_MODEL_TURNS
-    assert FOLLOWUP_TOOL in result["tools_used"]
-    assert set(result["tools_used"]) <= {FOLLOWUP_TOOL, APPOINTMENTS_TOOL}
-    assert result["patient"]["id"] == stored_patient["id"]
-    assert result["patient"]["name"] == stored_patient["name"][0]["text"]
-    found = next(item for item in result["observations"] if item.get("id") == stored_observation["id"])
-    assert found["valueString"] == stored_observation["valueString"]
-    observed = [
-        reference
-        for entry in result["evidence"]
-        for reference in entry["resources"]
-    ]
-    assert f"Observation/{stored_observation['id']}" in observed
-    assert result["final_answer"]
-    assert result["decision"] == "finish"
-    last = result["messages"][-1]
-    assert isinstance(last, AIMessage)
-    assert not last.tool_calls
-    assert PATIENT_PATH in workflow.adapter.transport.calls or PATIENT_PATH in _client_calls(workflow)
-    secret = os.getenv("GEMINI_API_KEY", "").strip()
-    blob = _audit_blob(sink)
-    assert secret not in blob
-    assert secret not in str(result["final_answer"])
-    assert stored_observation.get("valueString", "missing-value") not in blob
-    assert BOUNDARY_EVENTS.index(f"policy:{FOLLOWUP_TOOL}:allowed") < BOUNDARY_EVENTS.index(
-        f"audit:{FOLLOWUP_TOOL}:allowed"
-    )
-    assert BOUNDARY_EVENTS.index(f"audit:{FOLLOWUP_TOOL}:allowed") < BOUNDARY_EVENTS.index(
-        f"execute:{FOLLOWUP_TOOL}"
-    )
-
-
-def _client_calls(workflow: GeminiFhirFollowUp) -> list[str]:
-    transport = workflow.adapter.transport
-    return list(getattr(transport, "calls", []))
 
 
 class _GeminiScript:
