@@ -22,6 +22,11 @@ from app.langgraph_fhir_client import (
 CONTRACT_VERSION = "clinical-read-v1"
 CLINICAL_READ_PREFIX = "/api/clinical-read/v1"
 _UNAVAILABLE = "clinical read unavailable"
+_EXACT_COLLECTIONS = {
+    "Patient": "patients",
+    "Encounter": "encounters",
+    "Observation": "observations",
+}
 
 
 class ClinicalReadClient:
@@ -61,20 +66,19 @@ class ClinicalReadClient:
 
     def get(self, path: str) -> dict:
         resource, query = _split_path(path)
-        if query or not resource.startswith("Patient/"):
-            raise ReadClientError("clinical read path is not authorized")
-        logical_id = resource.removeprefix("Patient/")
-        if not logical_id or "/" in logical_id:
+        resource_type, separator, logical_id = resource.partition("/")
+        collection = _EXACT_COLLECTIONS.get(resource_type)
+        if query or separator != "/" or collection is None or not logical_id or "/" in logical_id:
             raise ReadClientError("clinical read path is not authorized")
         status, body = self._exchange(
-            f"{self.base_url}{CLINICAL_READ_PREFIX}/patients/{quote(logical_id, safe='')}",
+            f"{self.base_url}{CLINICAL_READ_PREFIX}/{collection}/{quote(logical_id, safe='')}",
             None,
         )
         if status == 404 and isinstance(body, dict) and body.get("error") == "not_found":
             raise ExactResourceNotFound()
         if status != 200 or not isinstance(body, dict):
             raise ReadClientError(_UNAVAILABLE)
-        return _exact_resource(body, "Patient", logical_id)
+        return _exact_resource(body, resource_type, logical_id)
 
     def search(self, path: str, expected_resource_type: str) -> BoundedSearchResult:
         try:
@@ -92,9 +96,25 @@ class ClinicalReadClient:
             )
         elif expected_resource_type == "Appointment" and resource == "Appointment":
             patient_id = _patient_logical_id(query.get("patient"))
+            _known_query(query, {"patient", "_count"})
             status, body = self._exchange(
                 f"{self.base_url}{CLINICAL_READ_PREFIX}/appointments",
                 {"patient": patient_id},
+            )
+        elif expected_resource_type == "Encounter" and resource == "Encounter":
+            _known_query(query, {"patient", "status", "_count"})
+            status, body = self._exchange(
+                f"{self.base_url}{CLINICAL_READ_PREFIX}/encounters",
+                {"patient": _patient_logical_id(query.get("patient")), "status": _required_status(query.get("status"))},
+            )
+        elif expected_resource_type == "Observation" and resource == "Observation":
+            _known_query(query, {"patient", "subject", "status", "_count"})
+            status, body = self._exchange(
+                f"{self.base_url}{CLINICAL_READ_PREFIX}/observations",
+                {
+                    "patient": _one_patient_reference(query.get("patient"), query.get("subject")),
+                    "status": _required_status(query.get("status")),
+                },
             )
         else:
             raise ReadClientError("clinical read path is not authorized")
@@ -145,6 +165,23 @@ def _identifier_token(raw: object) -> tuple[str, str]:
     if not system.strip() or not value.strip():
         raise ReadClientError("clinical read path is not authorized")
     return system, value
+
+
+def _known_query(query: dict[str, str], allowed: set[str]) -> None:
+    if any(key not in allowed for key in query):
+        raise ReadClientError("clinical read path is not authorized")
+
+
+def _required_status(raw: object) -> str:
+    if not isinstance(raw, str) or not raw or "/" in raw:
+        raise ReadClientError("clinical read path is not authorized")
+    return raw
+
+
+def _one_patient_reference(patient: object, subject: object) -> str:
+    if (patient is None) == (subject is None):
+        raise ReadClientError("clinical read path is not authorized")
+    return _patient_logical_id(patient if patient is not None else subject)
 
 
 def _patient_logical_id(raw: object) -> str:

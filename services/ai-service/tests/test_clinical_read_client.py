@@ -19,8 +19,10 @@ from app.langgraph_fhir_client import (
 from app.langgraph_fhir_followup import (
     FollowUpFHIRAdapter,
     case_resolution_search_path,
+    encounter_search_path,
     patient_resource_path,
     protocol_appointment_search_path,
+    protocol_observation_search_path,
 )
 from app.langgraph_followup_workflow import build_live_followup_workflow
 from app.missed_follow_up_review import REASON_MISSED
@@ -304,3 +306,160 @@ def test_migrated_protocol_matches_a_past_noshow_and_keeps_hapi_for_post_consult
     assert "ClinicalReadClient" in missed_source
     assert "HapiReadClient" not in missed_source
     assert "HapiReadClient" in workflow_source
+
+
+def test_encounter_and_observation_reads_keep_fields_and_java_errors():
+    encounter = {
+        "resourceType": "Encounter",
+        "id": "MHS-CON-001",
+        "status": "finished",
+        "class": {"system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB"},
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "period": {"start": "2026-09-01T15:00:00Z"},
+    }
+    observation = {
+        "resourceType": "Observation",
+        "id": "MHS-RES-001",
+        "status": "final",
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "encounter": {"reference": "Encounter/MHS-CON-001"},
+        "effectiveDateTime": "2026-09-01T15:10:00Z",
+        "valueQuantity": {"value": 13.4, "unit": "g/dL"},
+    }
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url}")
+        if request.headers.get("X-Service-Token") != TOKEN:
+            return httpx.Response(401)
+        assert request.url.host == "interop.test"
+        assert request.url.path.startswith("/api/clinical-read/v1/")
+        assert "8080" not in str(request.url)
+        path = request.url.path
+        if path.endswith("/encounters") and request.url.params.get("status") == "finished":
+            assert request.url.params["patient"] == PATIENT_ID
+            assert "_count" not in request.url.params
+            return httpx.Response(200, json=_search("Encounter", [encounter]))
+        if path.endswith("/encounters") and request.url.params.get("status") == "incomplete":
+            return httpx.Response(200, json=_search("Encounter", [encounter], "incomplete"))
+        if path.endswith("/encounters/MHS-CON-001"):
+            return httpx.Response(200, json=_read(encounter))
+        if path.endswith("/observations") and request.url.params.get("status") == "final":
+            assert request.url.params["patient"] == PATIENT_ID
+            return httpx.Response(200, json=_search("Observation", [observation]))
+        if path.endswith("/observations") and request.url.params.get("status") == "partial":
+            return httpx.Response(200, json=_search("Observation", [observation], "incomplete"))
+        if path.endswith("/observations/MHS-RES-001"):
+            return httpx.Response(200, json=_read(observation))
+        if path.endswith("/encounters/missing"):
+            return httpx.Response(404, json={"error": "not_found"})
+        if path.endswith("/observations/missing"):
+            return httpx.Response(404, json={"error": "not_found"})
+        if path.endswith("/observations/unsupported"):
+            return httpx.Response(409, json={"error": "operation_not_supported"})
+        if path.endswith("/observations/invalid"):
+            return httpx.Response(422, json={"error": "invalid_source"})
+        if path.endswith("/observations/down"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        if path.endswith("/encounters") and request.url.params.get("status") == "blocked":
+            return httpx.Response(409, json={"error": "operation_not_supported"})
+        if path.endswith("/observations") and request.url.params.get("status") == "invalid":
+            return httpx.Response(422, json={"error": "invalid_source"})
+        if path.endswith("/observations") and request.url.params.get("status") == "down":
+            return httpx.Response(503, json={"error": "unavailable"})
+        raise AssertionError(str(request.url))
+
+    client, http = _client(handler)
+    try:
+        encounters = client.search(encounter_search_path(PATIENT_ID), "Encounter")
+        one_encounter = client.get("Encounter/MHS-CON-001")
+        observations = client.search(protocol_observation_search_path(PATIENT_ID), "Observation")
+        one_observation = client.get("Observation/MHS-RES-001")
+        incomplete_encounters = client.search(
+            f"Encounter?patient=Patient/{PATIENT_ID}&status=incomplete&_count=25",
+            "Encounter",
+        )
+        incomplete_observations = client.search(
+            f"Observation?subject=Patient/{PATIENT_ID}&status=partial&_count=25",
+            "Observation",
+        )
+        try:
+            client.get("Encounter/missing")
+        except ExactResourceNotFound:
+            missing_encounter = "not_found"
+        else:
+            missing_encounter = "returned"
+        try:
+            client.get("Observation/missing")
+        except ExactResourceNotFound:
+            missing_observation = "not_found"
+        else:
+            missing_observation = "returned"
+        exact_errors = {}
+        for logical_id, label in (
+            ("unsupported", "conflict"),
+            ("invalid", "invalid_source"),
+            ("down", "unavailable"),
+        ):
+            try:
+                client.get(f"Observation/{logical_id}")
+            except ExactResourceNotFound:
+                exact_errors[label] = "not_found"
+            except Exception as exc:
+                exact_errors[label] = type(exc).__name__
+            else:
+                exact_errors[label] = "returned"
+        blocked = client.search(
+            f"Encounter?patient=Patient/{PATIENT_ID}&status=blocked",
+            "Encounter",
+        )
+        denied = ClinicalReadClient("http://interop.test", "wrong", http_client=http).search(
+            f"Observation?patient=Patient/{PATIENT_ID}&status=denied",
+            "Observation",
+        )
+        invalid_search = client.search(
+            f"Observation?subject=Patient/{PATIENT_ID}&status=invalid",
+            "Observation",
+        )
+        unavailable = client.search(
+            f"Observation?patient={PATIENT_ID}&status=down",
+            "Observation",
+        )
+    finally:
+        http.close()
+
+    assert encounters.status is BoundedSearchStatus.COMPLETE
+    assert encounters.resources[0]["status"] == "finished"
+    assert encounters.resources[0]["class"]["code"] == "AMB"
+    assert encounters.resources[0]["subject"]["reference"] == f"Patient/{PATIENT_ID}"
+    assert encounters.resources[0]["period"]["start"] == "2026-09-01T15:00:00Z"
+    assert one_encounter["id"] == "MHS-CON-001"
+    assert observations.status is BoundedSearchStatus.COMPLETE
+    assert observations.resources[0]["status"] == "final"
+    assert observations.resources[0]["encounter"]["reference"] == "Encounter/MHS-CON-001"
+    assert observations.resources[0]["effectiveDateTime"] == "2026-09-01T15:10:00Z"
+    assert observations.resources[0]["valueQuantity"]["value"] == 13.4
+    assert one_observation["subject"]["reference"] == f"Patient/{PATIENT_ID}"
+    assert incomplete_encounters.status is BoundedSearchStatus.INCOMPLETE_LIMIT
+    assert incomplete_observations.status is BoundedSearchStatus.INCOMPLETE_LIMIT
+    assert incomplete_observations.resources[0]["id"] == "MHS-RES-001"
+    assert missing_encounter == "not_found"
+    assert missing_observation == "not_found"
+    assert exact_errors == {
+        "conflict": "ReadClientError",
+        "invalid_source": "ReadClientError",
+        "unavailable": "ReadClientError",
+    }
+    assert blocked.status is BoundedSearchStatus.FAILED
+    assert blocked.resources == ()
+    assert denied.status is BoundedSearchStatus.FAILED
+    assert denied.resources == ()
+    assert invalid_search.status is BoundedSearchStatus.FAILED
+    assert invalid_search.resources == ()
+    assert unavailable.status is BoundedSearchStatus.FAILED
+    assert unavailable.resources == ()
+    assert all("/api/clinical-read/v1/" in item for item in seen)
+    client_source = inspect.getsource(ClinicalReadClient)
+    assert "HapiReadClient" not in client_source
+    assert "8080" not in client_source
+    assert "HapiReadClient" in inspect.getsource(build_live_followup_workflow)
