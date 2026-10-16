@@ -671,7 +671,8 @@ def test_concurrent_cases_do_not_share_read_results(tmp_path):
 
 @pytest.mark.parametrize("base_url", ["", "not-a-url"])
 def test_invalid_fhir_base_url_is_generic_503(tmp_path, monkeypatch, base_url):
-    monkeypatch.setenv("FHIR_BASE_URL", base_url)
+    monkeypatch.setenv("MODEL_BOUNDARY_BASE_URL", base_url)
+    monkeypatch.setenv("MODEL_BOUNDARY_SERVICE_TOKEN", TOKEN)
     repository = _repository(tmp_path)
     case = _create(repository)
     app.state.followup_review_repository = repository

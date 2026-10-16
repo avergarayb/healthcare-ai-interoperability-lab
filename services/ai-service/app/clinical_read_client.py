@@ -17,6 +17,7 @@ from app.langgraph_fhir_client import (
     ExactResourceNotFound,
     ReadClientError,
 )
+from app.post_consultation_review import validated_fhir_id
 
 
 CONTRACT_VERSION = "clinical-read-v1"
@@ -26,7 +27,9 @@ _EXACT_COLLECTIONS = {
     "Patient": "patients",
     "Encounter": "encounters",
     "Observation": "observations",
+    "Appointment": "appointments",
 }
+_READ_EXACT_TYPES = frozenset({"Encounter", "Observation", "Appointment"})
 
 
 class ClinicalReadClient:
@@ -79,6 +82,12 @@ class ClinicalReadClient:
         if status != 200 or not isinstance(body, dict):
             raise ReadClientError(_UNAVAILABLE)
         return _exact_resource(body, resource_type, logical_id)
+
+    def read_exact(self, resource_type: str, resource_id: str) -> dict:
+        """GET one authorized resource. HTTP 404 with error not_found is ExactResourceNotFound."""
+        if resource_type not in _READ_EXACT_TYPES or validated_fhir_id(resource_id) is None:
+            raise ReadClientError("clinical read path is not authorized")
+        return self.get(f"{resource_type}/{resource_id}")
 
     def search(self, path: str, expected_resource_type: str) -> BoundedSearchResult:
         try:

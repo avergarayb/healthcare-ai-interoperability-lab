@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
+from app.clinical_read_client import ClinicalReadClient
 from app.clinical_review_context import (
     ClinicalContextClosed,
     ClinicalContextUnavailable,
@@ -23,7 +24,6 @@ from app.followup_review_http import (
     NOT_FOUND_DETAIL,
     PERSISTENCE_UNAVAILABLE_DETAIL,
 )
-from app.langgraph_fhir_hapi import HapiReadClient
 from app.service_auth import authenticate
 
 
@@ -73,8 +73,8 @@ def clinical_context_service(
     )
 
 
-def _fhir_client(request: Request) -> HapiReadClient:
+def _fhir_client(request: Request):
     factory = getattr(request.app.state, "clinical_context_fhir_client", None)
     if factory is not None:
         return factory()
-    return HapiReadClient()
+    return ClinicalReadClient.from_settings(Settings.from_env())

@@ -552,3 +552,86 @@ def test_post_consultation_protocol_reads_java_and_keeps_decisions():
     assert incomplete.evaluation_status is ProtocolEvaluationStatus.INSUFFICIENT
     assert incomplete.reason_codes == ("observation_search_incomplete",)
     assert incomplete.matched_resources == ()
+
+
+def test_read_exact_includes_appointment_and_keeps_not_found_distinct():
+    appointment = _appointment()
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        assert request.headers["X-Service-Token"] == TOKEN
+        assert request.url.host == "interop.test"
+        assert "8080" not in str(request.url)
+        path = request.url.path
+        if path.endswith(f"/appointments/{APPOINTMENT_ID}"):
+            return httpx.Response(200, json=_read(_appointment()))
+        if path.endswith("/appointments/missing"):
+            return httpx.Response(404, json={"error": "not_found"})
+        if path.endswith("/appointments/blocked"):
+            return httpx.Response(409, json={"error": "operation_not_supported"})
+        if path.endswith("/appointments/invalid"):
+            return httpx.Response(422, json={"error": "invalid_source"})
+        if path.endswith("/appointments/down"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        if path.endswith("/appointments/denied"):
+            return httpx.Response(401)
+        raise AssertionError(path)
+
+    client, http = _client(handler)
+    try:
+        found = client.read_exact("Appointment", APPOINTMENT_ID)
+        try:
+            client.read_exact("Appointment", "missing")
+        except ExactResourceNotFound:
+            missing = "not_found"
+        else:
+            missing = "returned"
+        failures = {}
+        for logical_id, label in (
+            ("blocked", "conflict"),
+            ("invalid", "invalid_source"),
+            ("down", "unavailable"),
+            ("denied", "unauthorized"),
+        ):
+            try:
+                client.read_exact("Appointment", logical_id)
+            except ExactResourceNotFound:
+                failures[label] = "not_found"
+            except Exception as exc:
+                failures[label] = type(exc).__name__
+            else:
+                failures[label] = "returned"
+        try:
+            client.read_exact("Patient", PATIENT_ID)
+        except ReadClientError:
+            patient_exact = "rejected"
+        else:
+            patient_exact = "returned"
+        try:
+            client.read_exact("Appointment", ".")
+        except ReadClientError:
+            dotted = "rejected"
+        else:
+            dotted = "returned"
+    finally:
+        http.close()
+
+    assert found == appointment
+    assert found["status"] == "noshow"
+    assert found["participant"][0]["actor"]["reference"] == f"Patient/{PATIENT_ID}"
+    assert missing == "not_found"
+    assert failures == {
+        "conflict": "ReadClientError",
+        "invalid_source": "ReadClientError",
+        "unavailable": "ReadClientError",
+        "unauthorized": "ReadClientError",
+    }
+    assert patient_exact == "rejected"
+    assert dotted == "rejected"
+    assert all(path.startswith("/api/clinical-read/v1/appointments/") for path in seen)
+    from app.clinical_review_context_http import _fhir_client
+
+    factory = inspect.getsource(_fhir_client)
+    assert "ClinicalReadClient.from_settings" in factory
+    assert "HapiReadClient" not in factory
