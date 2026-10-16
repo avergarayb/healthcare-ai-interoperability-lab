@@ -6,5 +6,6 @@ public record ConsultationView(
         String occurredAt,
         String reason,
         String clinicianName,
-        String status) {
+        String status,
+        String careClass) {
 }

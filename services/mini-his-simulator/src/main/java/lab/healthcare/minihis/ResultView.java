@@ -8,5 +8,6 @@ public record ResultView(
         String displayName,
         String valueText,
         String unit,
-        String observedAt) {
+        String observedAt,
+        String status) {
 }

@@ -3,6 +3,10 @@ package lab.healthcare.minihis;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 @Component
 public class MiniHisSchema {
 
@@ -30,7 +34,8 @@ public class MiniHisSchema {
                     occurred_at TEXT NOT NULL,
                     reason TEXT NOT NULL,
                     clinician_name TEXT NOT NULL,
-                    status TEXT NOT NULL CHECK (status IN ('completed', 'in_progress'))
+                    status TEXT NOT NULL CHECK (status IN ('completed', 'in_progress')),
+                    care_class TEXT
                 )
                 """);
         jdbc.execute("""
@@ -42,7 +47,8 @@ public class MiniHisSchema {
                     display_name TEXT NOT NULL,
                     value_text TEXT NOT NULL,
                     unit TEXT NOT NULL,
-                    observed_at TEXT NOT NULL
+                    observed_at TEXT NOT NULL,
+                    status TEXT
                 )
                 """);
         jdbc.execute("""
@@ -56,5 +62,47 @@ public class MiniHisSchema {
                     SELECT RAISE(ABORT, 'result patient does not match consultation');
                 END
                 """);
+        addColumnIfAbsent("consultation", "care_class", "TEXT");
+        addColumnIfAbsent("clinical_result", "status", "TEXT");
+        backfillSyntheticCareClass();
+        backfillSyntheticResultStatus();
+    }
+
+    private void addColumnIfAbsent(String table, String column, String definition) {
+        if (!columnNames(table).contains(column)) {
+            jdbc.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+        }
+    }
+
+    private void backfillSyntheticCareClass() {
+        jdbc.update(
+                """
+                UPDATE consultation
+                SET care_class = ?
+                WHERE consultation_id IN ('MHS-CON-001', 'MHS-CON-002', 'MHS-CON-003')
+                  AND (care_class IS NULL OR TRIM(care_class) = '')
+                """,
+                SyntheticSeed.AMBULATORY_CARE);
+    }
+
+    private void backfillSyntheticResultStatus() {
+        jdbc.update(
+                """
+                UPDATE clinical_result
+                SET status = ?
+                WHERE result_id IN (
+                    'MHS-RES-001', 'MHS-RES-002', 'MHS-RES-003',
+                    'MHS-RES-004', 'MHS-RES-005', 'MHS-RES-006'
+                )
+                  AND (status IS NULL OR TRIM(status) = '')
+                """,
+                SyntheticSeed.FINAL_RESULT);
+    }
+
+    private Set<String> columnNames(String table) {
+        List<String> names = jdbc.query(
+                "PRAGMA table_info(" + table + ")",
+                (rs, row) -> rs.getString("name"));
+        return new HashSet<>(names);
     }
 }

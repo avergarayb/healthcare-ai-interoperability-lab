@@ -91,6 +91,13 @@ public class MiniHisController {
                 .orElseGet(MiniHisController::notFound);
     }
 
+    @GetMapping(path = "/results/{resultId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> result(@PathVariable String resultId) {
+        return store.findResult(resultId)
+                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .orElseGet(MiniHisController::notFound);
+    }
+
     @PostMapping(path = "/synthetic/reset", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> reset(HttpServletRequest request) {
         if (!LoopbackGuard.isLoopback(request.getRemoteAddr())

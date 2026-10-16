@@ -79,6 +79,8 @@ class MiniHisSimulatorTest {
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].consultationId").value("MHS-CON-001"))
                 .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-001"))
+                .andExpect(jsonPath("$[0].status").value("completed"))
+                .andExpect(jsonPath("$[0].careClass").value("ambulatory"))
                 .andExpect(jsonPath("$[0].occurredAt").value("2026-09-01T15:00:00Z"));
 
         mockMvc.perform(get("/consultations/MHS-CON-001/results"))
@@ -87,7 +89,9 @@ class MiniHisSimulatorTest {
                 .andExpect(jsonPath("$[0].resultId").value("MHS-RES-001"))
                 .andExpect(jsonPath("$[0].consultationId").value("MHS-CON-001"))
                 .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-001"))
-                .andExpect(jsonPath("$[1].resultId").value("MHS-RES-002"));
+                .andExpect(jsonPath("$[0].status").value("final"))
+                .andExpect(jsonPath("$[1].resultId").value("MHS-RES-002"))
+                .andExpect(jsonPath("$[1].status").value("final"));
 
         mockMvc.perform(get("/patients/MHS-PAT-001/results"))
                 .andExpect(jsonPath("$[0].resultId").value("MHS-RES-001"))
@@ -132,6 +136,9 @@ class MiniHisSimulatorTest {
         mockMvc.perform(get("/patients/missing/consultations")).andExpect(status().isNotFound());
         mockMvc.perform(get("/consultations/missing")).andExpect(status().isNotFound());
         mockMvc.perform(get("/consultations/missing/results")).andExpect(status().isNotFound());
+        mockMvc.perform(get("/results/MHS-RES-999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("not_found"));
         mockMvc.perform(get("/patients").param("limit", "101")).andExpect(status().isBadRequest());
     }
 
@@ -160,6 +167,13 @@ class MiniHisSimulatorTest {
         mockMvc.perform(get("/consultations/MHS-CON-003/results"))
                 .andExpect(jsonPath("$[0].resultId").value("MHS-RES-005"))
                 .andExpect(jsonPath("$[1].resultId").value("MHS-RES-006"));
+        mockMvc.perform(get("/results/MHS-RES-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultId").value("MHS-RES-001"))
+                .andExpect(jsonPath("$.consultationId").value("MHS-CON-001"))
+                .andExpect(jsonPath("$.patientId").value("MHS-PAT-001"))
+                .andExpect(jsonPath("$.status").value("final"))
+                .andExpect(jsonPath("$.resourceType").doesNotExist());
     }
 
     @Test

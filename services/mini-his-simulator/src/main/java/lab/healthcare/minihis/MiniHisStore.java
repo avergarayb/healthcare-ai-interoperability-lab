@@ -79,7 +79,7 @@ public class MiniHisStore {
         }
         return Optional.of(jdbc.query(
                 """
-                SELECT consultation_id, patient_id, occurred_at, reason, clinician_name, status
+                SELECT consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class
                 FROM consultation
                 WHERE patient_id = ?
                 ORDER BY occurred_at DESC, consultation_id ASC
@@ -93,7 +93,7 @@ public class MiniHisStore {
     public Optional<ConsultationView> findConsultation(String consultationId) {
         List<ConsultationView> rows = jdbc.query(
                 """
-                SELECT consultation_id, patient_id, occurred_at, reason, clinician_name, status
+                SELECT consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class
                 FROM consultation
                 WHERE consultation_id = ?
                 """,
@@ -109,7 +109,7 @@ public class MiniHisStore {
         return Optional.of(jdbc.query(
                 """
                 SELECT result_id, consultation_id, patient_id, result_type, display_name,
-                       value_text, unit, observed_at
+                       value_text, unit, observed_at, status
                 FROM clinical_result
                 WHERE consultation_id = ?
                 ORDER BY observed_at ASC, result_id ASC
@@ -127,7 +127,7 @@ public class MiniHisStore {
         return Optional.of(jdbc.query(
                 """
                 SELECT result_id, consultation_id, patient_id, result_type, display_name,
-                       value_text, unit, observed_at
+                       value_text, unit, observed_at, status
                 FROM clinical_result
                 WHERE patient_id = ?
                 ORDER BY observed_at ASC, result_id ASC
@@ -136,6 +136,19 @@ public class MiniHisStore {
                 (rs, row) -> result(rs),
                 patientId,
                 limit));
+    }
+
+    public Optional<ResultView> findResult(String resultId) {
+        List<ResultView> rows = jdbc.query(
+                """
+                SELECT result_id, consultation_id, patient_id, result_type, display_name,
+                       value_text, unit, observed_at, status
+                FROM clinical_result
+                WHERE result_id = ?
+                """,
+                (rs, row) -> result(rs),
+                resultId);
+        return rows.stream().findFirst();
     }
 
     public boolean foreignKeysEnabled() {
@@ -160,23 +173,24 @@ public class MiniHisStore {
             jdbc.update(
                     """
                     INSERT INTO consultation (
-                        consultation_id, patient_id, occurred_at, reason, clinician_name, status
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     consultation.consultationId(),
                     consultation.patientId(),
                     consultation.occurredAt(),
                     consultation.reason(),
                     consultation.clinicianName(),
-                    consultation.status());
+                    consultation.status(),
+                    consultation.careClass());
         }
         for (SyntheticSeed.ResultSeed result : SyntheticSeed.RESULTS) {
             jdbc.update(
                     """
                     INSERT INTO clinical_result (
                         result_id, consultation_id, patient_id, result_type, display_name,
-                        value_text, unit, observed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        value_text, unit, observed_at, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     result.resultId(),
                     result.consultationId(),
@@ -185,7 +199,8 @@ public class MiniHisStore {
                     result.displayName(),
                     result.valueText(),
                     result.unit(),
-                    result.observedAt());
+                    result.observedAt(),
+                    result.status());
         }
     }
 
@@ -201,7 +216,8 @@ public class MiniHisStore {
                 rs.getString("occurred_at"),
                 rs.getString("reason"),
                 rs.getString("clinician_name"),
-                rs.getString("status"));
+                rs.getString("status"),
+                rs.getString("care_class"));
     }
 
     private static ResultView result(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -213,6 +229,7 @@ public class MiniHisStore {
                 rs.getString("display_name"),
                 rs.getString("value_text"),
                 rs.getString("unit"),
-                rs.getString("observed_at"));
+                rs.getString("observed_at"),
+                rs.getString("status"));
     }
 }
