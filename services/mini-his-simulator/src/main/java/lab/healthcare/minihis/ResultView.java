@@ -1,5 +1,7 @@
 package lab.healthcare.minihis;
 
+import java.util.List;
+
 public record ResultView(
         String resultId,
         String consultationId,
@@ -9,5 +11,6 @@ public record ResultView(
         String valueText,
         String unit,
         String observedAt,
-        String status) {
+        String status,
+        List<ResultComponentView> components) {
 }

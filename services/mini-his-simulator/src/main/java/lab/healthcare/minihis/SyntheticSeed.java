@@ -44,6 +44,14 @@ public final class SyntheticSeed {
             String status) {
     }
 
+    public record ComponentSeed(
+            String componentId,
+            String resultId,
+            String name,
+            String valueDecimal,
+            String unit) {
+    }
+
     public static final List<PatientSeed> PATIENTS = List.of(
             new PatientSeed("MHS-PAT-001", "Quispe", "Ana", "1984-03-12", "female"),
             new PatientSeed("MHS-PAT-002", "Vargas", "Luis", "1976-11-02", "male"),
@@ -136,6 +144,14 @@ public final class SyntheticSeed {
                     "C",
                     "2026-07-20T19:05:00Z",
                     FINAL_RESULT));
+
+    /**
+     * Structured parts of MHS-RES-002. They are stored explicitly and are not
+     * derived from the descriptive value {@code 120/80}.
+     */
+    public static final List<ComponentSeed> COMPONENTS = List.of(
+            new ComponentSeed("MHS-CMP-002-1", "MHS-RES-002", "Presion sistolica", "120", "mmHg"),
+            new ComponentSeed("MHS-CMP-002-2", "MHS-RES-002", "Presion diastolica", "80", "mmHg"));
 
     private SyntheticSeed() {
     }

@@ -62,10 +62,20 @@ public class MiniHisSchema {
                     SELECT RAISE(ABORT, 'result patient does not match consultation');
                 END
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS clinical_result_component (
+                    component_id TEXT PRIMARY KEY,
+                    result_id TEXT NOT NULL REFERENCES clinical_result(result_id),
+                    component_name TEXT NOT NULL,
+                    value_decimal TEXT NOT NULL,
+                    unit TEXT NOT NULL
+                )
+                """);
         addColumnIfAbsent("consultation", "care_class", "TEXT");
         addColumnIfAbsent("clinical_result", "status", "TEXT");
         backfillSyntheticCareClass();
         backfillSyntheticResultStatus();
+        backfillSyntheticBloodPressure();
     }
 
     private void addColumnIfAbsent(String table, String column, String definition) {
@@ -97,6 +107,29 @@ public class MiniHisSchema {
                   AND (status IS NULL OR TRIM(status) = '')
                 """,
                 SyntheticSeed.FINAL_RESULT);
+    }
+
+    private void backfillSyntheticBloodPressure() {
+        for (SyntheticSeed.ComponentSeed component : SyntheticSeed.COMPONENTS) {
+            jdbc.update(
+                    """
+                    INSERT INTO clinical_result_component (
+                        component_id, result_id, component_name, value_decimal, unit
+                    )
+                    SELECT ?, result_id, ?, ?, ?
+                    FROM clinical_result
+                    WHERE result_id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM clinical_result_component WHERE component_id = ?
+                      )
+                    """,
+                    component.componentId(),
+                    component.name(),
+                    component.valueDecimal(),
+                    component.unit(),
+                    component.resultId(),
+                    component.componentId());
+        }
     }
 
     private Set<String> columnNames(String table) {

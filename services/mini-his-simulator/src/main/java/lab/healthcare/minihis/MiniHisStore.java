@@ -4,7 +4,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Repository
@@ -28,6 +31,7 @@ public class MiniHisStore {
     @Transactional
     public SeedCounts reset() {
         schema.createIfAbsent();
+        jdbc.update("DELETE FROM clinical_result_component");
         jdbc.update("DELETE FROM clinical_result");
         jdbc.update("DELETE FROM consultation");
         jdbc.update("DELETE FROM patient");
@@ -106,7 +110,7 @@ public class MiniHisStore {
         if (findConsultation(consultationId).isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(jdbc.query(
+        return Optional.of(attachComponents(jdbc.query(
                 """
                 SELECT result_id, consultation_id, patient_id, result_type, display_name,
                        value_text, unit, observed_at, status
@@ -117,14 +121,14 @@ public class MiniHisStore {
                 """,
                 (rs, row) -> result(rs),
                 consultationId,
-                limit));
+                limit)));
     }
 
     public Optional<List<ResultView>> listResultsForPatient(String patientId, int limit) {
         if (findPatient(patientId).isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(jdbc.query(
+        return Optional.of(attachComponents(jdbc.query(
                 """
                 SELECT result_id, consultation_id, patient_id, result_type, display_name,
                        value_text, unit, observed_at, status
@@ -135,7 +139,42 @@ public class MiniHisStore {
                 """,
                 (rs, row) -> result(rs),
                 patientId,
-                limit));
+                limit)));
+    }
+
+    public ResultSearch searchResults(String patientId, String status, int limit) {
+        int probe = limit + 1;
+        List<ResultView> rows = status == null
+                ? jdbc.query(
+                        """
+                        SELECT result_id, consultation_id, patient_id, result_type, display_name,
+                               value_text, unit, observed_at, status
+                        FROM clinical_result
+                        WHERE patient_id = ?
+                        ORDER BY observed_at ASC, result_id ASC
+                        LIMIT ?
+                        """,
+                        (rs, row) -> result(rs),
+                        patientId,
+                        probe)
+                : jdbc.query(
+                        """
+                        SELECT result_id, consultation_id, patient_id, result_type, display_name,
+                               value_text, unit, observed_at, status
+                        FROM clinical_result
+                        WHERE patient_id = ? AND status = ?
+                        ORDER BY observed_at ASC, result_id ASC
+                        LIMIT ?
+                        """,
+                        (rs, row) -> result(rs),
+                        patientId,
+                        status,
+                        probe);
+        boolean truncated = rows.size() > limit;
+        if (truncated) {
+            rows = List.copyOf(rows.subList(0, limit));
+        }
+        return new ResultSearch(attachComponents(rows), truncated);
     }
 
     public Optional<ResultView> findResult(String resultId) {
@@ -148,7 +187,7 @@ public class MiniHisStore {
                 """,
                 (rs, row) -> result(rs),
                 resultId);
-        return rows.stream().findFirst();
+        return attachComponents(rows).stream().findFirst();
     }
 
     public boolean foreignKeysEnabled() {
@@ -202,6 +241,19 @@ public class MiniHisStore {
                     result.observedAt(),
                     result.status());
         }
+        for (SyntheticSeed.ComponentSeed component : SyntheticSeed.COMPONENTS) {
+            jdbc.update(
+                    """
+                    INSERT INTO clinical_result_component (
+                        component_id, result_id, component_name, value_decimal, unit
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    component.componentId(),
+                    component.resultId(),
+                    component.name(),
+                    component.valueDecimal(),
+                    component.unit());
+        }
     }
 
     private int count(String table) {
@@ -230,6 +282,46 @@ public class MiniHisStore {
                 rs.getString("value_text"),
                 rs.getString("unit"),
                 rs.getString("observed_at"),
-                rs.getString("status"));
+                rs.getString("status"),
+                List.of());
+    }
+
+    private List<ResultView> attachComponents(List<ResultView> rows) {
+        if (rows.isEmpty()) {
+            return rows;
+        }
+        String placeholders = String.join(", ", java.util.Collections.nCopies(rows.size(), "?"));
+        Object[] ids = rows.stream().map(ResultView::resultId).toArray();
+        Map<String, List<ResultComponentView>> grouped = new LinkedHashMap<>();
+        jdbc.query(
+                """
+                SELECT component_id, result_id, component_name, value_decimal, unit
+                FROM clinical_result_component
+                WHERE result_id IN (%s)
+                ORDER BY component_id ASC
+                """.formatted(placeholders),
+                rs -> {
+                    String resultId = rs.getString("result_id");
+                    grouped.computeIfAbsent(resultId, key -> new ArrayList<>())
+                            .add(new ResultComponentView(
+                                    rs.getString("component_id"),
+                                    rs.getString("component_name"),
+                                    rs.getString("value_decimal"),
+                                    rs.getString("unit")));
+                },
+                ids);
+        return rows.stream()
+                .map(row -> new ResultView(
+                        row.resultId(),
+                        row.consultationId(),
+                        row.patientId(),
+                        row.resultType(),
+                        row.displayName(),
+                        row.valueText(),
+                        row.unit(),
+                        row.observedAt(),
+                        row.status(),
+                        List.copyOf(grouped.getOrDefault(row.resultId(), List.of()))))
+                .toList();
     }
 }

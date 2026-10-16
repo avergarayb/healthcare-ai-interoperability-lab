@@ -72,6 +72,67 @@ class MiniHisSchemaMigrationTest {
         }
     }
 
+    @Test
+    void bloodPressureComponentsFillOnlyTheSyntheticResult() throws Exception {
+        Path database = Files.createTempFile("mini-his-pressure", ".sqlite");
+        try {
+            JdbcTemplate jdbc = jdbc(database);
+            createLegacySchema(jdbc);
+            jdbc.update(
+                    """
+                    INSERT INTO patient (patient_id, family_name, given_name, birth_date, administrative_sex)
+                    VALUES ('MHS-PAT-001', 'Quispe', 'Ana', '1984-03-12', 'female'),
+                           ('LOCAL-PAT-9', 'Local', 'Paz', '1990-01-01', 'female')
+                    """);
+            jdbc.update(
+                    """
+                    INSERT INTO consultation (
+                        consultation_id, patient_id, occurred_at, reason, clinician_name, status
+                    ) VALUES
+                    ('MHS-CON-001', 'MHS-PAT-001', '2026-09-01T15:00:00Z', 'Control', 'Dra. Luz Demo', 'completed'),
+                    ('LOCAL-CON-9', 'LOCAL-PAT-9', '2026-09-02T15:00:00Z', 'Local', 'Dr. Local', 'completed')
+                    """);
+            jdbc.update(
+                    """
+                    INSERT INTO clinical_result (
+                        result_id, consultation_id, patient_id, result_type, display_name,
+                        value_text, unit, observed_at
+                    ) VALUES
+                    ('MHS-RES-001', 'MHS-CON-001', 'MHS-PAT-001', 'laboratory', 'Hemoglobina', '13.4', 'g/dL', '2026-09-01T15:10:00Z'),
+                    ('MHS-RES-002', 'MHS-CON-001', 'MHS-PAT-001', 'vital_sign', 'Presion arterial', '120/80', 'mmHg', '2026-09-01T15:20:00Z'),
+                    ('LOCAL-RES-9', 'LOCAL-CON-9', 'LOCAL-PAT-9', 'vital_sign', 'Presion arterial', '120/80', 'mmHg', '2026-09-02T15:20:00Z')
+                    """);
+
+            MiniHisSchema schema = new MiniHisSchema(jdbc);
+            schema.createIfAbsent();
+            schema.createIfAbsent();
+
+            assertThat(text(jdbc, "SELECT value_text FROM clinical_result WHERE result_id = 'MHS-RES-002'"))
+                    .isEqualTo("120/80");
+            assertThat(count(jdbc, "clinical_result_component")).isEqualTo(2);
+            assertThat(text(jdbc, "SELECT component_name FROM clinical_result_component WHERE component_id = 'MHS-CMP-002-1'"))
+                    .isEqualTo("Presion sistolica");
+            assertThat(text(jdbc, "SELECT value_decimal FROM clinical_result_component WHERE component_id = 'MHS-CMP-002-1'"))
+                    .isEqualTo("120");
+            assertThat(text(jdbc, "SELECT unit FROM clinical_result_component WHERE component_id = 'MHS-CMP-002-2'"))
+                    .isEqualTo("mmHg");
+            assertThat(text(jdbc, "SELECT value_decimal FROM clinical_result_component WHERE component_id = 'MHS-CMP-002-2'"))
+                    .isEqualTo("80");
+            assertThat(countWhere(jdbc, "clinical_result_component", "result_id = 'MHS-RES-001'")).isZero();
+            assertThat(countWhere(jdbc, "clinical_result_component", "result_id = 'LOCAL-RES-9'")).isZero();
+
+            jdbc.update("UPDATE clinical_result_component SET value_decimal = '119' WHERE component_id = 'MHS-CMP-002-1'");
+            schema.createIfAbsent();
+
+            assertThat(text(jdbc, "SELECT value_decimal FROM clinical_result_component WHERE component_id = 'MHS-CMP-002-1'"))
+                    .isEqualTo("119");
+            assertThat(count(jdbc, "clinical_result_component")).isEqualTo(2);
+            assertThat(count(jdbc, "clinical_result")).isEqualTo(3);
+        } finally {
+            Files.deleteIfExists(database);
+        }
+    }
+
     private static JdbcTemplate jdbc(Path database) {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.sqlite.JDBC");
@@ -114,7 +175,11 @@ class MiniHisSchemaMigrationTest {
     }
 
     private static int count(JdbcTemplate jdbc, String table) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
+        return countWhere(jdbc, table, "1 = 1");
+    }
+
+    private static int countWhere(JdbcTemplate jdbc, String table, String where) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM " + table + " WHERE " + where, Integer.class);
         return count == null ? 0 : count;
     }
 

@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -143,6 +144,39 @@ class MiniHisSimulatorTest {
     }
 
     @Test
+    void resultSearchFiltersInTheDatabaseAndReportsTruncation() throws Exception {
+        mockMvc.perform(get("/results").param("patientId", "MHS-PAT-404").param("status", "final"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-More-Results", "false"))
+                .andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/results").param("patientId", "MHS-PAT-001").param("status", "preliminary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/results").param("patientId", "MHS-PAT-001").param("status", "final").param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-More-Results", "true"))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].resultId").value("MHS-RES-001"));
+
+        mockMvc.perform(get("/results")).andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("invalid_request"));
+        mockMvc.perform(get("/results").param("patientId", " ")).andExpect(jsonPath("$.error").value("invalid_request"));
+        mockMvc.perform(get("/results").param("patientId", "MHS-PAT-001").param("status", "final status"))
+                .andExpect(jsonPath("$.error").value("invalid_request"));
+        mockMvc.perform(get("/results").param("patientId", "MHS-PAT-001").param("limit", "0"))
+                .andExpect(jsonPath("$.error").value("invalid_limit"));
+
+        jdbc.execute("ALTER TABLE clinical_result RENAME TO clinical_result_hidden");
+        try {
+            mockMvc.perform(get("/results").param("patientId", "MHS-PAT-001"))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.error").value("unavailable"));
+        } finally {
+            jdbc.execute("ALTER TABLE clinical_result_hidden RENAME TO clinical_result");
+        }
+        mockMvc.perform(get("/results/MHS-RES-001")).andExpect(status().isOk());
+    }
+
+    @Test
     void resetRestoresTheStableSeedAndRejectsRemoteCallers() throws Exception {
         jdbc.update("DELETE FROM clinical_result WHERE consultation_id = 'MHS-CON-003'");
         jdbc.update("DELETE FROM consultation WHERE consultation_id = 'MHS-CON-003'");
@@ -167,6 +201,35 @@ class MiniHisSimulatorTest {
         mockMvc.perform(get("/consultations/MHS-CON-003/results"))
                 .andExpect(jsonPath("$[0].resultId").value("MHS-RES-005"))
                 .andExpect(jsonPath("$[1].resultId").value("MHS-RES-006"));
+        mockMvc.perform(get("/results").param("patientId", "MHS-PAT-001").param("status", "final"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-More-Results", "false"))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].resultId").value("MHS-RES-001"))
+                .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-001"))
+                .andExpect(jsonPath("$[0].consultationId").value("MHS-CON-001"))
+                .andExpect(jsonPath("$[0].valueText").value("13.4"))
+                .andExpect(jsonPath("$[0].components.length()").value(0))
+                .andExpect(jsonPath("$[1].resultId").value("MHS-RES-002"))
+                .andExpect(jsonPath("$[1].valueText").value("120/80"))
+                .andExpect(jsonPath("$[1].components.length()").value(2))
+                .andExpect(jsonPath("$[1].components[0].componentId").value("MHS-CMP-002-1"))
+                .andExpect(jsonPath("$[1].components[0].name").value("Presion sistolica"))
+                .andExpect(jsonPath("$[1].components[0].valueDecimal").value("120"))
+                .andExpect(jsonPath("$[1].components[0].unit").value("mmHg"))
+                .andExpect(jsonPath("$[1].components[1].name").value("Presion diastolica"))
+                .andExpect(jsonPath("$[1].components[1].valueDecimal").value("80"))
+                .andExpect(jsonPath("$[1].components[1].unit").value("mmHg"));
+        mockMvc.perform(get("/results").param("patientId", "MHS-PAT-002").param("status", "final"))
+                .andExpect(jsonPath("$[0].resultId").value("MHS-RES-003"))
+                .andExpect(jsonPath("$[?(@.patientId != 'MHS-PAT-002')]").doesNotExist());
+
+        mockMvc.perform(get("/results/MHS-RES-002"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valueText").value("120/80"))
+                .andExpect(jsonPath("$.components.length()").value(2))
+                .andExpect(jsonPath("$.components[0].valueDecimal").value("120"))
+                .andExpect(jsonPath("$.components[1].valueDecimal").value("80"));
         mockMvc.perform(get("/results/MHS-RES-001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultId").value("MHS-RES-001"))
