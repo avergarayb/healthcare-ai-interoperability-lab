@@ -20,6 +20,12 @@ public final class SyntheticSeed {
     /** Proprietary appointment status. It is not a FHIR status. */
     public static final String CONFIRMED = "confirmed";
 
+    /** Logical id system. It is not replaced by a follow-up case identifier. */
+    public static final String PROPRIETARY_PATIENT_SYSTEM = "https://lab.local/mini-his/patient";
+
+    /** Additional case identifier system. The value is a case id, not a patient id. */
+    public static final String FOLLOW_UP_CASE_SYSTEM = "https://lab.local/followup-case";
+
     public record PatientSeed(
             String patientId,
             String familyName,
@@ -65,12 +71,16 @@ public final class SyntheticSeed {
             int startOffsetDays) {
     }
 
+    public record PatientIdentifierSeed(String system, String value, String patientId) {
+    }
+
     public static final List<PatientSeed> PATIENTS = List.of(
             new PatientSeed("MHS-PAT-001", "Quispe", "Ana", "1984-03-12", "female"),
             new PatientSeed("MHS-PAT-002", "Vargas", "Luis", "1976-11-02", "male"),
             new PatientSeed("MHS-PAT-003", "Rojas", "Carmen", "1991-07-19", "female"),
             new PatientSeed("MHS-PAT-004", "Demo", "Nora", "1988-04-04", "female"),
-            new PatientSeed("MHS-PAT-005", "Demo", "Raul", "1979-05-05", "male"));
+            new PatientSeed("MHS-PAT-005", "Demo", "Raul", "1979-05-05", "male"),
+            new PatientSeed("MHS-PAT-006", "Demo", "Ines", "1992-06-06", "female"));
 
     public static final List<ConsultationSeed> CONSULTATIONS = List.of(
             new ConsultationSeed(
@@ -177,6 +187,11 @@ public final class SyntheticSeed {
             new AppointmentSeed("MHS-APT-001", "MHS-PAT-004", NOT_ATTENDED, AppointmentStart.PAST_OFFSET_DAYS),
             new AppointmentSeed("MHS-APT-003", "MHS-PAT-005", NOT_ATTENDED, AppointmentStart.PAST_OFFSET_DAYS),
             new AppointmentSeed("MHS-APT-002", "MHS-PAT-005", CONFIRMED, AppointmentStart.FUTURE_OFFSET_DAYS));
+
+    public static final List<PatientIdentifierSeed> PATIENT_IDENTIFIERS = List.of(
+            new PatientIdentifierSeed(FOLLOW_UP_CASE_SYSTEM, "SYN-FOLLOWUP-013", "MHS-PAT-004"),
+            new PatientIdentifierSeed(FOLLOW_UP_CASE_SYSTEM, "SYN-FOLLOWUP-014", "MHS-PAT-005"),
+            new PatientIdentifierSeed(FOLLOW_UP_CASE_SYSTEM, "SYN-FOLLOWUP-015", "MHS-PAT-006"));
 
     private SyntheticSeed() {
     }

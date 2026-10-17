@@ -156,6 +156,19 @@ class MiniHisConnectorTest {
                 exchange.sendResponseHeaders(405, -1);
                 return;
             }
+            if ("/patients".equals(path)) {
+                String patientQuery = exchange.getRequestURI().getRawQuery();
+                byte[] found = (patientQuery != null && patientQuery.contains("value=MHS-PAT-001")
+                        ? "[" + patientJson() + "]"
+                        : "[]").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.getResponseHeaders().set("X-More-Results", "false");
+                exchange.sendResponseHeaders(200, found.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(found);
+                }
+                return;
+            }
             if ("/results".equals(path)) {
                 String query = exchange.getRequestURI().getRawQuery();
                 if (query == null || !query.contains("patientId=MHS-PAT-001") || !query.contains("status=final")) {
@@ -594,6 +607,79 @@ class MiniHisConnectorTest {
                 .extracting(ex -> ((ClinicalReadException) ex).code())
                 .isEqualTo("destination_not_supported");
         verifyNoInteractions(routing);
+    }
+
+    @Test
+    void followUpCaseSearchKeepsTheMiniHisPatientId() throws IOException {
+        List<String> paths = new CopyOnWriteArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            String path = exchange.getRequestURI().getPath();
+            paths.add(path);
+            String query = exchange.getRequestURI().getRawQuery() == null ? "" : exchange.getRequestURI().getRawQuery();
+            String payload = "[]";
+            String more = "false";
+            if (query.contains("value=SYN-FOLLOWUP-013")) {
+                payload = """
+                        [{"patientId":"MHS-PAT-004","familyName":"Demo","givenName":"Nora","birthDate":"1988-04-04","administrativeSex":"female","identifiers":[{"system":"https://lab.local/followup-case","value":"SYN-FOLLOWUP-013"}]}]
+                        """;
+            } else if (query.contains("value=SYN-FOLLOWUP-DUP")) {
+                payload = """
+                        [{"patientId":"MHS-PAT-004","familyName":"Demo","givenName":"Nora","birthDate":"1988-04-04","administrativeSex":"female","identifiers":[{"system":"https://lab.local/followup-case","value":"SYN-FOLLOWUP-DUP"}]},{"patientId":"MHS-PAT-005","familyName":"Demo","givenName":"Raul","birthDate":"1979-05-05","administrativeSex":"male","identifiers":[{"system":"https://lab.local/followup-case","value":"SYN-FOLLOWUP-DUP"}]}]
+                        """;
+            } else if (query.contains("value=SYN-FOLLOWUP-BAD")) {
+                payload = """
+                        [{"patientId":"MHS-PAT-004","familyName":"Demo","givenName":"Nora","birthDate":"1988-04-04","administrativeSex":"female","identifiers":[{"system":"https://lab.local/followup-case","value":"SYN-FOLLOWUP-013"},{"system":"https://lab.local/followup-case","value":"SYN-FOLLOWUP-013"}]}]
+                        """;
+            } else if (query.contains("value=SYN-FOLLOWUP-PAGE")) {
+                more = "true";
+                payload = """
+                        [{"patientId":"MHS-PAT-004","familyName":"Demo","givenName":"Nora","birthDate":"1988-04-04","administrativeSex":"female","identifiers":[{"system":"https://lab.local/followup-case","value":"SYN-FOLLOWUP-PAGE"}]}]
+                        """;
+            }
+            byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.getResponseHeaders().set("X-More-Results", more);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        server.start();
+        try {
+            MiniHisClinicalSource source = source("http://127.0.0.1:" + server.getAddress().getPort());
+            JsonNode found = source.searchPatients("https://lab.local/followup-case", "SYN-FOLLOWUP-013");
+            JsonNode missing = source.searchPatients("https://lab.local/followup-case", "SYN-FOLLOWUP-404");
+
+            assertThat(paths).allMatch("/patients"::equals);
+            assertThat(found.path("collectionStatus").asText()).isEqualTo("complete");
+            assertThat(found.path("resources").get(0).path("id").asText()).isEqualTo("MHS-PAT-004");
+            assertThat(found.path("resources").get(0).path("identifier")).hasSize(2);
+            assertThat(found.path("resources").get(0).path("identifier").get(0).path("system").asText())
+                    .isEqualTo(MiniHisNormalizer.PATIENT_SYSTEM);
+            assertThat(found.path("resources").get(0).path("identifier").get(0).path("value").asText())
+                    .isEqualTo("MHS-PAT-004");
+            assertThat(found.path("resources").get(0).path("identifier").get(1).path("system").asText())
+                    .isEqualTo("https://lab.local/followup-case");
+            assertThat(found.path("resources").get(0).path("identifier").get(1).path("value").asText())
+                    .isEqualTo("SYN-FOLLOWUP-013");
+            assertThat(missing.path("collectionStatus").asText()).isEqualTo("complete");
+            assertThat(missing.path("resources")).isEmpty();
+            assertThatThrownBy(() -> source.searchPatients("https://lab.local/followup-case", "SYN-FOLLOWUP-DUP"))
+                    .isInstanceOf(ClinicalReadException.class)
+                    .extracting(ex -> ((ClinicalReadException) ex).code())
+                    .isEqualTo("invalid_source");
+            assertThatThrownBy(() -> source.searchPatients("https://lab.local/followup-case", "SYN-FOLLOWUP-BAD"))
+                    .isInstanceOf(ClinicalReadException.class)
+                    .extracting(ex -> ((ClinicalReadException) ex).code())
+                    .isEqualTo("invalid_source");
+            assertThatThrownBy(() -> source.searchPatients("https://lab.local/followup-case", "SYN-FOLLOWUP-PAGE"))
+                    .isInstanceOf(ClinicalReadException.class)
+                    .extracting(ex -> ((ClinicalReadException) ex).code())
+                    .isEqualTo("invalid_source");
+        } finally {
+            server.stop(0);
+        }
     }
 
     private static void assertRequiredR4Elements(ObjectNode... resources) {

@@ -35,6 +35,7 @@ public class MiniHisStore {
     @Transactional
     public SeedCounts reset() {
         schema.migrateExistingRows();
+        jdbc.update("DELETE FROM patient_identifier");
         jdbc.update("DELETE FROM appointment");
         jdbc.update("DELETE FROM clinical_result_component");
         jdbc.update("DELETE FROM clinical_result");
@@ -49,20 +50,51 @@ public class MiniHisStore {
     }
 
     public List<PatientView> listPatients(int limit) {
-        return jdbc.query(
+        return attachIdentifiers(jdbc.query(
                 """
                 SELECT patient_id, family_name, given_name, birth_date, administrative_sex
                 FROM patient
                 ORDER BY patient_id ASC
                 LIMIT ?
                 """,
-                (rs, row) -> new PatientView(
-                        rs.getString("patient_id"),
-                        rs.getString("family_name"),
-                        rs.getString("given_name"),
-                        rs.getString("birth_date"),
-                        rs.getString("administrative_sex")),
-                limit);
+                (rs, row) -> patient(rs),
+                limit));
+    }
+
+    public PatientLookup searchPatients(String system, String value, int limit) {
+        int probe = limit + 1;
+        List<PatientView> rows;
+        if (SyntheticSeed.PROPRIETARY_PATIENT_SYSTEM.equals(system)) {
+            rows = jdbc.query(
+                    """
+                    SELECT patient_id, family_name, given_name, birth_date, administrative_sex
+                    FROM patient
+                    WHERE patient_id = ?
+                    LIMIT ?
+                    """,
+                    (rs, row) -> patient(rs),
+                    value,
+                    probe);
+        } else {
+            rows = jdbc.query(
+                    """
+                    SELECT p.patient_id, p.family_name, p.given_name, p.birth_date, p.administrative_sex
+                    FROM patient p
+                    INNER JOIN patient_identifier i ON i.patient_id = p.patient_id
+                    WHERE i.identifier_system = ? AND i.identifier_value = ?
+                    ORDER BY p.patient_id ASC
+                    LIMIT ?
+                    """,
+                    (rs, row) -> patient(rs),
+                    system,
+                    value,
+                    probe);
+        }
+        boolean truncated = rows.size() > limit;
+        if (truncated) {
+            rows = new ArrayList<>(rows.subList(0, limit));
+        }
+        return new PatientLookup(attachIdentifiers(rows), truncated);
     }
 
     public Optional<PatientView> findPatient(String patientId) {
@@ -72,14 +104,9 @@ public class MiniHisStore {
                 FROM patient
                 WHERE patient_id = ?
                 """,
-                (rs, row) -> new PatientView(
-                        rs.getString("patient_id"),
-                        rs.getString("family_name"),
-                        rs.getString("given_name"),
-                        rs.getString("birth_date"),
-                        rs.getString("administrative_sex")),
+                (rs, row) -> patient(rs),
                 patientId);
-        return rows.stream().findFirst();
+        return attachIdentifiers(rows).stream().findFirst();
     }
 
     public Optional<List<ConsultationView>> listConsultations(String patientId, int limit) {
@@ -245,6 +272,16 @@ public class MiniHisStore {
                     patient.birthDate(),
                     patient.administrativeSex());
         }
+        for (SyntheticSeed.PatientIdentifierSeed identifier : SyntheticSeed.PATIENT_IDENTIFIERS) {
+            jdbc.update(
+                    """
+                    INSERT INTO patient_identifier (identifier_system, identifier_value, patient_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    identifier.system(),
+                    identifier.value(),
+                    identifier.patientId());
+        }
         for (SyntheticSeed.ConsultationSeed consultation : SyntheticSeed.CONSULTATIONS) {
             jdbc.update(
                     """
@@ -307,6 +344,48 @@ public class MiniHisStore {
     private int count(String table) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
         return count == null ? 0 : count;
+    }
+
+    private static PatientView patient(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new PatientView(
+                rs.getString("patient_id"),
+                rs.getString("family_name"),
+                rs.getString("given_name"),
+                rs.getString("birth_date"),
+                rs.getString("administrative_sex"),
+                List.of());
+    }
+
+    private List<PatientView> attachIdentifiers(List<PatientView> patients) {
+        if (patients.isEmpty()) {
+            return patients;
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(patients.size(), "?"));
+        Object[] ids = patients.stream().map(PatientView::patientId).toArray();
+        Map<String, List<PatientIdentifierView>> grouped = new LinkedHashMap<>();
+        jdbc.query(
+                """
+                SELECT patient_id, identifier_system, identifier_value
+                FROM patient_identifier
+                WHERE patient_id IN (%s)
+                ORDER BY identifier_system ASC, identifier_value ASC
+                """.formatted(placeholders),
+                rs -> {
+                    grouped.computeIfAbsent(rs.getString("patient_id"), key -> new ArrayList<>())
+                            .add(new PatientIdentifierView(
+                                    rs.getString("identifier_system"),
+                                    rs.getString("identifier_value")));
+                },
+                ids);
+        return patients.stream()
+                .map(patient -> new PatientView(
+                        patient.patientId(),
+                        patient.familyName(),
+                        patient.givenName(),
+                        patient.birthDate(),
+                        patient.administrativeSex(),
+                        grouped.getOrDefault(patient.patientId(), List.of())))
+                .toList();
     }
 
     private static ConsultationView consultation(java.sql.ResultSet rs) throws java.sql.SQLException {

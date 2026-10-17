@@ -55,7 +55,7 @@ class MiniHisSimulatorTest {
 
         mockMvc.perform(get("/patients"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(5))
+                .andExpect(jsonPath("$.length()").value(6))
                 .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-001"))
                 .andExpect(jsonPath("$[0].familyName").value("Quispe"))
                 .andExpect(jsonPath("$[0].givenName").value("Ana"))
@@ -196,7 +196,7 @@ class MiniHisSimulatorTest {
 
         mockMvc.perform(post("/synthetic/reset"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.patients").value(5))
+                .andExpect(jsonPath("$.patients").value(6))
                 .andExpect(jsonPath("$.consultations").value(3))
                 .andExpect(jsonPath("$.results").value(6));
         mockMvc.perform(get("/patients/MHS-PAT-003"))
@@ -241,6 +241,47 @@ class MiniHisSimulatorTest {
                 .andExpect(jsonPath("$.patientId").value("MHS-PAT-001"))
                 .andExpect(jsonPath("$.status").value("final"))
                 .andExpect(jsonPath("$.resourceType").doesNotExist());
+    }
+
+    @Test
+    void followUpCaseSearchResolvesBoundPatients() throws Exception {
+        mockMvc.perform(get("/patients")
+                        .param("system", SyntheticSeed.FOLLOW_UP_CASE_SYSTEM)
+                        .param("value", "SYN-FOLLOWUP-013"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-More-Results", "false"))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-004"))
+                .andExpect(jsonPath("$[0].identifiers[0].system").value(SyntheticSeed.FOLLOW_UP_CASE_SYSTEM))
+                .andExpect(jsonPath("$[0].identifiers[0].value").value("SYN-FOLLOWUP-013"));
+        mockMvc.perform(get("/patients")
+                        .param("system", SyntheticSeed.FOLLOW_UP_CASE_SYSTEM)
+                        .param("value", "SYN-FOLLOWUP-014"))
+                .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-005"));
+        mockMvc.perform(get("/patients")
+                        .param("system", SyntheticSeed.FOLLOW_UP_CASE_SYSTEM)
+                        .param("value", "SYN-FOLLOWUP-015"))
+                .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-006"));
+        mockMvc.perform(get("/patients/MHS-PAT-006/consultations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/appointments").param("patientId", "MHS-PAT-006"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/patients")
+                        .param("system", SyntheticSeed.PROPRIETARY_PATIENT_SYSTEM)
+                        .param("value", "MHS-PAT-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-001"))
+                .andExpect(jsonPath("$[0].identifiers.length()").value(0));
+        mockMvc.perform(get("/patients")
+                        .param("system", SyntheticSeed.FOLLOW_UP_CASE_SYSTEM)
+                        .param("value", "SYN-FOLLOWUP-404"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-More-Results", "false"))
+                .andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/patients").param("system", SyntheticSeed.FOLLOW_UP_CASE_SYSTEM))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

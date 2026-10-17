@@ -56,6 +56,7 @@ final class MiniHisNormalizer {
             throw ClinicalReadException.invalidSource();
         }
         ObjectNode resource = resource("Patient", id, PATIENT_SYSTEM);
+        appendIdentifiers(resource, id, source.get("identifiers"));
         ObjectNode name = resource.putArray("name").addObject();
         name.put("family", family);
         name.putArray("given").add(given);
@@ -128,6 +129,31 @@ final class MiniHisNormalizer {
         participant.put("status", PARTICIPANT_NEEDS_ACTION);
         participant.putObject("actor").put("reference", "Patient/" + patientId);
         return resource;
+    }
+
+    private static void appendIdentifiers(ObjectNode resource, String patientId, JsonNode extra) {
+        if (extra == null || extra.isNull()) {
+            return;
+        }
+        if (!extra.isArray()) {
+            throw ClinicalReadException.invalidSource();
+        }
+        ArrayNode identifiers = (ArrayNode) resource.get("identifier");
+        Set<String> seen = new HashSet<>();
+        seen.add(PATIENT_SYSTEM + "\n" + patientId);
+        for (JsonNode item : extra) {
+            if (item == null || !item.isObject()) {
+                throw ClinicalReadException.invalidSource();
+            }
+            String system = required(item, "system");
+            String value = required(item, "value");
+            if (PATIENT_SYSTEM.equals(system) || !seen.add(system + "\n" + value)) {
+                throw ClinicalReadException.invalidSource();
+            }
+            ObjectNode identifier = identifiers.addObject();
+            identifier.put("system", system);
+            identifier.put("value", value);
+        }
     }
 
     private ObjectNode resource(String resourceType, String id, String system) {

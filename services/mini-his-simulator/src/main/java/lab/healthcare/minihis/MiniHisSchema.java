@@ -79,6 +79,14 @@ public class MiniHisSchema {
                     start_offset_days INTEGER NOT NULL
                 )
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS patient_identifier (
+                    identifier_system TEXT NOT NULL,
+                    identifier_value TEXT NOT NULL,
+                    patient_id TEXT NOT NULL REFERENCES patient(patient_id),
+                    PRIMARY KEY (identifier_system, identifier_value)
+                )
+                """);
         addColumnIfAbsent("consultation", "care_class", "TEXT");
         addColumnIfAbsent("clinical_result", "status", "TEXT");
         backfillSyntheticCareClass();
@@ -93,7 +101,9 @@ public class MiniHisSchema {
 
     public void backfillSyntheticAppointments() {
         for (SyntheticSeed.PatientSeed patient : SyntheticSeed.PATIENTS) {
-            if (!"MHS-PAT-004".equals(patient.patientId()) && !"MHS-PAT-005".equals(patient.patientId())) {
+            if (!"MHS-PAT-004".equals(patient.patientId())
+                    && !"MHS-PAT-005".equals(patient.patientId())
+                    && !"MHS-PAT-006".equals(patient.patientId())) {
                 continue;
             }
             jdbc.update(
@@ -125,6 +135,24 @@ public class MiniHisSchema {
                     appointment.startOffsetDays(),
                     appointment.patientId(),
                     appointment.appointmentId());
+        }
+        for (SyntheticSeed.PatientIdentifierSeed identifier : SyntheticSeed.PATIENT_IDENTIFIERS) {
+            jdbc.update(
+                    """
+                    INSERT INTO patient_identifier (identifier_system, identifier_value, patient_id)
+                    SELECT ?, ?, ?
+                    WHERE EXISTS (SELECT 1 FROM patient WHERE patient_id = ?)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM patient_identifier
+                          WHERE identifier_system = ? AND identifier_value = ?
+                      )
+                    """,
+                    identifier.system(),
+                    identifier.value(),
+                    identifier.patientId(),
+                    identifier.patientId(),
+                    identifier.system(),
+                    identifier.value());
         }
     }
 

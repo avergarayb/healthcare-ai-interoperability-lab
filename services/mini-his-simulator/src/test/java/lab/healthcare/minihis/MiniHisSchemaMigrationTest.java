@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MiniHisSchemaMigrationTest {
 
@@ -47,7 +48,7 @@ class MiniHisSchemaMigrationTest {
             MiniHisSchema schema = new MiniHisSchema(jdbc);
             schema.createIfAbsent();
 
-            assertThat(count(jdbc, "patient")).isEqualTo(patients + 2);
+            assertThat(count(jdbc, "patient")).isEqualTo(patients + 3);
             assertThat(count(jdbc, "consultation")).isEqualTo(consultations);
             assertThat(count(jdbc, "clinical_result")).isEqualTo(results);
             assertThat(text(jdbc, "SELECT care_class FROM consultation WHERE consultation_id = 'MHS-CON-001'"))
@@ -66,7 +67,7 @@ class MiniHisSchemaMigrationTest {
                     .isEqualTo("specialist");
             assertThat(text(jdbc, "SELECT care_class FROM consultation WHERE consultation_id = 'LOCAL-CON-9'"))
                     .isNull();
-            assertThat(count(jdbc, "patient")).isEqualTo(patients + 2);
+            assertThat(count(jdbc, "patient")).isEqualTo(patients + 3);
         } finally {
             Files.deleteIfExists(database);
         }
@@ -173,7 +174,64 @@ class MiniHisSchemaMigrationTest {
             assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-004'")).isEqualTo(1);
             assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-005'")).isEqualTo(2);
             assertThat(count(jdbc, "appointment")).isEqualTo(4);
-            assertThat(count(jdbc, "patient")).isEqualTo(4);
+            assertThat(count(jdbc, "patient")).isEqualTo(5);
+        } finally {
+            Files.deleteIfExists(database);
+        }
+    }
+
+    @Test
+    void followUpIdentifiersAreInsertedOnceAndNeverReassigned() throws Exception {
+        Path database = Files.createTempFile("mini-his-case", ".sqlite");
+        try {
+            JdbcTemplate jdbc = jdbc(database);
+            createLegacySchema(jdbc);
+            jdbc.update(
+                    """
+                    INSERT INTO patient (patient_id, family_name, given_name, birth_date, administrative_sex)
+                    VALUES ('MHS-PAT-001', 'Quispe', 'Ana', '1984-03-12', 'female'),
+                           ('LOCAL-PAT-9', 'Local', 'Paz', '1990-01-01', 'female')
+                    """);
+
+            MiniHisSchema schema = new MiniHisSchema(jdbc);
+            schema.createIfAbsent();
+            schema.createIfAbsent();
+
+            assertThat(count(jdbc, "patient_identifier")).isEqualTo(3);
+            assertThat(text(jdbc, "SELECT patient_id FROM patient_identifier WHERE identifier_value = 'SYN-FOLLOWUP-013'"))
+                    .isEqualTo("MHS-PAT-004");
+            assertThat(text(jdbc, "SELECT patient_id FROM patient_identifier WHERE identifier_value = 'SYN-FOLLOWUP-014'"))
+                    .isEqualTo("MHS-PAT-005");
+            assertThat(text(jdbc, "SELECT patient_id FROM patient_identifier WHERE identifier_value = 'SYN-FOLLOWUP-015'"))
+                    .isEqualTo("MHS-PAT-006");
+            assertThat(countWhere(jdbc, "patient_identifier", "patient_id = 'MHS-PAT-001'")).isZero();
+            assertThat(countWhere(
+                    jdbc,
+                    "patient_identifier",
+                    "identifier_value IN ('SYN-FOLLOWUP-001','SYN-FOLLOWUP-002','SYN-FOLLOWUP-003','SYN-FOLLOWUP-004','SYN-FOLLOWUP-005','SYN-FOLLOWUP-006','SYN-FOLLOWUP-007','SYN-FOLLOWUP-008','SYN-FOLLOWUP-009','SYN-FOLLOWUP-010','SYN-FOLLOWUP-011','SYN-FOLLOWUP-012')"))
+                    .isZero();
+            assertThat(countWhere(jdbc, "consultation", "patient_id = 'MHS-PAT-006'")).isZero();
+            assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-006'")).isZero();
+
+            jdbc.update(
+                    """
+                    UPDATE patient_identifier
+                    SET patient_id = 'LOCAL-PAT-9'
+                    WHERE identifier_system = ? AND identifier_value = 'SYN-FOLLOWUP-013'
+                    """,
+                    SyntheticSeed.FOLLOW_UP_CASE_SYSTEM);
+            schema.createIfAbsent();
+
+            assertThat(count(jdbc, "patient_identifier")).isEqualTo(3);
+            assertThat(text(jdbc, "SELECT patient_id FROM patient_identifier WHERE identifier_value = 'SYN-FOLLOWUP-013'"))
+                    .isEqualTo("LOCAL-PAT-9");
+            assertThatThrownBy(() -> jdbc.update(
+                    """
+                    INSERT INTO patient_identifier (identifier_system, identifier_value, patient_id)
+                    VALUES (?, 'SYN-FOLLOWUP-013', 'MHS-PAT-004')
+                    """,
+                    SyntheticSeed.FOLLOW_UP_CASE_SYSTEM))
+                    .isInstanceOf(org.springframework.dao.DataAccessException.class);
         } finally {
             Files.deleteIfExists(database);
         }

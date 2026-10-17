@@ -20,6 +20,7 @@ public class MiniHisController {
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 100;
     private static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z0-9\\-.]{1,64}");
+    private static final Pattern IDENTIFIER_SYSTEM = Pattern.compile("https://[A-Za-z0-9./_-]{1,200}");
     private static final Pattern STATUS = Pattern.compile("[A-Za-z0-9\\-]{1,64}");
 
     private final MiniHisStore store;
@@ -34,12 +35,30 @@ public class MiniHisController {
     }
 
     @GetMapping(path = "/patients", produces = MediaType.APPLICATION_JSON_VALUE)
-    public Object patients(@RequestParam(name = "limit", required = false) Integer limit) {
+    public Object patients(
+            @RequestParam(name = "limit", required = false) Integer limit,
+            @RequestParam(name = "system", required = false) String system,
+            @RequestParam(name = "value", required = false) String value) {
         Integer bounded = boundLimit(limit);
         if (bounded == null) {
             return invalidLimit();
         }
-        return store.listPatients(bounded);
+        if (system == null && value == null) {
+            return store.listPatients(bounded);
+        }
+        if (system == null || value == null
+                || !IDENTIFIER_SYSTEM.matcher(system).matches()
+                || !IDENTIFIER.matcher(value).matches()) {
+            return invalidRequest();
+        }
+        try {
+            PatientLookup lookup = store.searchPatients(system, value, bounded);
+            return ResponseEntity.ok()
+                    .header("X-More-Results", Boolean.toString(lookup.truncated()))
+                    .body(lookup.patients());
+        } catch (DataAccessException ex) {
+            return ResponseEntity.status(503).body(Map.of("error", "unavailable"));
+        }
     }
 
     @GetMapping(path = "/patients/{patientId}", produces = MediaType.APPLICATION_JSON_VALUE)

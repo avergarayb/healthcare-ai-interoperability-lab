@@ -41,20 +41,24 @@ final class MiniHisRestSource implements MiniHisClinicalSource {
 
     @Override
     public JsonNode searchPatients(String identifierSystem, String identifierValue) {
-        if (!MiniHisNormalizer.PATIENT_SYSTEM.equals(identifierSystem)) {
-            requireAvailable();
-            return collection("Patient", json.createArrayNode(), false);
-        }
-        MiniHisResponse response = client.getOne("/patients/" + MiniHisClient.encode(identifierValue));
+        MiniHisResponse response = client.getList(
+                "/patients?system=" + MiniHisClient.encode(identifierSystem)
+                        + "&value=" + MiniHisClient.encode(identifierValue));
         if (response.status() == 404) {
             return collection("Patient", json.createArrayNode(), false);
         }
-        ObjectNode resource = normalizer.patient(response.body());
-        if (!identifierValue.equals(resource.path("id").asText())) {
+        JsonNode body = response.body();
+        if (body == null || !body.isArray() || response.truncated() || body.size() > 1) {
             throw ClinicalReadException.invalidSource();
         }
-        ArrayNode resources = json.createArrayNode().add(resource);
-        return collection("Patient", resources, false);
+        if (body.isEmpty()) {
+            return collection("Patient", json.createArrayNode(), false);
+        }
+        ObjectNode resource = normalizer.patient(body.get(0));
+        if (!containsIdentifier(resource, identifierSystem, identifierValue)) {
+            throw ClinicalReadException.invalidSource();
+        }
+        return collection("Patient", json.createArrayNode().add(resource), false);
     }
 
     @Override
@@ -162,11 +166,18 @@ final class MiniHisRestSource implements MiniHisClinicalSource {
         return collection("Appointment", resources, response.truncated());
     }
 
-    private void requireAvailable() {
-        MiniHisResponse response = client.getList("/patients");
-        if (response.status() != 200) {
-            throw ClinicalReadException.unavailable();
+    private static boolean containsIdentifier(JsonNode resource, String system, String value) {
+        JsonNode identifiers = resource.path("identifier");
+        if (!identifiers.isArray()) {
+            return false;
         }
+        for (JsonNode identifier : identifiers) {
+            if (system.equals(identifier.path("system").asText())
+                    && value.equals(identifier.path("value").asText())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private ObjectNode readEnvelope(ObjectNode resource) {
