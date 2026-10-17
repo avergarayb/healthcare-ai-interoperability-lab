@@ -1,6 +1,11 @@
 package lab.healthcare.fhir.clinicalread.minihis;
 
 import lab.healthcare.fhir.clinicalread.ClinicalReadException;
+import lab.healthcare.fhir.terminology.StaticTerminologyRegistry;
+import lab.healthcare.fhir.terminology.TerminologyDomain;
+import lab.healthcare.fhir.terminology.TerminologyMapping;
+import lab.healthcare.fhir.terminology.TerminologyMappingNotFound;
+import lab.healthcare.fhir.terminology.TerminologyRegistry;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,8 +40,7 @@ final class MiniHisNormalizer {
      */
     static final String PARTICIPANT_NEEDS_ACTION = "needs-action";
     private static final String AMBULATORY_CARE = "ambulatory";
-    private static final String AMBULATORY_CODE = "AMB";
-    private static final String FINAL_RESULT = "final";
+    private static final TerminologyRegistry TERMINOLOGY = StaticTerminologyRegistry.miniHis();
 
     private static final Pattern DECIMAL = Pattern.compile("-?(?:0|[1-9]\\d*)(?:\\.\\d+)?");
     private static final Set<String> SEX = Set.of("female", "male", "unknown");
@@ -213,45 +217,51 @@ final class MiniHisNormalizer {
     }
 
     private ObjectNode encounterClass(String careClass) {
-        if (!AMBULATORY_CARE.equals(careClass)) {
+        TerminologyMapping mapping = mapped(TerminologyDomain.ENCOUNTER_CLASS, careClass);
+        if (!ENCOUNTER_CLASS_SYSTEM.equals(mapping.targetSystem())) {
             throw ClinicalReadException.invalidSource();
         }
         ObjectNode coding = json.createObjectNode();
         coding.put("system", ENCOUNTER_CLASS_SYSTEM);
-        coding.put("code", AMBULATORY_CODE);
+        coding.put("code", mapping.targetCode());
         coding.put("display", AMBULATORY_CARE);
         return coding;
     }
 
     private static String observationStatus(String status) {
-        if (!FINAL_RESULT.equals(status)) {
-            throw ClinicalReadException.invalidSource();
-        }
-        return FINAL_RESULT;
+        return statusCode(TerminologyDomain.OBSERVATION_STATUS, status);
     }
 
     private static String appointmentStatus(String status) {
-        return switch (status) {
-            case "not_attended" -> "noshow";
-            case "confirmed" -> "booked";
-            default -> throw ClinicalReadException.invalidSource();
-        };
+        return statusCode(TerminologyDomain.APPOINTMENT_STATUS, status);
     }
 
     private static String encounterStatus(String status) {
-        return switch (status) {
-            case "completed" -> "finished";
-            case "in_progress" -> "in-progress";
-            default -> throw ClinicalReadException.invalidSource();
-        };
+        return statusCode(TerminologyDomain.ENCOUNTER_STATUS, status);
     }
 
     private static String category(String resultType) {
-        return switch (resultType) {
-            case "laboratory" -> "laboratory";
-            case "vital_sign" -> "vital-signs";
-            default -> throw ClinicalReadException.invalidSource();
-        };
+        TerminologyMapping mapping = mapped(TerminologyDomain.OBSERVATION_CATEGORY, resultType);
+        if (!CATEGORY_SYSTEM.equals(mapping.targetSystem())) {
+            throw ClinicalReadException.invalidSource();
+        }
+        return mapping.targetCode();
+    }
+
+    private static String statusCode(TerminologyDomain domain, String sourceCode) {
+        TerminologyMapping mapping = mapped(domain, sourceCode);
+        if (mapping.targetSystem() != null) {
+            throw ClinicalReadException.invalidSource();
+        }
+        return mapping.targetCode();
+    }
+
+    private static TerminologyMapping mapped(TerminologyDomain domain, String sourceCode) {
+        try {
+            return TERMINOLOGY.resolve(StaticTerminologyRegistry.MINI_HIS, domain, sourceCode);
+        } catch (TerminologyMappingNotFound ex) {
+            throw ClinicalReadException.invalidSource();
+        }
     }
 
     private static String instant(String value) {
