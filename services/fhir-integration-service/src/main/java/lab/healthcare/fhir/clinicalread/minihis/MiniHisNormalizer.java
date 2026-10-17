@@ -1,6 +1,9 @@
 package lab.healthcare.fhir.clinicalread.minihis;
 
 import lab.healthcare.fhir.clinicalread.ClinicalReadException;
+import lab.healthcare.fhir.terminology.QuantityUnitMapping;
+import lab.healthcare.fhir.terminology.QuantityUnitRegistry;
+import lab.healthcare.fhir.terminology.StaticQuantityUnitRegistry;
 import lab.healthcare.fhir.terminology.StaticTerminologyRegistry;
 import lab.healthcare.fhir.terminology.TerminologyDomain;
 import lab.healthcare.fhir.terminology.TerminologyMapping;
@@ -17,6 +20,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -41,6 +45,7 @@ final class MiniHisNormalizer {
     static final String PARTICIPANT_NEEDS_ACTION = "needs-action";
     private static final String AMBULATORY_CARE = "ambulatory";
     private static final TerminologyRegistry TERMINOLOGY = StaticTerminologyRegistry.miniHis();
+    private static final QuantityUnitRegistry UNITS = StaticQuantityUnitRegistry.miniHis();
 
     private static final Pattern DECIMAL = Pattern.compile("-?(?:0|[1-9]\\d*)(?:\\.\\d+)?");
     private static final Set<String> SEX = Set.of("female", "male", "unknown");
@@ -176,11 +181,7 @@ final class MiniHisNormalizer {
             return;
         }
         if (valueText != null && DECIMAL.matcher(valueText).matches()) {
-            ObjectNode quantity = resource.putObject("valueQuantity");
-            quantity.put("value", new BigDecimal(valueText));
-            if (unit != null) {
-                quantity.put("unit", unit);
-            }
+            applyQuantity(resource.putObject("valueQuantity"), new BigDecimal(valueText), unit);
             return;
         }
         if (valueText != null && unit == null) {
@@ -210,10 +211,24 @@ final class MiniHisNormalizer {
             }
             ObjectNode component = target.addObject();
             component.putObject("code").put("text", name);
-            ObjectNode quantity = component.putObject("valueQuantity");
-            quantity.put("value", new BigDecimal(value));
-            quantity.put("unit", unit);
+            applyQuantity(component.putObject("valueQuantity"), new BigDecimal(value), unit);
         }
+    }
+
+    private static void applyQuantity(ObjectNode quantity, BigDecimal value, String unit) {
+        quantity.put("value", value);
+        if (unit == null) {
+            return;
+        }
+        Optional<QuantityUnitMapping> coding = UNITS.find(StaticQuantityUnitRegistry.MINI_HIS, unit);
+        if (coding.isEmpty()) {
+            quantity.put("unit", unit);
+            return;
+        }
+        QuantityUnitMapping mapping = coding.get();
+        quantity.put("unit", mapping.unitText());
+        quantity.put("system", mapping.system());
+        quantity.put("code", mapping.code());
     }
 
     private ObjectNode encounterClass(String careClass) {

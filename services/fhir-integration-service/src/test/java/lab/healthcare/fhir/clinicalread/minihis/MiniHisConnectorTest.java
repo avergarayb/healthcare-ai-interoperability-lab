@@ -376,12 +376,18 @@ class MiniHisConnectorTest {
         assertThat(pressure.path("component").get(0).path("valueQuantity").path("value").decimalValue())
                 .isEqualByComparingTo("120");
         assertThat(pressure.path("component").get(0).path("valueQuantity").path("unit").asText()).isEqualTo("mmHg");
+        assertThat(pressure.path("component").get(0).path("valueQuantity").path("system").asText())
+                .isEqualTo("http://unitsofmeasure.org");
+        assertThat(pressure.path("component").get(0).path("valueQuantity").path("code").asText()).isEqualTo("mm[Hg]");
         assertThat(pressure.path("component").get(1).path("code").path("text").asText()).isEqualTo("Presion diastolica");
         assertThat(pressure.path("component").get(1).path("valueQuantity").path("value").decimalValue())
                 .isEqualByComparingTo("80");
+        assertThat(pressure.path("component").get(1).path("valueQuantity").path("code").asText()).isEqualTo("mm[Hg]");
         assertThat(hemoglobin.path("component").isMissingNode()).isTrue();
         assertThat(hemoglobin.path("valueQuantity").path("value").decimalValue()).isEqualByComparingTo("13.4");
         assertThat(hemoglobin.path("valueQuantity").path("unit").asText()).isEqualTo("g/dL");
+        assertThat(hemoglobin.path("valueQuantity").path("system").asText()).isEqualTo("http://unitsofmeasure.org");
+        assertThat(hemoglobin.path("valueQuantity").path("code").asText()).isEqualTo("g/dL");
         assertThatThrownBy(() -> normalizer.observation(json.readTree(bloodPressureJson().replace("\"unit\":\"mmHg\"", "\"unit\":\"\""))))
                 .isInstanceOf(ClinicalReadException.class)
                 .extracting(ex -> ((ClinicalReadException) ex).code())
@@ -403,6 +409,17 @@ class MiniHisConnectorTest {
                 .isInstanceOf(ClinicalReadException.class)
                 .extracting(ex -> ((ClinicalReadException) ex).code())
                 .isEqualTo("invalid_source");
+
+        JsonNode parentPressure = normalizer.observation(json.readTree(resultJson()));
+        assertThat(parentPressure.path("valueQuantity").path("value").decimalValue()).isEqualByComparingTo("120");
+        assertThat(parentPressure.path("valueQuantity").path("unit").asText()).isEqualTo("mmHg");
+        assertThat(parentPressure.path("valueQuantity").path("system").asText()).isEqualTo("http://unitsofmeasure.org");
+        assertThat(parentPressure.path("valueQuantity").path("code").asText()).isEqualTo("mm[Hg]");
+        JsonNode unknown = normalizer.observation(json.readTree(hemoglobinJson().replace("g/dL", "mg/dL")));
+        assertThat(unknown.path("valueQuantity").path("value").decimalValue()).isEqualByComparingTo("13.4");
+        assertThat(unknown.path("valueQuantity").path("unit").asText()).isEqualTo("mg/dL");
+        assertThat(unknown.path("valueQuantity").path("system").isMissingNode()).isTrue();
+        assertThat(unknown.path("valueQuantity").path("code").isMissingNode()).isTrue();
 
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
