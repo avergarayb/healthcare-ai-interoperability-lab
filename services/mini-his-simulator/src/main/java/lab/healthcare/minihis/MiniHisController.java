@@ -121,6 +121,39 @@ public class MiniHisController {
                 .body(search.results());
     }
 
+    @GetMapping(path = "/appointments", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> appointments(
+            @RequestParam(name = "patientId", required = false) String patientId,
+            @RequestParam(name = "limit", required = false) Integer limit) {
+        if (patientId == null || !IDENTIFIER.matcher(patientId).matches()) {
+            return invalidRequest();
+        }
+        Integer bounded = boundLimit(limit);
+        if (bounded == null) {
+            return invalidLimit();
+        }
+        AppointmentSearch search;
+        try {
+            search = store.searchAppointments(patientId, bounded);
+        } catch (DataAccessException ex) {
+            return ResponseEntity.status(503).body(Map.of("error", "unavailable"));
+        }
+        return ResponseEntity.ok()
+                .header("X-More-Results", Boolean.toString(search.truncated()))
+                .body(search.appointments());
+    }
+
+    @GetMapping(path = "/appointments/{appointmentId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> appointment(@PathVariable String appointmentId) {
+        try {
+            return store.findAppointment(appointmentId)
+                    .<ResponseEntity<?>>map(ResponseEntity::ok)
+                    .orElseGet(MiniHisController::notFound);
+        } catch (DataAccessException ex) {
+            return ResponseEntity.status(503).body(Map.of("error", "unavailable"));
+        }
+    }
+
     @GetMapping(path = "/results/{resultId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> result(@PathVariable String resultId) {
         return store.findResult(resultId)

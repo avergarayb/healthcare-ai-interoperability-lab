@@ -27,6 +27,13 @@ final class MiniHisNormalizer {
     static final String RESULT_SYSTEM = "https://lab.local/mini-his/result";
     static final String CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category";
     static final String ENCOUNTER_CLASS_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-ActCode";
+    static final String APPOINTMENT_SYSTEM = "https://lab.local/mini-his/appointment";
+    /**
+     * FHIR requires participant.status. Mini HIS does not record an individual
+     * response, so the participant stays needs-action. Appointment status is
+     * not copied onto the participant: confirmed does not become accepted.
+     */
+    static final String PARTICIPANT_NEEDS_ACTION = "needs-action";
     private static final String AMBULATORY_CARE = "ambulatory";
     private static final String AMBULATORY_CODE = "AMB";
     private static final String FINAL_RESULT = "final";
@@ -111,6 +118,18 @@ final class MiniHisNormalizer {
         return resource;
     }
 
+    ObjectNode appointment(JsonNode source) {
+        String id = required(source, "appointmentId");
+        String patientId = required(source, "patientId");
+        ObjectNode resource = resource("Appointment", id, APPOINTMENT_SYSTEM);
+        resource.put("status", appointmentStatus(required(source, "status")));
+        resource.put("start", instant(required(source, "start")));
+        ObjectNode participant = resource.putArray("participant").addObject();
+        participant.put("status", PARTICIPANT_NEEDS_ACTION);
+        participant.putObject("actor").put("reference", "Patient/" + patientId);
+        return resource;
+    }
+
     private ObjectNode resource(String resourceType, String id, String system) {
         ObjectNode resource = json.createObjectNode();
         resource.put("resourceType", resourceType);
@@ -183,6 +202,14 @@ final class MiniHisNormalizer {
             throw ClinicalReadException.invalidSource();
         }
         return FINAL_RESULT;
+    }
+
+    private static String appointmentStatus(String status) {
+        return switch (status) {
+            case "not_attended" -> "noshow";
+            case "confirmed" -> "booked";
+            default -> throw ClinicalReadException.invalidSource();
+        };
     }
 
     private static String encounterStatus(String status) {

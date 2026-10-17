@@ -16,7 +16,7 @@ public class MiniHisSchema {
         this.jdbc = jdbc;
     }
 
-    public void createIfAbsent() {
+    public void migrateExistingRows() {
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS patient (
                     patient_id TEXT PRIMARY KEY,
@@ -71,11 +71,61 @@ public class MiniHisSchema {
                     unit TEXT NOT NULL
                 )
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS appointment (
+                    appointment_id TEXT PRIMARY KEY,
+                    patient_id TEXT NOT NULL REFERENCES patient(patient_id),
+                    status TEXT NOT NULL CHECK (status IN ('not_attended', 'confirmed')),
+                    start_offset_days INTEGER NOT NULL
+                )
+                """);
         addColumnIfAbsent("consultation", "care_class", "TEXT");
         addColumnIfAbsent("clinical_result", "status", "TEXT");
         backfillSyntheticCareClass();
         backfillSyntheticResultStatus();
         backfillSyntheticBloodPressure();
+    }
+
+    public void createIfAbsent() {
+        migrateExistingRows();
+        backfillSyntheticAppointments();
+    }
+
+    public void backfillSyntheticAppointments() {
+        for (SyntheticSeed.PatientSeed patient : SyntheticSeed.PATIENTS) {
+            if (!"MHS-PAT-004".equals(patient.patientId()) && !"MHS-PAT-005".equals(patient.patientId())) {
+                continue;
+            }
+            jdbc.update(
+                    """
+                    INSERT INTO patient (
+                        patient_id, family_name, given_name, birth_date, administrative_sex
+                    )
+                    SELECT ?, ?, ?, ?, ?
+                    WHERE NOT EXISTS (SELECT 1 FROM patient WHERE patient_id = ?)
+                    """,
+                    patient.patientId(),
+                    patient.familyName(),
+                    patient.givenName(),
+                    patient.birthDate(),
+                    patient.administrativeSex(),
+                    patient.patientId());
+        }
+        for (SyntheticSeed.AppointmentSeed appointment : SyntheticSeed.APPOINTMENTS) {
+            jdbc.update(
+                    """
+                    INSERT INTO appointment (appointment_id, patient_id, status, start_offset_days)
+                    SELECT ?, ?, ?, ?
+                    WHERE EXISTS (SELECT 1 FROM patient WHERE patient_id = ?)
+                      AND NOT EXISTS (SELECT 1 FROM appointment WHERE appointment_id = ?)
+                    """,
+                    appointment.appointmentId(),
+                    appointment.patientId(),
+                    appointment.status(),
+                    appointment.startOffsetDays(),
+                    appointment.patientId(),
+                    appointment.appointmentId());
+        }
     }
 
     private void addColumnIfAbsent(String table, String column, String definition) {

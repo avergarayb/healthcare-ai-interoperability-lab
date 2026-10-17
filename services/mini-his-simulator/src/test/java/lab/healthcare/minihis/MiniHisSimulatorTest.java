@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,7 +55,7 @@ class MiniHisSimulatorTest {
 
         mockMvc.perform(get("/patients"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$.length()").value(5))
                 .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-001"))
                 .andExpect(jsonPath("$[0].familyName").value("Quispe"))
                 .andExpect(jsonPath("$[0].givenName").value("Ana"))
@@ -118,10 +119,13 @@ class MiniHisSimulatorTest {
                 """))
                 .isInstanceOf(DataAccessException.class);
 
-        Integer appointments = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'appointment'",
+        Integer historicalAppointments = jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM appointment
+                WHERE patient_id IN ('MHS-PAT-001', 'MHS-PAT-002', 'MHS-PAT-003')
+                """,
                 Integer.class);
-        assertThat(appointments).isZero();
+        assertThat(historicalAppointments).isZero();
     }
 
     @Test
@@ -192,7 +196,7 @@ class MiniHisSimulatorTest {
 
         mockMvc.perform(post("/synthetic/reset"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.patients").value(3))
+                .andExpect(jsonPath("$.patients").value(5))
                 .andExpect(jsonPath("$.consultations").value(3))
                 .andExpect(jsonPath("$.results").value(6));
         mockMvc.perform(get("/patients/MHS-PAT-003"))
@@ -237,6 +241,72 @@ class MiniHisSimulatorTest {
                 .andExpect(jsonPath("$.patientId").value("MHS-PAT-001"))
                 .andExpect(jsonPath("$.status").value("final"))
                 .andExpect(jsonPath("$.resourceType").doesNotExist());
+    }
+
+    @Test
+    void appointmentsStayPastOrFutureWithoutRewritingStoredOffsets() throws Exception {
+        String past = AppointmentStart.atOffset(AppointmentStart.PAST_OFFSET_DAYS, Clock.systemUTC());
+        String future = AppointmentStart.atOffset(AppointmentStart.FUTURE_OFFSET_DAYS, Clock.systemUTC());
+
+        mockMvc.perform(get("/appointments").param("patientId", "MHS-PAT-004"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-More-Results", "false"))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].appointmentId").value("MHS-APT-001"))
+                .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-004"))
+                .andExpect(jsonPath("$[0].status").value("not_attended"))
+                .andExpect(jsonPath("$[0].start").value(past));
+        mockMvc.perform(get("/appointments").param("patientId", "MHS-PAT-005"))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].appointmentId").value("MHS-APT-003"))
+                .andExpect(jsonPath("$[0].status").value("not_attended"))
+                .andExpect(jsonPath("$[0].start").value(past))
+                .andExpect(jsonPath("$[1].appointmentId").value("MHS-APT-002"))
+                .andExpect(jsonPath("$[1].status").value("confirmed"))
+                .andExpect(jsonPath("$[1].start").value(future));
+        mockMvc.perform(get("/appointments").param("patientId", "MHS-PAT-005").param("limit", "1"))
+                .andExpect(header().string("X-More-Results", "true"))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].appointmentId").value("MHS-APT-003"));
+        mockMvc.perform(get("/appointments").param("patientId", "MHS-PAT-001"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-More-Results", "false"))
+                .andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/appointments/MHS-APT-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("not_attended"))
+                .andExpect(jsonPath("$.start").value(past))
+                .andExpect(jsonPath("$.resourceType").doesNotExist());
+        mockMvc.perform(get("/appointments/MHS-APT-404"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("not_found"));
+        mockMvc.perform(get("/appointments"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"));
+
+        Integer historical = jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM appointment
+                WHERE patient_id IN ('MHS-PAT-001', 'MHS-PAT-002', 'MHS-PAT-003')
+                """,
+                Integer.class);
+        assertThat(historical).isZero();
+        Integer offset = jdbc.queryForObject(
+                "SELECT start_offset_days FROM appointment WHERE appointment_id = 'MHS-APT-002'",
+                Integer.class);
+        store.ensureReady();
+        assertThat(jdbc.queryForObject(
+                "SELECT start_offset_days FROM appointment WHERE appointment_id = 'MHS-APT-002'",
+                Integer.class)).isEqualTo(offset);
+
+        jdbc.execute("ALTER TABLE appointment RENAME TO appointment_hidden");
+        try {
+            mockMvc.perform(get("/appointments").param("patientId", "MHS-PAT-004"))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.error").value("unavailable"));
+        } finally {
+            jdbc.execute("ALTER TABLE appointment_hidden RENAME TO appointment");
+        }
     }
 
     @Test

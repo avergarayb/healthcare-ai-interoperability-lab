@@ -47,7 +47,7 @@ class MiniHisSchemaMigrationTest {
             MiniHisSchema schema = new MiniHisSchema(jdbc);
             schema.createIfAbsent();
 
-            assertThat(count(jdbc, "patient")).isEqualTo(patients);
+            assertThat(count(jdbc, "patient")).isEqualTo(patients + 2);
             assertThat(count(jdbc, "consultation")).isEqualTo(consultations);
             assertThat(count(jdbc, "clinical_result")).isEqualTo(results);
             assertThat(text(jdbc, "SELECT care_class FROM consultation WHERE consultation_id = 'MHS-CON-001'"))
@@ -66,7 +66,7 @@ class MiniHisSchemaMigrationTest {
                     .isEqualTo("specialist");
             assertThat(text(jdbc, "SELECT care_class FROM consultation WHERE consultation_id = 'LOCAL-CON-9'"))
                     .isNull();
-            assertThat(count(jdbc, "patient")).isEqualTo(patients);
+            assertThat(count(jdbc, "patient")).isEqualTo(patients + 2);
         } finally {
             Files.deleteIfExists(database);
         }
@@ -128,6 +128,52 @@ class MiniHisSchemaMigrationTest {
                     .isEqualTo("119");
             assertThat(count(jdbc, "clinical_result_component")).isEqualTo(2);
             assertThat(count(jdbc, "clinical_result")).isEqualTo(3);
+        } finally {
+            Files.deleteIfExists(database);
+        }
+    }
+
+    @Test
+    void appointmentOffsetsAreInsertedOnceAndNeverRewritten() throws Exception {
+        Path database = Files.createTempFile("mini-his-appointments", ".sqlite");
+        try {
+            JdbcTemplate jdbc = jdbc(database);
+            createLegacySchema(jdbc);
+            jdbc.update(
+                    """
+                    INSERT INTO patient (patient_id, family_name, given_name, birth_date, administrative_sex)
+                    VALUES ('MHS-PAT-001', 'Quispe', 'Ana', '1984-03-12', 'female'),
+                           ('LOCAL-PAT-9', 'Local', 'Paz', '1990-01-01', 'female')
+                    """);
+
+            MiniHisSchema schema = new MiniHisSchema(jdbc);
+            schema.createIfAbsent();
+            jdbc.update(
+                    """
+                    INSERT INTO appointment (appointment_id, patient_id, status, start_offset_days)
+                    VALUES ('LOCAL-APT-9', 'LOCAL-PAT-9', 'confirmed', 12)
+                    """);
+            jdbc.update("UPDATE appointment SET start_offset_days = -7 WHERE appointment_id = 'MHS-APT-001'");
+            jdbc.update("UPDATE patient SET family_name = 'Conservada' WHERE patient_id = 'MHS-PAT-004'");
+            schema.createIfAbsent();
+
+            assertThat(jdbc.queryForObject(
+                    "SELECT start_offset_days FROM appointment WHERE appointment_id = 'MHS-APT-001'", Integer.class))
+                    .isEqualTo(-7);
+            assertThat(text(jdbc, "SELECT status FROM appointment WHERE appointment_id = 'MHS-APT-001'"))
+                    .isEqualTo(SyntheticSeed.NOT_ATTENDED);
+            assertThat(jdbc.queryForObject(
+                    "SELECT start_offset_days FROM appointment WHERE appointment_id = 'LOCAL-APT-9'", Integer.class))
+                    .isEqualTo(12);
+            assertThat(text(jdbc, "SELECT family_name FROM patient WHERE patient_id = 'MHS-PAT-004'"))
+                    .isEqualTo("Conservada");
+            assertThat(text(jdbc, "SELECT family_name FROM patient WHERE patient_id = 'MHS-PAT-001'"))
+                    .isEqualTo("Quispe");
+            assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-001'")).isZero();
+            assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-004'")).isEqualTo(1);
+            assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-005'")).isEqualTo(2);
+            assertThat(count(jdbc, "appointment")).isEqualTo(4);
+            assertThat(count(jdbc, "patient")).isEqualTo(4);
         } finally {
             Files.deleteIfExists(database);
         }

@@ -220,14 +220,6 @@ class MiniHisConnectorTest {
             assertThat(observation.path("resource").path("encounter").path("reference").asText())
                     .isEqualTo("Encounter/MHS-CON-001");
 
-            assertThatThrownBy(() -> source.searchAppointments("MHS-PAT-001"))
-                    .isInstanceOf(ClinicalReadException.class)
-                    .extracting(ex -> ((ClinicalReadException) ex).code())
-                    .isEqualTo("operation_not_supported");
-            assertThatThrownBy(() -> source.readAppointment("MHS-APT-001"))
-                    .isInstanceOf(ClinicalReadException.class)
-                    .extracting(ex -> ((ClinicalReadException) ex).code())
-                    .isEqualTo("operation_not_supported");
             assertThat(requests.get()).isEqualTo(beforeSearch + 1);
             assertThat(paths.get(paths.size() - 1)).isEqualTo("/results");
             assertThat(observations.path("collectionStatus").asText()).isEqualTo("complete");
@@ -253,6 +245,105 @@ class MiniHisConnectorTest {
             server.stop(0);
         }
         verifyNoInteractions(routing);
+    }
+
+    @Test
+    void appointmentsUseSourceStatusAndDoNotConfirmTheParticipant() throws IOException {
+        MiniHisNormalizer normalizer = new MiniHisNormalizer(json);
+        JsonNode confirmed = normalizer.appointment(json.readTree(confirmedAppointmentJson()));
+        assertThat(confirmed.path("status").asText()).isEqualTo("booked");
+        assertThat(confirmed.path("participant").get(0).path("status").asText()).isEqualTo("needs-action");
+        assertThat(confirmed.path("participant").get(0).path("actor").path("reference").asText())
+                .isEqualTo("Patient/MHS-PAT-005");
+        assertThat(confirmed.path("start").asText()).isEqualTo("2099-01-01T12:00:00Z");
+        assertThatThrownBy(() -> normalizer.appointment(json.readTree(
+                confirmedAppointmentJson().replace("confirmed", "arrived"))))
+                .isInstanceOf(ClinicalReadException.class)
+                .extracting(ex -> ((ClinicalReadException) ex).code())
+                .isEqualTo("invalid_source");
+        assertThatThrownBy(() -> normalizer.appointment(json.readTree(
+                confirmedAppointmentJson().replace("2099-01-01T12:00:00Z", "tomorrow"))))
+                .isInstanceOf(ClinicalReadException.class)
+                .extracting(ex -> ((ClinicalReadException) ex).code())
+                .isEqualTo("invalid_source");
+        assertThatThrownBy(() -> normalizer.appointment(json.readTree(
+                confirmedAppointmentJson().replace(",\"start\":\"2099-01-01T12:00:00Z\"", ""))))
+                .isInstanceOf(ClinicalReadException.class)
+                .extracting(ex -> ((ClinicalReadException) ex).code())
+                .isEqualTo("invalid_source");
+
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            String path = exchange.getRequestURI().getPath();
+            String query = exchange.getRequestURI().getRawQuery() == null ? "" : exchange.getRequestURI().getRawQuery();
+            String payload;
+            String more = "false";
+            if ("/appointments/MHS-APT-001".equals(path)) {
+                payload = missedAppointmentJson();
+            } else if ("/appointments/MHS-APT-404".equals(path)) {
+                payload = null;
+            } else if ("/appointments".equals(path) && query.contains("patientId=MHS-PAT-001")) {
+                payload = "[]";
+            } else if ("/appointments".equals(path) && query.contains("patientId=MHS-PAT-005")) {
+                payload = "[" + missedAppointmentJson().replace("MHS-APT-001", "MHS-APT-003").replace("MHS-PAT-004", "MHS-PAT-005")
+                        + "," + confirmedAppointmentJson() + "]";
+            } else if ("/appointments".equals(path) && query.contains("patientId=MHS-PAT-009")) {
+                payload = "[" + missedAppointmentJson() + "]";
+            } else if ("/appointments".equals(path) && query.contains("patientId=MHS-PAT-004")) {
+                payload = "[" + missedAppointmentJson() + "]";
+                more = "true";
+            } else {
+                payload = null;
+            }
+            if (payload == null) {
+                byte[] missing = "{\"error\":\"not_found\"}".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.sendResponseHeaders(404, missing.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(missing);
+                }
+                return;
+            }
+            byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            if ("/appointments".equals(path)) {
+                exchange.getResponseHeaders().set("X-More-Results", more);
+            }
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(body);
+            }
+        });
+        server.start();
+        try {
+            MiniHisClinicalSource source = source("http://127.0.0.1:" + server.getAddress().getPort());
+            JsonNode exact = source.readAppointment("MHS-APT-001");
+            JsonNode empty = source.searchAppointments("MHS-PAT-001");
+            JsonNode found = source.searchAppointments("MHS-PAT-005");
+            JsonNode truncated = source.searchAppointments("MHS-PAT-004");
+            assertThat(exact.path("resource").path("status").asText()).isEqualTo("noshow");
+            assertThat(exact.path("resource").path("participant").get(0).path("status").asText()).isEqualTo("needs-action");
+            assertThat(exact.path("resource").path("participant").get(0).path("actor").path("reference").asText())
+                    .isEqualTo("Patient/MHS-PAT-004");
+            assertThat(empty.path("collectionStatus").asText()).isEqualTo("complete");
+            assertThat(empty.path("resources")).isEmpty();
+            assertThat(found.path("collectionStatus").asText()).isEqualTo("complete");
+            assertThat(found.path("resources")).hasSize(2);
+            assertThat(found.path("resources").get(0).path("status").asText()).isEqualTo("noshow");
+            assertThat(found.path("resources").get(1).path("status").asText()).isEqualTo("booked");
+            assertThat(found.path("resources").get(1).path("participant").get(0).path("status").asText()).isEqualTo("needs-action");
+            assertThat(truncated.path("collectionStatus").asText()).isEqualTo("incomplete");
+            assertThatThrownBy(() -> source.searchAppointments("MHS-PAT-009"))
+                    .isInstanceOf(ClinicalReadException.class)
+                    .extracting(ex -> ((ClinicalReadException) ex).code())
+                    .isEqualTo("invalid_source");
+            assertThatThrownBy(() -> source.readAppointment("MHS-APT-404"))
+                    .isInstanceOf(ClinicalReadException.class)
+                    .extracting(ex -> ((ClinicalReadException) ex).code())
+                    .isEqualTo("not_found");
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -540,6 +631,18 @@ class MiniHisConnectorTest {
 
     private static String consultationsJson() {
         return "[" + consultationJson() + "]";
+    }
+
+    private static String missedAppointmentJson() {
+        return """
+                {"appointmentId":"MHS-APT-001","patientId":"MHS-PAT-004","status":"not_attended","start":"2020-01-01T12:00:00Z"}
+                """;
+    }
+
+    private static String confirmedAppointmentJson() {
+        return """
+                {"appointmentId":"MHS-APT-002","patientId":"MHS-PAT-005","status":"confirmed","start":"2099-01-01T12:00:00Z"}
+                """;
     }
 
     private static String hemoglobinJson() {

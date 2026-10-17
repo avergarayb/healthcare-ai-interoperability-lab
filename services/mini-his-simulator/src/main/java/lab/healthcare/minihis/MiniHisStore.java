@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,6 +16,7 @@ public class MiniHisStore {
 
     private final JdbcTemplate jdbc;
     private final MiniHisSchema schema;
+    private final Clock clock = Clock.systemUTC();
 
     public MiniHisStore(JdbcTemplate jdbc, MiniHisSchema schema) {
         this.jdbc = jdbc;
@@ -22,15 +24,18 @@ public class MiniHisStore {
     }
 
     public void ensureReady() {
-        schema.createIfAbsent();
+        schema.migrateExistingRows();
         if (count("patient") == 0 && count("consultation") == 0 && count("clinical_result") == 0) {
             insertSeed();
+        } else {
+            schema.backfillSyntheticAppointments();
         }
     }
 
     @Transactional
     public SeedCounts reset() {
-        schema.createIfAbsent();
+        schema.migrateExistingRows();
+        jdbc.update("DELETE FROM appointment");
         jdbc.update("DELETE FROM clinical_result_component");
         jdbc.update("DELETE FROM clinical_result");
         jdbc.update("DELETE FROM consultation");
@@ -190,6 +195,38 @@ public class MiniHisStore {
         return attachComponents(rows).stream().findFirst();
     }
 
+    public AppointmentSearch searchAppointments(String patientId, int limit) {
+        int probe = limit + 1;
+        List<AppointmentView> rows = jdbc.query(
+                """
+                SELECT appointment_id, patient_id, status, start_offset_days
+                FROM appointment
+                WHERE patient_id = ?
+                ORDER BY start_offset_days ASC, appointment_id ASC
+                LIMIT ?
+                """,
+                (rs, row) -> appointment(rs),
+                patientId,
+                probe);
+        boolean truncated = rows.size() > limit;
+        if (truncated) {
+            rows = List.copyOf(rows.subList(0, limit));
+        }
+        return new AppointmentSearch(rows, truncated);
+    }
+
+    public Optional<AppointmentView> findAppointment(String appointmentId) {
+        List<AppointmentView> rows = jdbc.query(
+                """
+                SELECT appointment_id, patient_id, status, start_offset_days
+                FROM appointment
+                WHERE appointment_id = ?
+                """,
+                (rs, row) -> appointment(rs),
+                appointmentId);
+        return rows.stream().findFirst();
+    }
+
     public boolean foreignKeysEnabled() {
         Integer enabled = jdbc.queryForObject("PRAGMA foreign_keys", Integer.class);
         return enabled != null && enabled == 1;
@@ -253,6 +290,17 @@ public class MiniHisStore {
                     component.name(),
                     component.valueDecimal(),
                     component.unit());
+        }
+        for (SyntheticSeed.AppointmentSeed appointment : SyntheticSeed.APPOINTMENTS) {
+            jdbc.update(
+                    """
+                    INSERT INTO appointment (appointment_id, patient_id, status, start_offset_days)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    appointment.appointmentId(),
+                    appointment.patientId(),
+                    appointment.status(),
+                    appointment.startOffsetDays());
         }
     }
 
@@ -323,5 +371,13 @@ public class MiniHisStore {
                         row.status(),
                         List.copyOf(grouped.getOrDefault(row.resultId(), List.of()))))
                 .toList();
+    }
+
+    private AppointmentView appointment(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new AppointmentView(
+                rs.getString("appointment_id"),
+                rs.getString("patient_id"),
+                rs.getString("status"),
+                AppointmentStart.atOffset(rs.getInt("start_offset_days"), clock));
     }
 }

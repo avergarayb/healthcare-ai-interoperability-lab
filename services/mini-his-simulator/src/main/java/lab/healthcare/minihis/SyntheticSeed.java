@@ -14,6 +14,12 @@ public final class SyntheticSeed {
     /** Documented status of the current synthetic results. */
     public static final String FINAL_RESULT = "final";
 
+    /** Proprietary appointment status. It is not a FHIR status. */
+    public static final String NOT_ATTENDED = "not_attended";
+
+    /** Proprietary appointment status. It is not a FHIR status. */
+    public static final String CONFIRMED = "confirmed";
+
     public record PatientSeed(
             String patientId,
             String familyName,
@@ -52,10 +58,19 @@ public final class SyntheticSeed {
             String unit) {
     }
 
+    public record AppointmentSeed(
+            String appointmentId,
+            String patientId,
+            String status,
+            int startOffsetDays) {
+    }
+
     public static final List<PatientSeed> PATIENTS = List.of(
             new PatientSeed("MHS-PAT-001", "Quispe", "Ana", "1984-03-12", "female"),
             new PatientSeed("MHS-PAT-002", "Vargas", "Luis", "1976-11-02", "male"),
-            new PatientSeed("MHS-PAT-003", "Rojas", "Carmen", "1991-07-19", "female"));
+            new PatientSeed("MHS-PAT-003", "Rojas", "Carmen", "1991-07-19", "female"),
+            new PatientSeed("MHS-PAT-004", "Demo", "Nora", "1988-04-04", "female"),
+            new PatientSeed("MHS-PAT-005", "Demo", "Raul", "1979-05-05", "male"));
 
     public static final List<ConsultationSeed> CONSULTATIONS = List.of(
             new ConsultationSeed(
@@ -152,6 +167,16 @@ public final class SyntheticSeed {
     public static final List<ComponentSeed> COMPONENTS = List.of(
             new ComponentSeed("MHS-CMP-002-1", "MHS-RES-002", "Presion sistolica", "120", "mmHg"),
             new ComponentSeed("MHS-CMP-002-2", "MHS-RES-002", "Presion diastolica", "80", "mmHg"));
+
+    /**
+     * Offsets are the durable scenario. {@link AppointmentStart} resolves them
+     * at read time, so startup does not update these rows and the past or
+     * future relationship does not expire.
+     */
+    public static final List<AppointmentSeed> APPOINTMENTS = List.of(
+            new AppointmentSeed("MHS-APT-001", "MHS-PAT-004", NOT_ATTENDED, AppointmentStart.PAST_OFFSET_DAYS),
+            new AppointmentSeed("MHS-APT-003", "MHS-PAT-005", NOT_ATTENDED, AppointmentStart.PAST_OFFSET_DAYS),
+            new AppointmentSeed("MHS-APT-002", "MHS-PAT-005", CONFIRMED, AppointmentStart.FUTURE_OFFSET_DAYS));
 
     private SyntheticSeed() {
     }
