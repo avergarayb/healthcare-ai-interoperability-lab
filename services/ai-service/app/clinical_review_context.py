@@ -20,7 +20,11 @@ from app.followup_review import (
     ReviewPersistenceUnavailable,
     canonical_reason_codes,
 )
-from app.langgraph_fhir_client import BoundedSearchStatus, ReadClientError
+from app.langgraph_fhir_client import (
+    BoundedSearchStatus,
+    ExactResourceNotFound,
+    ReadClientError,
+)
 from app.langgraph_fhir_followup import (
     CANCELLED,
     NONE,
@@ -34,7 +38,6 @@ from app.langgraph_fhir_followup import (
     protocol_appointment_search_path,
     schedule_classifications,
 )
-from app.langgraph_fhir_hapi import ExactResourceNotFound
 from app.missed_follow_up_review import MISSED_FOLLOW_UP_REVIEW_V1
 from app.post_consultation_review import (
     POST_CONSULTATION_RESULT_REVIEW_V1,
