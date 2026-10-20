@@ -6,8 +6,8 @@ This is the concise architecture authority and index for the **Healthcare AI & I
 
 | Unit | Runtime | Current responsibility |
 |---|---|---|
-| **Healthcare Interoperability** | Java 21 / Spring Boot | Implemented: FHIR/SMART client, vendor profiles, routing, resilience, transformations, controlled projections and Model Boundary v1. Target, not implemented: independent bidirectional exchange among authorized organizations. |
-| **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, authorized bounded FHIR acquisition for explicit capabilities, deterministic protocol authority and narrative model subflows. |
+| **Healthcare Interoperability** | Java 21 / Spring Boot | Implemented: FHIR/SMART client, vendor profiles, routing, resilience, transformations, controlled projections, Model Boundary v1, and Clinical Read API v1. The default Clinical Read source is local HAPI. `mini-his` is an optional laboratory source. Target, not implemented: independent bidirectional exchange among authorized organizations. |
+| **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, deterministic protocol authority, and narrative model subflows. Operational follow-up factories acquire Patient, Encounter, Observation, and Appointment through Clinical Read API v1. |
 
 The units are independently deployable and may be sold separately or composed. Pricing and SKU names are not decided. The commercial connectivity target is [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
 
@@ -21,22 +21,23 @@ Epic / Oracle sandbox / local HAPI
 ```
 
 ```text
-Configured authorized FHIR endpoint
-        -> Healthcare AI case-bound GET reads
-        -> mandatory Patient + Encounter + Observation + Appointment snapshot
-        -> deterministic POST_CONSULTATION_RESULT_REVIEW_V1
+local HAPI  (clinical-read.source=local-hapi, the default)
+        -> Java Clinical Read API v1
+        -> Python ClinicalReadClient
+        -> POST_CONSULTATION_RESULT_REVIEW_V1 or MISSED_FOLLOW_UP_REVIEW_V1
         -> durable operational review case when MATCHED
-        -> authorized LangGraph/Gemini narrative subflow when allowed
-        -> application-owned response projection
+        -> post-consultation narrative subflow only when that protocol allows it
 ```
 
 ```text
-Configured authorized FHIR endpoint
-        -> Healthcare AI Patient resolution + bounded Appointment search
-        -> deterministic MISSED_FOLLOW_UP_REVIEW_V1
-        -> one durable review case per missed Appointment when MATCHED
-        -> shared review queue and case page
+Mini HIS Simulator (own SQLite, proprietary REST)
+        -> Java reads it only when clinical-read.source=mini-his
+        -> Java normalizes the payload to FHIR R4
+        -> same Clinical Read API v1 envelope
+        -> Python ClinicalReadClient and the same follow-up protocols
 ```
+
+Python does not call Mini HIS and does not choose the protocol outcome. `HapiReadClient` remains in the Python tree; the factories named above do not construct it. Clinical review context for an open case uses the same Java read. See [Clinical Read API v1](../contracts/clinical-read-v1.md) and [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
 
 ```text
 Repository institutional Markdown
@@ -60,7 +61,7 @@ Closed review case, outcome follow-up coordination planned, explicit Create coor
         -> one durable internal coordination request
 ```
 
-These flows do not require the Java process merely to obtain FHIR context when an authorized FHIR endpoint is configured. They do not authorize arbitrary FHIR access or writes. `MISSED_FOLLOW_UP_REVIEW_V1` does not call Gemini or LangGraph during protocol evaluation. Institutional retrieval uses Gemini embeddings only. AI-assisted review may then make one structured generation call. It does not use LangGraph. The coordination request does not call Gemini, retrieval, or FHIR. See [ADR-089](../adr/ADR-089-missed-follow-up-review.md), [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md), [ADR-091](../adr/ADR-091-ai-assisted-review.md) and [ADR-092](../adr/ADR-092-controlled-action.md).
+The follow-up flows above obtain clinical facts through Java. Model Boundary v1, institutional retrieval, AI-assisted review, and the coordination request are separate flows. Retrieval, assistance, and coordination do not call Clinical Read. None of these flows authorize arbitrary FHIR access or writes. `MISSED_FOLLOW_UP_REVIEW_V1` does not call Gemini or LangGraph during protocol evaluation. Institutional retrieval uses Gemini embeddings only. AI-assisted review may then make one structured generation call. It does not use LangGraph. The coordination request does not call Gemini, retrieval, or FHIR. See [ADR-089](../adr/ADR-089-missed-follow-up-review.md), [ADR-090](../adr/ADR-090-institutional-knowledge-rag.md), [ADR-091](../adr/ADR-091-ai-assisted-review.md) and [ADR-092](../adr/ADR-092-controlled-action.md).
 
 ## Commercial connectivity target
 
@@ -68,13 +69,13 @@ These flows do not require the Java process merely to obtain FHIR context when a
 
 | | Implemented | Target |
 |---|---|---|
-| Exchange role | FHIR client for configured destinations. No route among organizations | Independent bidirectional platform. Clinics, hospitals, EPS, insurers, pharmacies, laboratories, and other authorized systems. Each hop is limited by agreement, permission, and remote capability |
-| Connectors | FHIR R4 client: Epic sandbox, Oracle Health sandbox, and laboratory HAPI | FHIR, proprietary REST, SOAP, HL7 v2, and files, inbound and outbound |
-| Transformation | Java projects FHIR it has already read. That read requires a FHIR server | Protocol transformation in both directions. FHIR R4 normalization when the content is clinical. A FHIR server is not mandatory for that engine |
+| Exchange role | FHIR client for configured destinations, plus one laboratory Clinical Read path. No route among organizations | Independent bidirectional platform. Clinics, hospitals, EPS, insurers, pharmacies, laboratories, and other authorized systems. Each hop is limited by agreement, permission, and remote capability |
+| Connectors | FHIR R4 client: Epic sandbox, Oracle Health sandbox, and laboratory HAPI. One proprietary REST reader for the Mini HIS Simulator, used only as a Clinical Read source | FHIR, proprietary REST, SOAP, HL7 v2, and files, inbound and outbound |
+| Transformation | Java projects FHIR it has already read. For `mini-his` it also normalizes proprietary JSON to FHIR R4 without calling a FHIR server. Epic, Oracle, and HAPI reads still require a FHIR server | Protocol transformation in both directions. FHIR R4 normalization when the content is clinical. A FHIR server is not mandatory for that engine |
 | Exchange controls | Destination routing, resilience, and FHIR-call audit inside the Java client. Tasks 057–073 are simulations, not authorization of an exchange | Routing, validation, traceability, audit, and authorization controls for organizational exchange |
-| Python clinical input | Model Boundary v1, plus the bounded FHIR reads in ADR-085. v1 is not a clinical API | Normalized clinical data only. No dependency on each HIS protocol. Healthcare AI is an optional consumer, not a dependency of the exchange |
-| FHIR repository | HAPI FHIR Docker is the laboratory repository | Optional repository or endpoint, not a mandatory hop |
-| Mini HIS Simulator | Local proprietary REST process and its own SQLite database. Java does not read it | Possible future proprietary source. Not the exchange platform |
+| Python clinical input | Model Boundary v1, plus Clinical Read API v1 for the operational follow-up factories. v1 is not that clinical API. Python does not call Mini HIS | Normalized clinical data only. No dependency on each HIS protocol. Healthcare AI is an optional consumer, not a dependency of the exchange |
+| FHIR repository | HAPI FHIR Docker is the laboratory repository and the default Clinical Read source | Optional repository or endpoint, not a mandatory hop |
+| Mini HIS Simulator | Local proprietary REST process and its own SQLite database. Java reads it when `clinical-read.source=mini-his` | Laboratory stand-in for a proprietary source. Not the exchange platform |
 
 ## Authority boundaries
 
@@ -96,6 +97,9 @@ These flows do not require the Java process merely to obtain FHIR context when a
 - [Product scope](../PROJECT.md)
 - [Clinical Follow-up Review V1 contract](../contracts/post-consultation-result-review-v1.md)
 - [Missed follow-up review V1 contract](../contracts/missed-follow-up-review-v1.md)
+- [Clinical review context V1 contract](../contracts/clinical-review-context-v1.md)
+- [Clinical Read API v1 contract](../contracts/clinical-read-v1.md)
+- [Mini HIS terminology and UCUM maps](../contracts/mini-his-terminology-v1.md)
 - [Institutional knowledge retrieval V1 contract](../contracts/institutional-knowledge-retrieval-v1.md)
 - [AI-assisted review V1 contract](../contracts/ai-assisted-review-v1.md)
 - [Controlled action V1 contract](../contracts/controlled-action-v1.md)
@@ -119,7 +123,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-082](../adr/ADR-082-inbound-ai-service-protection.md) | Authentication requirement implemented; effective production network boundary remains unresolved. |
 | [ADR-083](../adr/ADR-083-product-and-local-fhir-packaging.md) | Local-FHIR Support Pack distinction retained; single-runtime wording refined by ADR-084. |
 | [ADR-084](../adr/ADR-084-product-identity-and-architectural-units.md) | Establishes independent product units; Python-FHIR current-state portions superseded by ADR-085. Ingress target is ADR-095. |
-| [ADR-085](../adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) | Accepted current decision for bounded Python FHIR reads and model authority. |
+| [ADR-085](../adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) | Accepted decision for the follow-up resource set and model authority. Operational factories now acquire those resources through Clinical Read API v1. The ADR text still describes the earlier direct FHIR read. |
 | [ADR-086](../adr/ADR-086-persistent-follow-up-review-workflow-and-operational-authority-boundary.md) | Accepted current decision for durable operational follow-up review state and authority. Its exclusion of live clinical-detail projection is superseded only by ADR-087. |
 | [ADR-087](../adr/ADR-087-case-bound-current-clinical-review-context.md) | Accepted current decision for bounded current clinical context of an open review case. |
 | [ADR-088](../adr/ADR-088-server-rendered-human-review-demo.md) | Accepted current decision for the server-rendered synthetic review demo inside Healthcare AI. |
@@ -129,7 +133,7 @@ These flows do not require the Java process merely to obtain FHIR context when a
 | [ADR-092](../adr/ADR-092-controlled-action.md) | Accepted current decision for one internal follow-up coordination request after an explicit human POST. Not external execution and not authenticated approval. |
 | [ADR-093](../adr/ADR-093-human-review-session.md) | Accepted current decision for a development-only human session. Not production identity, IAM, SSO or RBAC. |
 | [ADR-094](../adr/ADR-094-human-attribution.md) | Accepted development attribution. The review UI records a synthetic development principal. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. |
-| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted target: Healthcare Interoperability is an independent bidirectional exchange platform; Java normalizes clinical content to FHIR R4; HAPI and Healthcare AI are optional. Not implemented beyond the current FHIR client and ADR-085 reads. |
+| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted target: Healthcare Interoperability is an independent bidirectional exchange platform. Laboratory increments now include Clinical Read API v1 and Mini HIS normalization to FHIR R4. The organizational broker, SOAP, HL7 v2, and file connectors are not implemented. |
 
 ## Historical governance artifacts
 

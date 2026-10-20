@@ -1,6 +1,21 @@
 # PYTHON_HAPI_DECOUPLING_ASSESSMENT_V1
 
-Assessment only. No code, configuration, fixture, or runtime change. ADR-085 remains the implemented follow-up read decision. ADR-095 remains the target that Python consumes normalized clinical data. Model Boundary v1 is not that clinical API.
+Assessment only. No code, configuration, fixture, or runtime change. ADR-085 remains the decision for the follow-up resource set and model authority. ADR-095 remains the target that Python consumes normalized clinical data. Model Boundary v1 is not that clinical API.
+
+## Reconciliation status (2026-10-16)
+
+The sections below keep the original inventory. They are not deleted. This status is the current reading of the tree. It does not record a test run.
+
+| Migration step | State in source |
+|---|---|
+| 1. Read-only Java contract for `local-hapi` | Implemented. [Clinical Read API v1](../contracts/clinical-read-v1.md). Model Boundary v1 and the Python HTTP routes are unchanged. |
+| 2. Compare Java and `HapiReadClient` on the existing synthetic cases | Not closed by this document. No comparison result is stored here. |
+| 3. Missed follow-up reads Java | Implemented. `missed_follow_up_service` builds `ClinicalReadClient`. |
+| 4. Post-consultation acquisition, including the narrative client on that same object, reads Java | Implemented. `build_live_followup_workflow` passes `ClinicalReadClient` into `FollowUpWorkflow`, and that object is the client given to `build_gemini_fhir_followup`. |
+| 5. Clinical context and the open-case HTML reader read Java | Implemented. `clinical_review_context_http._fhir_client` returns `ClinicalReadClient` unless a test replaces `app.state.clinical_context_fhir_client`. `human_review_client` uses that service. |
+| 6. Remove `FHIR_BASE_URL` from those paths | Not closed. `HapiReadClient` remains in `services/ai-service/app/langgraph_fhir_hapi.py`. `hapi_base_url()` still reads `FHIR_BASE_URL`. |
+
+`ClinicalReadClient` speaks `GET /api/clinical-read/v1` with `X-Service-Token`. It does not call HAPI and it does not call Mini HIS. Decoupling is not finished while the legacy client and `FHIR_BASE_URL` remain.
 
 ## 1. Direct Python reads of HAPI
 
@@ -18,6 +33,8 @@ The only HTTP FHIR client is `HapiReadClient` in `services/ai-service/app/langgr
 `GET /internal/agent-context` does not call HAPI. `consumer.py` calls Java `GET /api/model-boundary/v1` with `X-Service-Token`.
 
 ## 2. Java reads that exist
+
+This section describes Java as it was when the assessment was written. Clinical Read API v1 now reads Encounter and Appointment, and it searches Observation by patient and status. Those operations are specified in [clinical-read-v1](../contracts/clinical-read-v1.md). The projection limits below still describe Model Boundary v1, not Clinical Read.
 
 `RoutingService` is the destination-aware FHIR client used by projections. It discovers capabilities and, with resilience and audit, reads one Patient by logical id and searches Condition (`problem-list-item`, count 5), Observation (`vital-signs`, count 5), DiagnosticReport (count 5), MedicationRequest (count 5), and Patient by name (count 1). It has no Encounter operation, no Appointment operation, no identifier search, and no exact read of Encounter, Observation, or Appointment.
 
@@ -55,10 +72,12 @@ Each step keeps `POST_CONSULTATION_RESULT_REVIEW_V1`, `MISSED_FOLLOW_UP_REVIEW_V
 
 ## 5. Operational flows and historical experiments
 
-Operational HAPI readers are the two follow-up endpoints, clinical context, and the open review-case page. Operational paths that do not read HAPI are `GET /internal/agent-context`, review queue and case read, close, coordination, institutional retrieval, and the development review session.
+The paragraph that follows is the original inventory. The reconciliation table above replaces it for the three factories: they call Clinical Read API v1. `HapiReadClient` is still importable and tests can still inject it.
+
+Operational HAPI readers, at the time of the original assessment, were the two follow-up endpoints, clinical context, and the open review-case page. Operational paths that do not read clinical facts from HAPI or from Clinical Read are `GET /internal/agent-context`, review queue and case read, close, coordination, institutional retrieval, and the development review session.
 
 Historical or non-operational FHIR-adjacent code: `POST /internal/experimental-summary` (fixture `SYN-076-001`, no FHIR), Java tasks 057–073, sandbox HTML diagnosis pages, and `FhirService` write methods used by integration tests. Those are not the migration queue. The LangGraph loop inside `POST /internal/agent/follow-up` is operational: the application owns acquisition, and the model does not choose the protocol outcome.
 
 ## 6. What this assessment does not claim
 
-Moving these reads to Java does not create the bidirectional exchange platform in ADR-095. It does not make Model Boundary v1 a clinical API. It does not authorize Python to call a proprietary HIS protocol.
+Moving these reads to Java does not create the bidirectional exchange platform in ADR-095. It does not make Model Boundary v1 a clinical API. It does not authorize Python to call a proprietary HIS protocol. The Mini HIS REST client, when configured, lives in Java. Completing steps 3 to 5 does not retire `HapiReadClient` and does not finish step 6.

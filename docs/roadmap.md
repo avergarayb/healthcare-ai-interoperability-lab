@@ -15,6 +15,9 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - Epic and Oracle sandbox integrations.
 - Controlled snapshot, allowlist, retention ceiling and Model Boundary v1.
 - Service-token protection for the v1 boundary.
+- Laboratory Clinical Read API v1 for Patient, Encounter, Observation, and Appointment. The same service token protects it. The default source is local HAPI. Contract: [clinical-read-v1](contracts/clinical-read-v1.md). This line records source. It does not record a test run.
+- Mini HIS Simulator as a separate process with its own SQLite database and a proprietary REST API. Java reads it only when `clinical-read.source=mini-his` and normalizes the payload to FHIR R4. It is not in the HAPI Docker stack and it is not an organizational exchange.
+- Static Mini HIS maps `mini-his-maps-v1` and UCUM maps `mini-his-ucum-v1` for `g/dL` and `mmHg`. No terminology server, no general LOINC or SNOMED, and no numeric unit conversion. Contract: [mini-his-terminology-v1](contracts/mini-his-terminology-v1.md).
 
 ### Healthcare AI
 
@@ -24,7 +27,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - LangGraph narrative agent subflow with explicit tool policy.
 - Clinical Follow-up Review endpoint.
 - Mandatory application-owned Patient, Encounter, Observation and Appointment acquisition.
-- Bounded, completeness-aware HAPI pagination and case isolation.
+- Bounded, completeness-aware collection handling and case isolation. The operational post-consultation, missed-follow-up, and clinical-context factories, including the open-case page reader, call Java through `ClinicalReadClient`. `HapiReadClient` and `FHIR_BASE_URL` remain in the repository. Python does not call Mini HIS.
 - Deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` outside model authority.
 - Deterministic `MISSED_FOLLOW_UP_REVIEW_V1` from Patient and Appointment reads only, without Gemini, on the same review queue.
 - Response-level human-review requirement and proposed review action when the protocol matches.
@@ -36,6 +39,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - One explicit internal follow-up coordination request after a closed review case whose outcome is follow-up coordination planned. The request status `requested` records that internal request. It does not send a message, write FHIR, or schedule an appointment.
 - Development authentication for the synthetic review pages: a server-side session, login and logout, and form signatures bound to that session. It is not production identity, verified reviewer identity, RBAC or institutional SSO.
 - Development attribution for a new Human Review close and for the first coordination request from that UI. The stored principal is a synthetic development principal. Manual validation passed. It is not verified clinical identity, IAM, SSO, RBAC, or a security audit. Historical rows stay unattributed. This service does not write FHIR. Security audit remains a separate later decision.
+- `DEMO_EXPERIENCE_V1` is done as presentation for the synthetic Human Review queue and case page. Implementation is complete: Spanish operational labels, readable UTC dates, one closed technical-details group, one rendering of the appointment that opened a missed-follow-up case, and the unclassified appointment label. Automated tests passed. Manual validation of slice 1 is complete. Visual validation of slice 2 is still pending. It does not change protocols, outcomes, coordination policy, sessions, or attribution. It is not production-ready and not a complete localization.
 - Deterministic, evaluation-harness and opt-in real-HAPI coverage. Live embedding and live AI-assistance checks are separate opt-ins from live Gemini narrative tests.
 
 ## Current product gaps
@@ -50,6 +54,9 @@ The following capabilities are not established by the current repository:
 - durable audit storage and production operations;
 - production secret management and enforced network architecture;
 - autonomous actions or FHIR writes from Healthcare AI;
+- retirement of `HapiReadClient` and `FHIR_BASE_URL`;
+- UCUM beyond `g/dL` and `mmHg`, and a terminology server, ValueSet, or ConceptMap;
+- SOAP, HL7 v2, file connectors, and a route among organizations;
 - protocol registry/lifecycle beyond the current versioned contract;
 - production packaging for SaaS, customer-hosted or hybrid operation;
 - completed governance and legal assessment for real clinical data sent to an external model.
@@ -67,7 +74,6 @@ Future product decisions may consider:
 - production retrieval beyond the synthetic institutional index, local models, MCP or additional providers;
 - customer-facing applications and integrations;
 - an external adapter that consumes an already recorded internal coordination request. The coordination policy remains the authorization decision;
-- `DEMO_EXPERIENCE_V1`: clearer review-page language and hierarchy. The manual test left protocol ids, the word matched, ISO timestamps, technical provenance, a duplicated missed-follow-up appointment, and the label "Other appointment status" unchanged on purpose.
 - production identity for human review, distinct from the accepted development session.
 Each candidate requires a separate product decision, security assessment and acceptance contract. Historical phase names under `docs/tasks/` remain development history rather than current sequencing authority.
 
@@ -75,4 +81,4 @@ Each candidate requires a separate product decision, security assessment and acc
 
 The repository has an implemented interoperability foundation and an implemented Healthcare AI workflow foundation. It is beyond the former “Phase 2–3” and “future AI/LangGraph” descriptions.
 
-It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, the SQLite review store is single-instance, and deterministic follow-up review is not clinical diagnosis. An internal coordination request after an explicit POST is recorded operational evidence. It is not external execution and it is not clinical diagnosis.
+It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, the SQLite review store is single-instance, and deterministic follow-up review is not clinical diagnosis. An internal coordination request after an explicit POST is recorded operational evidence. It is not external execution and it is not clinical diagnosis. The synthetic review pages now use the accepted demo presentation. Slice 2 of that presentation still awaits visual confirmation. Clinical Read and the Mini HIS source are laboratory increments on this branch. They are not the bidirectional exchange in ADR-095. Statements that automated tests passed remain only where an existing contract already says so. This roadmap does not add a new test result.
