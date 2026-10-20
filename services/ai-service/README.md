@@ -32,10 +32,10 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 
 | Variable | Default/example | Purpose |
 |---|---|---|
-| `MODEL_BOUNDARY_BASE_URL` | `http://localhost:8081` | Producer used by `/internal/agent-context`. |
+| `MODEL_BOUNDARY_BASE_URL` | `http://localhost:8081` | Java origin. `/internal/agent-context` calls Model Boundary v1. Operational follow-up factories call Clinical Read on the same origin through `ClinicalReadClient`. |
 | `MODEL_BOUNDARY_PATH` | `/api/model-boundary/v1` | Java v1 contract path. |
 | `MODEL_BOUNDARY_TIMEOUT_SECONDS` | `90` | Timeout for the Java v1 consumer. |
-| `MODEL_BOUNDARY_SERVICE_TOKEN` | empty | Shared development service token for `/internal/*`; blank is fail-closed. |
+| `MODEL_BOUNDARY_SERVICE_TOKEN` | empty | Shared `X-Service-Token` for `/internal/*` and for Clinical Read. Blank is fail-closed. |
 | `HUMAN_REVIEW_FORM_SIGNING_SECRET` | empty | Separate server-side secret for close, AI-assistance and controlled-action HMAC. The purposes differ and each signature includes the session id. Blank disables those forms. Do not reuse the service token. |
 | `HUMAN_SESSION_DB_PATH` | `./data/human-session.sqlite3` | Session SQLite file. Not the review database. |
 | `HUMAN_REVIEW_DEVELOPMENT_AUTH_ENABLED` | `false` | Enables the development review login only together with a loopback `AI_SERVICE_HOST`, a loopback accepted socket, a distinct 32+ character secret, and a fixed principal. Inactive review routes fail closed. Not production identity. |
@@ -46,7 +46,7 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 | `AI_SERVICE_PORT` | `8090` | Python service port. |
 | `LLM_EXPERIMENTAL_ENABLED` | `false` | Enables only `/internal/experimental-summary`. |
 | `FOLLOWUP_AGENT_ENABLED` | `false` | Existing configuration name that enables Clinical Follow-up Review. |
-| `FHIR_BASE_URL` | `http://localhost:8080/fhir` | Authorized FHIR endpoint used by the follow-up HAPI read client. |
+| `FHIR_BASE_URL` | `http://localhost:8080/fhir` | Direct HAPI base for `hapi_base_url()`. Used when laboratory code constructs `HapiReadClient` without an explicit base URL. Operational factories do not read it. |
 | `AI_REVIEW_DB_PATH` | `./data/follow-up-review.sqlite3` | Dedicated file-backed SQLite product store for operational review cases. |
 | `INSTITUTIONAL_KNOWLEDGE_DB_PATH` | `./data/institutional-knowledge.sqlite3` | Separate SQLite index for synthetic institutional procedures. Not the review store. |
 | `INSTITUTIONAL_KNOWLEDGE_EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model. Do not reuse `GEMINI_MODEL`. A failed call does not switch models. |
@@ -58,19 +58,25 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 | `RUN_LIVE_EMBEDDING_TESTS` | `false` | Test-only opt-in for live embedding tests. Independent of `RUN_LIVE_GEMINI_TESTS`. |
 | `RUN_LIVE_AI_ASSISTANCE_TESTS` | `false` | Test-only opt-in for one live structured assistance call. Independent of the other live flags. |
 
-`FHIR_BASE_URL` is read by the FHIR client rather than the `Settings` dataclass. The live-test flags are read by tests, not by application startup configuration.
+`Settings` reads `MODEL_BOUNDARY_BASE_URL` and `MODEL_BOUNDARY_SERVICE_TOKEN`. `ClinicalReadClient.from_settings` sends `GET {MODEL_BOUNDARY_BASE_URL}/api/clinical-read/v1/...` with that token. Java then selects the backend with `clinical-read.source`. The checked-in default is `local-hapi`, whose base URL is `http://localhost:8080/fhir`. The other implemented value is `mini-his`, whose base URL is `http://127.0.0.1:8095`.
+
+`FHIR_BASE_URL` is read only by `hapi_base_url()` in `langgraph_fhir_hapi.py`. When the variable is unset, that function uses `http://localhost:8080/fhir`. An explicit empty value is rejected. `HapiReadClient` stays in `app/` for laboratory scripts and HAPI tests. Do not construct it from a new operational factory. `tests/test_architecture.py` rejects an operational reference to that module, `HapiReadClient`, or `FHIR_BASE_URL`.
+
+The live-test flags are read by tests, not by application startup configuration.
 
 `AI_REVIEW_DB_PATH` is not HAPI PostgreSQL. V1 supports one `ai-service` instance and one writer store. The operator owns durable-volume placement, file permissions, backup and storage protection. Standard SQLite does not itself encrypt data at rest; environments using real clinical data require separately approved protected storage. No retention duration or automatic purge is configured.
 
 ## Local run
 
-Start local HAPI from the repository root if Clinical Follow-up Review needs it:
+Operational follow-up reads go to Java at `MODEL_BOUNDARY_BASE_URL` (port 8081 in `application.yml`). Start local HAPI when Java `clinical-read.source` remains `local-hapi`, or when a laboratory tool or the direct HAPI test below needs it:
 
 ```bash
 docker compose -f infra/docker/docker-compose.yml up -d
 ```
 
-Then install and run the service:
+A ready HAPI server answers `GET http://localhost:8080/fhir/metadata`. That URL is `fhir.servers.local-hapi.base-url` plus `/metadata`, and it is also the default direct base of `HapiReadClient`.
+
+Then install and run the Python service:
 
 ```powershell
 cd services/ai-service
@@ -79,10 +85,11 @@ py -3 -m venv .venv
 pip install -r requirements.txt
 $env:MODEL_BOUNDARY_SERVICE_TOKEN = "<local-token>"
 $env:FOLLOWUP_AGENT_ENABLED = "true"
-$env:FHIR_BASE_URL = "http://localhost:8080/fhir"
 $env:GEMINI_API_KEY = "<local-key>"
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8090
 ```
+
+`FHIR_BASE_URL` stays in `.env.example` for laboratory `HapiReadClient()` calls that omit a base URL. The service start above does not set it.
 
 That `--host` value is the listen address. `AI_SERVICE_HOST` does not change it. Development review login also requires the accepted socket to be loopback, so this `0.0.0.0` command keeps login inactive even if `AI_SERVICE_HOST` is `127.0.0.1`. The human review manual procedure uses `--host 127.0.0.1` and the same value in `AI_SERVICE_HOST`. A reverse proxy in front of loopback is outside this control.
 
@@ -123,6 +130,8 @@ Content-Type: application/json
 The retained environment/error string uses “agent” for compatibility; the productive capability name is **Clinical Follow-up Review**.
 
 ### Mandatory acquisition and deterministic authority
+
+`build_live_followup_workflow`, `_live_adapter`, and `_fhir_client` construct `ClinicalReadClient.from_settings`. The read reaches Java Clinical Read. Java applies `clinical-read.source`. Python does not choose `local-hapi` or `mini-his`.
 
 For every accepted request, the application binds the authorized case and, before LangGraph, acquires:
 
@@ -317,7 +326,9 @@ cd services/ai-service
 py -3 -m pytest
 ```
 
-The default suite uses fake/scripted providers and in-memory or mocked transports. It does not require Gemini, Epic, Oracle, a live API key or live HAPI. It protects closed HTTP contracts, authentication/gates, workflow ordering, model/tool policy, retry behavior, case isolation, protocol semantics and pagination validation.
+The default suite uses fake/scripted providers and in-memory or mocked transports. It does not require Gemini, Epic, Oracle, or a live API key. It protects closed HTTP contracts, authentication/gates, workflow ordering, model/tool policy, retry behavior, case isolation, protocol semantics and pagination validation.
+
+One default-suite test still calls HAPI directly and is not behind `RUN_HAPI_INTEGRATION_TESTS`: `test_local_server_missing_patient_is_not_a_clinical_result` in `tests/test_langgraph_fhir_hapi.py`. It uses `hapi_base_url()` and expects HTTP 404 for a missing Patient. Before the suite, confirm `GET http://localhost:8080/fhir/metadata`. If the server refuses the connection, that test fails with `transport failed`. The opt-in HAPI tests below stay skipped unless their flag is set.
 
 Dedicated temporary-file SQLite tests additionally protect schema migration, restart durability, deterministic identity, unique creation, optimistic closure, concurrent races, queue pagination and data minimization.
 
@@ -351,7 +362,7 @@ $env:RUN_HAPI_INTEGRATION_TESTS = "true"
 py -3 -m pytest tests/test_langgraph_fhir_hapi.py tests/test_langgraph_followup_workflow.py tests/test_langgraph_gemini_fhir_followup.py
 ```
 
-This opt-in category exercises productive HAPI reads, including multipage traversal. It does not require live Gemini unless the Gemini opt-in is also enabled.
+This opt-in category exercises productive HAPI reads, including multipage traversal. It does not require live Gemini unless the Gemini opt-in is also enabled. The missing-Patient test named above is separate: it runs in the default suite without this flag.
 
 ### Live Gemini
 
