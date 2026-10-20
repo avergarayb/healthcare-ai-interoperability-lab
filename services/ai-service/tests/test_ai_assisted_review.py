@@ -148,7 +148,7 @@ class ScriptedFhir:
             for item in self.appointments:
                 if item.get("id") == resource_id:
                     return dict(item)
-        from app.langgraph_fhir_hapi import ExactResourceNotFound
+        from app.langgraph_fhir_client import ExactResourceNotFound
 
         raise ExactResourceNotFound()
 

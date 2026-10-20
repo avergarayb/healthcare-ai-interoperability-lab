@@ -763,8 +763,8 @@ class LoopbackFhirGateway:
         patient_get: Callable[..., object] | None = None,
         reader: object | None = None,
     ) -> None:
-        from app.langgraph_fhir_client import ClientFHIRTransport
-        from app.langgraph_fhir_hapi import ACCEPT, ExactResourceNotFound, HapiReadClient
+        from app.langgraph_fhir_client import ClientFHIRTransport, ExactResourceNotFound
+        from app.langgraph_fhir_hapi import ACCEPT, HapiReadClient
 
         self._base_url = _require_loopback(base_url)
         self._exact_not_found = ExactResourceNotFound

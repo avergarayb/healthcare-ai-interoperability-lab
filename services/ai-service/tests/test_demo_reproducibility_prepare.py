@@ -535,7 +535,7 @@ class _ExactMiss:
 
     def read_exact(self, resource_type: str, resource_id: str):
         self.calls.append((resource_type, resource_id))
-        from app.langgraph_fhir_hapi import ExactResourceNotFound
+        from app.langgraph_fhir_client import ExactResourceNotFound
 
         raise ExactResourceNotFound()
 

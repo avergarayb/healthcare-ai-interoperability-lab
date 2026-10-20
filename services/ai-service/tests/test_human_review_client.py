@@ -176,7 +176,7 @@ class ScriptedFhir:
     def read_exact(self, resource_type: str, resource_id: str) -> dict:
         self.calls.append(("exact", resource_type, resource_id))
         if resource_type in self.missing or resource_id in self.missing:
-            from app.langgraph_fhir_hapi import ExactResourceNotFound
+            from app.langgraph_fhir_client import ExactResourceNotFound
 
             raise ExactResourceNotFound()
         if resource_type == "Encounter":
@@ -187,7 +187,7 @@ class ScriptedFhir:
             for item in (*self.exact_appointments, *self.appointments):
                 if item.get("id") == resource_id:
                     return dict(item)
-            from app.langgraph_fhir_hapi import ExactResourceNotFound
+            from app.langgraph_fhir_client import ExactResourceNotFound
 
             raise ExactResourceNotFound()
         raise AssertionError(resource_type)
