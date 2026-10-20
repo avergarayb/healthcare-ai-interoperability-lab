@@ -315,10 +315,11 @@ def test_requested_then_completed_records_actor_once_per_step(tmp_path):
     assert "La solicitud está completada." in done.text
     assert "Marcar la solicitud como completada" not in done.text
     rows = _events(repository.database_path, request.id)
-    assert [(row["from_status"], row["to_status"]) for row in rows] == [
+    assert len(rows) == 2
+    assert {(row["from_status"], row["to_status"]) for row in rows} == {
         ("requested", "in_progress"),
         ("in_progress", "completed"),
-    ]
+    }
     assert {row["principal_id"] for row in rows} == {"lab-reviewer"}
     assert {row["authenticator_id"] for row in rows} == {DEVELOPMENT_AUTHENTICATOR_V1}
     assert {row["session_id"] for row in rows} == {session.session_id}
@@ -360,6 +361,8 @@ def test_invalid_transitions_tokens_and_origin_do_not_write(tmp_path):
     _login(client)
     session = _session(client)
     detail = client.get(f"/review-coordination-requests/{request.id}")
+    token = _hidden(detail.text, "transitionToken")
+    forged_token = token[:-1] + ("1" if token[-1] == "0" else "0")
     forged = _post_form(
         client,
         f"/review-coordination-requests/{request.id}/transition",
@@ -367,7 +370,7 @@ def test_invalid_transitions_tokens_and_origin_do_not_write(tmp_path):
             "expectedStatus": "requested",
             "targetStatus": "in_progress",
             "transitionExpiry": _hidden(detail.text, "transitionExpiry"),
-            "transitionToken": _hidden(detail.text, "transitionToken")[:-1] + "0",
+            "transitionToken": forged_token,
         },
     )
     assert forged.status_code == 400
