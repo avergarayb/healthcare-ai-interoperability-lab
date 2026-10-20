@@ -74,6 +74,14 @@ def _name_text(payload: dict) -> str | None:
     return None
 
 
+def _searchset(resources: tuple[dict, ...] | list[dict]) -> dict:
+    return {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "entry": [{"resource": dict(item)} for item in resources],
+    }
+
+
 def _observations_from_bundle(payload: dict) -> list[dict]:
     """Read Observation entries. A valid bundle with no entries is an empty result."""
     if payload.get("resourceType") != "Bundle":
@@ -325,6 +333,15 @@ class FollowUpFHIRAdapter:
             "tools_used": tools,
         }
 
+    def _complete_search(self, path: str, expected_resource_type: str) -> tuple[dict, ...]:
+        """Read one bounded search. An incomplete collection is not a full result."""
+        result = self.transport.search(path, expected_resource_type)
+        if result.status is BoundedSearchStatus.COMPLETE:
+            return result.resources
+        if result.status is BoundedSearchStatus.INCOMPLETE_LIMIT:
+            raise ReadClientError(result.reason or "search collection is incomplete")
+        raise ReadClientError(result.reason or "search unavailable")
+
     def patient_id_for_case(self, case_id: str) -> str:
         """Resolve the authorized case. A different case id does not build a query."""
         scope = _READ_SCOPE.get()
@@ -338,7 +355,7 @@ class FollowUpFHIRAdapter:
             raise ReadClientError("authorized patient resolution is not complete")
         _mark("adapter:patient_for_case")
         self.calls.append(("patient_for_case", authorized))
-        payload = self.transport.get(case_search_path(authorized))
+        payload = _searchset(self._complete_search(case_resolution_search_path(authorized), "Patient"))
         return _patient_id_from_case_search(payload, authorized)
 
     def resolve_patient_for_protocol(self, case_id: str) -> str:
@@ -386,8 +403,9 @@ class FollowUpFHIRAdapter:
     def get_observations(self, patient_id: str) -> list[dict]:
         _mark("adapter:get_observations")
         self.calls.append(("get_observations", patient_id))
-        payload = self.transport.get(f"Observation?subject=Patient/{patient_id}")
-        observations = _observations_from_bundle(payload)
+        observations = _observations_from_bundle(
+            _searchset(self._complete_search(protocol_observation_search_path(patient_id), "Observation"))
+        )
         for resource in observations:
             if not isinstance(resource.get("id"), str) or not resource.get("id"):
                 raise ReadClientError("observation has no id")
@@ -515,7 +533,9 @@ class FollowUpFHIRAdapter:
         """Read this patient's appointments and label each operational fact. An empty search is NONE."""
         _mark("adapter:get_patient_appointments")
         self.calls.append(("get_patient_appointments", patient_id))
-        payload = self.transport.get(appointment_search_path(patient_id))
+        payload = _searchset(
+            self._complete_search(protocol_appointment_search_path(patient_id), "Appointment")
+        )
         return appointment_facts(payload, patient_id, now or self._now())
 
 

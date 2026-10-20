@@ -32,9 +32,10 @@ from app.langgraph_fhir_client import (
 )
 from app.langgraph_fhir_followup import (
     UNAVAILABLE_ANSWER,
-    appointment_search_path,
-    case_search_path,
+    case_resolution_search_path,
     make_followup_tool,
+    protocol_appointment_search_path,
+    protocol_observation_search_path,
 )
 from app.langgraph_fhir_hapi import HapiReadClient, hapi_base_url
 from app.langgraph_gemini_fhir_followup import (
@@ -54,8 +55,11 @@ from app.langgraph_gemini_fhir_followup import (
     initial_state,
 )
 PATIENT_PATH = f"Patient/{PATIENT_ID}"
-OBSERVATION_PATH = f"Observation?subject=Patient/{PATIENT_ID}"
-CASE_READS = [case_search_path(PATIENT_CASE), PATIENT_PATH, OBSERVATION_PATH]
+CASE_READS = [
+    case_resolution_search_path(PATIENT_CASE),
+    PATIENT_PATH,
+    protocol_observation_search_path(PATIENT_ID),
+]
 FINAL_TEXT = "Context received."
 CLINICAL_TEXT = (
     "Name From Server",
@@ -534,7 +538,7 @@ def test_model_can_finish_after_context_without_the_appointment_tool():
 def test_model_can_read_appointments_after_context_and_then_finish():
     def appointments(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert str(request.url).endswith(appointment_search_path(PATIENT_ID))
+        assert str(request.url).endswith(protocol_appointment_search_path(PATIENT_ID))
         return httpx.Response(200, json=_appointment_bundle([synthetic_followup_appointment()]))
 
     model = ScriptedModel(
@@ -650,7 +654,7 @@ def test_appointment_tool_ignores_another_patients_visit():
         result = _workflow(client, model).invoke()
     finally:
         http.close()
-    assert appointment_search_path(PATIENT_ID) in client.calls
+    assert protocol_appointment_search_path(PATIENT_ID) in client.calls
     assert "Appointment?patient=Patient/patient-001" not in client.calls
     assert not any(reference.startswith("Appointment/") for _, reference in _flat_evidence(result))
     assert result["patient"]["id"] == PATIENT_ID
@@ -1267,7 +1271,7 @@ def test_scripted_model_reads_the_synthetic_appointment_with_get_only():
     for method in (".post(", ".put(", ".patch(", ".delete("):
         assert method not in client_source
     assert result["decision"] == "finish"
-    assert appointment_search_path(PATIENT_ID) in client.calls
+    assert protocol_appointment_search_path(PATIENT_ID) in client.calls
     assert all(path.startswith(("Patient", "Observation", "Appointment")) for path in client.calls)
     assert (APPOINTMENTS_TOOL, f"Appointment/{APPOINTMENT_ID}") in _flat_evidence(result)
     assert "Patient/patient-001" not in json.dumps(result["evidence"])

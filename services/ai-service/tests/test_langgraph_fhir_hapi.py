@@ -24,7 +24,7 @@ from app.langgraph_fhir_client import (
     ReadClientError,
     clear_boundary_events,
 )
-from app.langgraph_fhir_followup import FollowUpFHIRAdapter, make_followup_tool
+from app.langgraph_fhir_followup import FollowUpFHIRAdapter, make_followup_tool, protocol_observation_search_path
 from app.langgraph_fhir_hapi import HapiReadClient, hapi_base_url
 
 
@@ -118,7 +118,7 @@ def test_transport_delegates_and_the_adapter_reads_the_observation():
     assert patient["name"] == "Synthetic Patient"
     assert observations[0]["id"] == SEEDED_OBSERVATION["id"]
     assert observations[0]["valueString"] == SEEDED_OBSERVATION["valueString"]
-    assert transport.calls == [PATIENT_PATH, OBSERVATION_PATH]
+    assert transport.calls == [PATIENT_PATH, protocol_observation_search_path(PATIENT_ID)]
     assert client.calls == transport.calls
     tool_source = inspect.getsource(make_followup_tool)
     for token in ("httpx", "HTTP", "FHIR_BASE_URL", "localhost"):

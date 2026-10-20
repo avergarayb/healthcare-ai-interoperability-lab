@@ -7,14 +7,18 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs, quote, urlsplit
 
 import httpx
+import pytest
+from langchain_core.messages import AIMessage
 
 from app.clinical_read_client import ClinicalReadClient
 from app.config import Settings
 from app.langgraph_fhir_client import (
     CASE_IDENTIFIER_SYSTEM,
+    FOLLOWUP_TOOL,
     BoundedSearchStatus,
     ClientFHIRTransport,
     ExactResourceNotFound,
+    InMemoryAuditSink,
     ReadClientError,
 )
 from app.langgraph_fhir_followup import (
@@ -26,7 +30,7 @@ from app.langgraph_fhir_followup import (
     protocol_appointment_search_path,
     protocol_observation_search_path,
 )
-from app.langgraph_followup_workflow import build_live_followup_workflow
+from app.langgraph_followup_workflow import FollowUpWorkflow, build_live_followup_workflow
 from app.missed_follow_up_review import REASON_MISSED
 from app.missed_follow_up_service import _live_adapter, evaluate_missed_follow_up_case
 from app.post_consultation_review import ProtocolEvaluationStatus, evaluate_post_consultation_review
@@ -635,3 +639,213 @@ def test_read_exact_includes_appointment_and_keeps_not_found_distinct():
     factory = inspect.getsource(_fhir_client)
     assert "ClinicalReadClient.from_settings" in factory
     assert "HapiReadClient" not in factory
+
+
+def _narrative(handler):
+    client, http = _client(handler)
+    return FollowUpFHIRAdapter(ClientFHIRTransport(client), now=lambda: INSTANT), http
+
+
+def _observation() -> dict:
+    return {
+        "resourceType": "Observation",
+        "id": "syn-demo-obs-102",
+        "status": "final",
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "valueQuantity": {"value": 13.4, "unit": "g/dL"},
+    }
+
+
+def test_narrative_patient_resolution_uses_the_identifier_search():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["X-Service-Token"] == TOKEN
+        assert request.url.path == "/api/clinical-read/v1/patients"
+        assert request.url.params["identifierSystem"] == CASE_IDENTIFIER_SYSTEM
+        assert request.url.params["identifierValue"] == CASE_ID
+        assert "_count" not in request.url.params
+        return httpx.Response(200, json=_search("Patient", [_patient()]))
+
+    adapter, http = _narrative(handler)
+    try:
+        with adapter.bind_read(CASE_ID):
+            assert adapter.patient_id_for_case(CASE_ID) == PATIENT_ID
+    finally:
+        http.close()
+
+
+def test_narrative_patient_resolution_rejects_zero_and_several_matches():
+    def patients(resources: list[dict]):
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/api/clinical-read/v1/patients"
+            return httpx.Response(200, json=_search("Patient", resources))
+
+        return handler
+
+    other = _patient()
+    other["id"] = "syn-demo-patient-103"
+    empty, empty_http = _narrative(patients([]))
+    try:
+        with empty.bind_read(CASE_ID):
+            with pytest.raises(ReadClientError, match="case has no patient"):
+                empty.patient_id_for_case(CASE_ID)
+    finally:
+        empty_http.close()
+    ambiguous, ambiguous_http = _narrative(patients([_patient(), other]))
+    try:
+        with ambiguous.bind_read(CASE_ID):
+            with pytest.raises(ReadClientError, match="case matched more than one patient"):
+                ambiguous.patient_id_for_case(CASE_ID)
+    finally:
+        ambiguous_http.close()
+
+
+def test_narrative_observations_request_final_status_and_keep_the_value():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/clinical-read/v1/observations"
+        assert request.url.params["patient"] == PATIENT_ID
+        assert request.url.params["status"] == "final"
+        assert "_count" not in request.url.params
+        return httpx.Response(200, json=_search("Observation", [_observation()]))
+
+    adapter, http = _narrative(handler)
+    try:
+        observations = adapter.get_observations(PATIENT_ID)
+    finally:
+        http.close()
+    assert observations[0]["status"] == "final"
+    assert observations[0]["subject"] == {"reference": f"Patient/{PATIENT_ID}"}
+    assert observations[0]["valueQuantity"] == {"value": 13.4, "unit": "g/dL"}
+
+
+def test_narrative_empty_complete_collections_stay_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/observations"):
+            return httpx.Response(200, json=_search("Observation", []))
+        assert request.url.path.endswith("/appointments")
+        assert "status" not in request.url.params
+        return httpx.Response(200, json=_search("Appointment", []))
+
+    adapter, http = _narrative(handler)
+    try:
+        assert adapter.get_observations(PATIENT_ID) == []
+        facts = adapter.get_patient_appointments(PATIENT_ID)
+    finally:
+        http.close()
+    assert facts["appointments"] == []
+    assert facts["classifications"] == ["NONE"]
+
+
+def test_narrative_appointments_keep_status_and_start():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/clinical-read/v1/appointments"
+        assert request.url.params["patient"] == PATIENT_ID
+        assert "status" not in request.url.params
+        assert "_count" not in request.url.params
+        return httpx.Response(200, json=_search("Appointment", [_appointment()]))
+
+    adapter, http = _narrative(handler)
+    try:
+        facts = adapter.get_patient_appointments(PATIENT_ID)
+    finally:
+        http.close()
+    appointment = facts["appointments"][0]
+    assert appointment["status"] == "noshow"
+    assert appointment["start"] == "2026-01-01T00:00:00Z"
+    assert appointment["id"] == APPOINTMENT_ID
+
+
+def test_narrative_incomplete_collection_is_not_returned_as_complete():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_search("Observation", [_observation()], "incomplete"))
+
+    adapter, http = _narrative(handler)
+    try:
+        with pytest.raises(ReadClientError, match="search collection is incomplete"):
+            adapter.get_observations(PATIENT_ID)
+    finally:
+        http.close()
+
+
+def test_narrative_search_failures_stay_unavailable():
+    def unauthorized(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401)
+
+    def unavailable(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    def timed_out(_request: httpx.Request) -> None:
+        raise httpx.ConnectTimeout("timed out")
+
+    for handler in (unauthorized, unavailable, timed_out):
+        adapter, http = _narrative(handler)
+        try:
+            with adapter.bind_read(CASE_ID):
+                with pytest.raises(ReadClientError, match="clinical read unavailable"):
+                    adapter.patient_id_for_case(CASE_ID)
+        finally:
+            http.close()
+
+
+def test_scripted_workflow_reuses_a_complete_ledger_without_another_read():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        assert request.headers["X-Service-Token"] == TOKEN
+        assert "/fhir" not in request.url.path
+        path = request.url.path
+        if path == "/api/clinical-read/v1/patients":
+            assert request.url.params["identifierValue"] == CASE_ID
+            return httpx.Response(200, json=_search("Patient", [_patient()]))
+        if path == f"/api/clinical-read/v1/patients/{PATIENT_ID}":
+            return httpx.Response(200, json=_read(_patient()))
+        if path == "/api/clinical-read/v1/encounters":
+            return httpx.Response(200, json=_search("Encounter", []))
+        if path == "/api/clinical-read/v1/observations":
+            assert request.url.params["status"] == "final"
+            return httpx.Response(200, json=_search("Observation", []))
+        if path == "/api/clinical-read/v1/appointments":
+            assert "status" not in request.url.params
+            return httpx.Response(200, json=_search("Appointment", []))
+        raise AssertionError(path)
+
+    tool = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": FOLLOWUP_TOOL,
+                "args": {"case_id": CASE_ID},
+                "id": "call-1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    final = AIMessage(content="Context received from the model.")
+    final.additional_kwargs["follow_up_required"] = "unknown"
+    replies = [tool, final]
+
+    def model(messages):
+        if not replies:
+            raise AssertionError("model called after the script ended")
+        return replies.pop(0)
+
+    client, http = _client(handler)
+    try:
+        result = FollowUpWorkflow(
+            model=model,
+            sink=InMemoryAuditSink(),
+            fhir_client=client,
+            clock=lambda: "2026-09-25T00:00:03Z",
+            run_id="run-narrative-clinical-read",
+        ).run(CASE_ID)
+    finally:
+        http.close()
+    assert result.final_answer == "Context received from the model."
+    assert result.tools_used == [FOLLOWUP_TOOL]
+    assert seen == [
+        "/api/clinical-read/v1/patients",
+        f"/api/clinical-read/v1/patients/{PATIENT_ID}",
+        "/api/clinical-read/v1/encounters",
+        "/api/clinical-read/v1/observations",
+        "/api/clinical-read/v1/appointments",
+    ]

@@ -47,6 +47,7 @@ from app.langgraph_fhir_followup import (
     UNAVAILABLE_ANSWER,
     FollowUpFHIRAdapter,
     appointment_search_path,
+    case_resolution_search_path,
     case_search_path,
     make_followup_tool,
 )
@@ -1560,7 +1561,7 @@ def test_execution_binding_does_not_query_a_foreign_case():
     assert client.calls == []
     with adapter.bind_read(PATIENT_CASE):
         assert adapter.patient_id_for_case(PATIENT_CASE) == PATIENT_ID
-    assert client.calls == [case_search_path(PATIENT_CASE)]
+    assert client.calls == [case_resolution_search_path(PATIENT_CASE)]
 
 
 def test_case_isolation_regression_does_not_attach_another_case_read(caplog):
