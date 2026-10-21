@@ -257,6 +257,27 @@ def longitudinal_context(
     return JSONResponse(content=context.model_dump(by_alias=True, mode="json", exclude_none=True))
 
 
+@app.get("/internal/clinical-context-intelligence")
+def clinical_context_intelligence(
+    caseId: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if not authenticate(request, settings):
+        return Response(status_code=401)
+    if caseId not in CASE_IDS:
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    from datetime import datetime, timezone
+
+    from app.clinical_context_intelligence import analyze_clinical_context
+    from app.clinical_read_client import ClinicalReadClient
+    from app.longitudinal_context import build_longitudinal_context
+
+    context = build_longitudinal_context(ClinicalReadClient.from_settings(settings), caseId)
+    analysis = analyze_clinical_context(context, evaluated_at=datetime.now(timezone.utc))
+    return JSONResponse(content=analysis.model_dump(by_alias=True, mode="json", exclude_none=True))
+
+
 @app.post("/internal/agent/follow-up")
 async def follow_up(
     request: Request,

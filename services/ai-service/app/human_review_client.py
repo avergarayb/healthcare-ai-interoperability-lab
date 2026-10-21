@@ -408,7 +408,7 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
         context, context_message = _load_context(request, detail.case)
         timeline_html = ""
         if request.query_params.get("timeline") == "1":
-            timeline_html = _timeline_section(detail.case.case_id, settings)
+            timeline_html = _timeline_section(detail.case, settings)
         ticket = request.cookies.get(_HANDOFF_COOKIE)
         assistance = _ASSISTANCE_HANDOFF.take(ticket, review_case_id) if ticket else None
         body = _case_body(
@@ -1229,18 +1229,35 @@ def _case_body(
     return "".join(parts)
 
 
-def _timeline_section(case_id: str, settings: Settings) -> str:
+def _timeline_section(case: FollowUpReviewCase, settings: Settings) -> str:
     try:
+        from datetime import datetime, timezone
+
+        from app.clinical_context_intelligence import (
+            ProtocolVerdict,
+            analyze_clinical_context,
+            render_intelligence_html,
+        )
         from app.clinical_read_client import ClinicalReadClient
         from app.longitudinal_context import build_longitudinal_context, render_timeline_html
 
-        context = build_longitudinal_context(ClinicalReadClient.from_settings(settings), case_id)
+        context = build_longitudinal_context(ClinicalReadClient.from_settings(settings), case.case_id)
+        analysis = analyze_clinical_context(
+            context,
+            protocol=ProtocolVerdict(
+                protocol_id=case.protocol_id,
+                evaluation_status=case.protocol_evaluation_status,
+                reason_codes=list(case.reason_codes),
+                primary_evidence=list(case.matched_resources),
+            ),
+            evaluated_at=datetime.now(timezone.utc),
+        )
     except Exception:
         return (
             "<section><h2>Historial longitudinal</h2>"
             "<p>El historial longitudinal no está disponible.</p></section>"
         )
-    return render_timeline_html(context)
+    return render_timeline_html(context) + render_intelligence_html(analysis)
 
 
 def _controlled_action_eligible(case: FollowUpReviewCase) -> bool:
@@ -1385,6 +1402,7 @@ def _proposal_section(case: FollowUpReviewCase) -> str:
         narrative = _p(MSG_AI_MISSING)
     return (
         "<section><h2>Propuesta del agente de seguimiento</h2>"
+        "<p>Texto generado por IA.</p>"
         f"<p>{esc(MSG_AI_SCOPE)}</p>"
         f"<p>{esc(MSG_AI_ORIGIN)}</p>"
         f"<p>{esc(MSG_AI_REVIEW)}</p>"
@@ -1596,6 +1614,7 @@ def _outcome_section(
             return ""
         return (
             "<section><h2>Resultado operativo</h2>"
+            "<p>Decisión humana.</p>"
             f"<p>{esc(sentence)}</p>"
             "</section>"
         )
@@ -1606,7 +1625,7 @@ def _outcome_section(
         session_id=session_id,
     )
     if issued is None:
-        return "<section><h2>Resultado operativo</h2>" + _error(MSG_NOT_CONFIGURED) + "</section>"
+        return "<section><h2>Resultado operativo</h2><p>Decisión humana.</p>" + _error(MSG_NOT_CONFIGURED) + "</section>"
     token, expiry = issued
     action = "/review-cases/" + quote(case.id, safe="") + "/close"
     options = [
@@ -1621,6 +1640,7 @@ def _outcome_section(
     ]
     return (
         "<section><h2>Resultado operativo</h2>"
+        "<p>Decisión humana.</p>"
         f"<p>{esc(MSG_CLOSE_SCOPE)}</p>"
         f'<form method="post" action="{esc(action)}">'
         '<fieldset><legend>Resultado operativo</legend>'

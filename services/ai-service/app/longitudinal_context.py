@@ -35,6 +35,7 @@ class LongitudinalFact(BaseModel):
     reference: str
     status: str | None = None
     instant: str | None = None
+    end: str | None = None
     related: list[str] = Field(default_factory=list)
     source: str | None = None
     recorded_value: str | None = Field(default=None, alias="recordedValue")
@@ -204,6 +205,7 @@ def _fact(resource: dict, resource_type: str, gaps: list[LongitudinalGap]) -> Lo
         reference=reference,
         status=status,
         instant=instant,
+        end=_text(_nested(resource, "period", "end")) if resource_type == "Encounter" else None,
         related=related,
         source=source,
         recordedValue=_recorded_value(resource) if resource_type == "Observation" else None,
@@ -277,6 +279,8 @@ def _facts_html(title: str, facts: list[LongitudinalFact]) -> str:
     parts.append("<ul>")
     for fact in facts:
         when = fact.instant or "fecha no consta"
+        if fact.end:
+            when = f"{when}; fin {fact.end}"
         status = fact.status or "estado no consta"
         source = fact.source or "procedencia no consta"
         related = ", ".join(fact.related) if fact.related else "sin relación adicional"

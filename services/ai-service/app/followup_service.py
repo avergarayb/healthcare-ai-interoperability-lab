@@ -6,6 +6,7 @@ import json
 import logging
 import uuid
 from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from fastapi import Request
@@ -151,13 +152,27 @@ def _with_longitudinal_context(payload, client, case_id: str):
     if client is None or client.__class__.__name__ != "ClinicalReadClient":
         return payload
     try:
+        from app.clinical_context_intelligence import ProtocolVerdict, analyze_clinical_context
         from app.longitudinal_context import build_longitudinal_context
 
         context = build_longitudinal_context(client, case_id)
+        analysis = analyze_clinical_context(
+            context,
+            protocol=ProtocolVerdict(
+                protocol_id=payload.protocol.id,
+                evaluation_status=payload.protocol.evaluation_status.value,
+                reason_codes=list(payload.protocol.reason_codes),
+                primary_evidence=list(payload.protocol.matched_resources),
+            ),
+            evaluated_at=datetime.now(timezone.utc),
+        )
     except Exception:
         return payload
     return payload.model_copy(
-        update={"longitudinal_context": context.model_dump(by_alias=True, mode="json", exclude_none=True)}
+        update={
+            "longitudinal_context": context.model_dump(by_alias=True, mode="json", exclude_none=True),
+            "clinical_context_intelligence": analysis.model_dump(by_alias=True, mode="json", exclude_none=True),
+        }
     )
 
 

@@ -221,6 +221,7 @@ class FollowUpEndpointResponse(BaseModel):
     )
     review_case: ReviewCaseLink | None = Field(default=None, alias="reviewCase")
     longitudinal_context: dict | None = Field(default=None, alias="longitudinalContext")
+    clinical_context_intelligence: dict | None = Field(default=None, alias="clinicalContextIntelligence")
     follow_up_required: FollowUpRequired = Field(alias="followUpRequired")
     answer: str
     evidence: list[Evidence]

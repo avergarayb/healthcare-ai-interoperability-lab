@@ -31,6 +31,20 @@ NARRATIVE_INSTRUCTION = "\n".join(
         "Return JSON with answer and no other decision.",
     )
 )
+LONGITUDINAL_BRIEF_INSTRUCTION = "\n".join(
+    (
+        "When longitudinalBrief is present, use only that brief and the appointment facts.",
+        "Describe the operational situation.",
+        "Mention only facts present in the input.",
+        "Separate confirmed relations from missing information.",
+        "State that a professional must review the case.",
+        "Do not diagnose.",
+        "Do not recommend treatment.",
+        "Do not state that the patient was contacted.",
+        "Do not change the protocol result.",
+        "Write answer in clear Spanish for health professionals in Peru and Latin America.",
+    )
+)
 NARRATIVE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -84,21 +98,22 @@ def generate_operational_narrative(
     *,
     matched_resource: str,
     appointments: list[dict[str, str | None]],
+    longitudinal_brief: dict | None = None,
 ) -> NarrativeGeneration:
     """One structured generation. Provider failures stay explicit and are not stored."""
-    payload = json.dumps(
-        {
-            "reasonCode": REASON_MISSED,
-            "matchedResource": matched_resource,
-            "retrievedAppointments": appointments,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    body: dict[str, object] = {
+        "reasonCode": REASON_MISSED,
+        "matchedResource": matched_resource,
+        "retrievedAppointments": appointments,
+    }
+    instruction = NARRATIVE_INSTRUCTION
+    if longitudinal_brief:
+        body["longitudinalBrief"] = longitudinal_brief
+        instruction = NARRATIVE_INSTRUCTION + "\n" + LONGITUDINAL_BRIEF_INSTRUCTION
+    payload = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     try:
         generation = provider.generate_structured(
-            system_instruction=NARRATIVE_INSTRUCTION,
+            system_instruction=instruction,
             contents=payload,
             response_json_schema=NARRATIVE_SCHEMA,
             max_output_tokens=MAX_OUTPUT_TOKENS,

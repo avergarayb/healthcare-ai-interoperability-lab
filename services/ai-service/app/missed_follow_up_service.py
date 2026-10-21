@@ -75,6 +75,7 @@ class MissedFollowUpResponse(BaseModel):
     provenance_resources: list[str] = Field(alias="provenanceResources")
     review_cases: list[MissedFollowUpReviewCaseRef] = Field(alias="reviewCases")
     longitudinal_context: dict | None = Field(default=None, alias="longitudinalContext")
+    clinical_context_intelligence: dict | None = Field(default=None, alias="clinicalContextIntelligence")
 
 
 def dump_missed_follow_up_response(response: MissedFollowUpResponse) -> dict:
@@ -110,10 +111,12 @@ def run_missed_follow_up_http(
             facts = appointment_facts(adapter.ledger.appointment_views)
         evaluation = evaluate_missed_follow_up(snapshot)
         review_cases = _ensure_review_cases(request, parsed.case_id, evaluation)
-        attachments = _attach_narratives(request, settings, review_cases, facts, evaluation)
+        bundle = _longitudinal_bundle(adapter, parsed.case_id, evaluation, instant)
+        brief = bundle[2] if bundle is not None and evaluation.status is ProtocolEvaluationStatus.MATCHED else None
+        attachments = _attach_narratives(request, settings, review_cases, facts, evaluation, brief)
         payload = _project(parsed.case_id, evaluation, attachments)
         if payload is not None:
-            payload = _with_longitudinal_context(payload, adapter, parsed.case_id)
+            payload = _apply_longitudinal_bundle(payload, bundle, adapter, parsed.case_id)
     except (ReviewPersistenceUnavailable, InvalidReviewTrigger):
         _log(correlation_id, "persistence_unavailable")
         return JSONResponse(status_code=503, content={"detail": REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL})
@@ -232,6 +235,7 @@ def _attach_narratives(
     review_cases: tuple[FollowUpReviewCase, ...],
     facts: list[dict[str, str | None]],
     evaluation: MissedFollowUpEvaluation,
+    longitudinal_brief: dict | None = None,
 ) -> tuple[tuple[FollowUpReviewCase, str | None, str | None], ...]:
     """Store one narrative per open matched case. An existing narrative is kept."""
     if evaluation.status is not ProtocolEvaluationStatus.MATCHED:
@@ -257,6 +261,7 @@ def _attach_narratives(
             provider,
             matched_resource=matched,
             appointments=facts,
+            longitudinal_brief=longitudinal_brief,
         )
         if generated.text is None:
             attached.append((case, "unavailable", generated.reason or "provider_unavailable"))
@@ -264,6 +269,49 @@ def _attach_narratives(
         stored = service.record_narrative(case.id, generated.text)
         attached.append((stored, "stored", None))
     return tuple(attached)
+
+
+def _longitudinal_bundle(adapter: Any, case_id: str, evaluation: MissedFollowUpEvaluation, evaluated_at: datetime):
+    client = _clinical_read_client(adapter)
+    if client is None:
+        return None
+    try:
+        from app.clinical_context_intelligence import ProtocolVerdict, analyze_clinical_context, narrative_brief
+        from app.longitudinal_context import build_longitudinal_context
+
+        context = build_longitudinal_context(client, case_id)
+        analysis = analyze_clinical_context(
+            context,
+            protocol=ProtocolVerdict(
+                protocol_id=MISSED_FOLLOW_UP_REVIEW_V1,
+                evaluation_status=evaluation.status.value,
+                reason_codes=list(evaluation.reason_codes),
+                primary_evidence=list(evaluation.provenance_resources),
+            ),
+            evaluated_at=evaluated_at,
+        )
+        return context, analysis, narrative_brief(analysis)
+    except Exception:
+        return None
+
+
+def _apply_longitudinal_bundle(payload: MissedFollowUpResponse, bundle, adapter: Any, case_id: str) -> MissedFollowUpResponse:
+    if bundle is None:
+        return _with_longitudinal_context(payload, adapter, case_id)
+    context, analysis, _brief = bundle
+    return payload.model_copy(
+        update={
+            "longitudinal_context": context.model_dump(by_alias=True, mode="json", exclude_none=True),
+            "clinical_context_intelligence": analysis.model_dump(by_alias=True, mode="json", exclude_none=True),
+        }
+    )
+
+
+def _clinical_read_client(adapter: Any):
+    client = getattr(getattr(adapter, "transport", None), "client", None)
+    if client is None or client.__class__.__name__ != "ClinicalReadClient":
+        return None
+    return client
 
 
 def _with_longitudinal_context(payload: MissedFollowUpResponse, adapter: Any, case_id: str) -> MissedFollowUpResponse:
