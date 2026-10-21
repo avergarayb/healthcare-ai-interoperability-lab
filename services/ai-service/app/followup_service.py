@@ -115,6 +115,19 @@ def run_followup_http(
                 result,
                 ensure_review_case(result.case_id, result.protocol),
             )
+        if (
+            review_service is not None
+            and result.review_case is not None
+            and result.status == "finish"
+            and result.final_answer.strip()
+        ):
+            result = replace(
+                result,
+                review_case=review_service.record_narrative(
+                    result.review_case.id,
+                    result.final_answer,
+                ),
+            )
     except (ReviewPersistenceUnavailable, InvalidReviewTrigger):
         _log(correlation_id, "persistence_unavailable")
         return JSONResponse(

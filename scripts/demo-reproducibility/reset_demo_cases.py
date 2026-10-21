@@ -31,6 +31,7 @@ REVIEW_TABLES = (
     "follow_up_coordination_requests",
     "follow_up_human_attributions",
     "follow_up_coordination_request_events",
+    "follow_up_review_narratives",
 )
 _TABLE_KEY = {
     "follow_up_review_cases": "id",
@@ -38,6 +39,7 @@ _TABLE_KEY = {
     "follow_up_coordination_requests": "review_case_id",
     "follow_up_human_attributions": "review_case_id",
     "follow_up_coordination_request_events": "review_case_id",
+    "follow_up_review_narratives": "review_case_id",
 }
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -64,6 +66,7 @@ class _DeletePlan:
     coordination_ids: tuple[str, ...]
     workflow_event_ids: tuple[str, ...]
     event_ids: tuple[str, ...]
+    narrative_ids: tuple[str, ...]
 
     @property
     def review_case_ids(self) -> tuple[str, ...]:
@@ -300,6 +303,7 @@ def _plan_deletes(
     requests = list(connection.execute("SELECT * FROM follow_up_coordination_requests"))
     attributions = list(connection.execute("SELECT * FROM follow_up_human_attributions"))
     workflow_events = list(connection.execute("SELECT * FROM follow_up_coordination_request_events"))
+    narratives = list(connection.execute("SELECT * FROM follow_up_review_narratives"))
     requests_by_id = {str(row["id"]): row for row in requests}
     events_by_case: dict[str, set[int]] = {}
     for row in events:
@@ -308,6 +312,7 @@ def _plan_deletes(
     _require_known_owners(requests, known_ids)
     _require_known_owners(attributions, known_ids)
     _require_known_owners(workflow_events, known_ids)
+    _require_known_owners(narratives, known_ids)
     for row in workflow_events:
         request = requests_by_id.get(str(row["coordination_request_id"]))
         if request is None or str(request["review_case_id"]) != str(row["review_case_id"]):
@@ -344,6 +349,9 @@ def _plan_deletes(
         ),
         event_ids=tuple(
             str(row["event_id"]) for row in events if str(row["review_case_id"]) in selected_ids
+        ),
+        narrative_ids=tuple(
+            str(row["review_case_id"]) for row in narratives if str(row["review_case_id"]) in selected_ids
         ),
     )
 
@@ -413,6 +421,11 @@ def _delete_disposable(
             "follow_up_review_case_events",
             "event_id",
             plan.event_ids,
+        ),
+        (
+            "follow_up_review_narratives",
+            "review_case_id",
+            plan.narrative_ids,
         ),
         (
             "follow_up_review_cases",

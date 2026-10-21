@@ -144,7 +144,7 @@ def _attribution(
 
 
 def test_migrations_001_and_002_do_not_define_attribution():
-    assert SCHEMA_VERSION == 4
+    assert SCHEMA_VERSION == 5
     first = (APP / "migrations" / "001_follow_up_review.sql").read_bytes()
     second = (APP / "migrations" / "002_follow_up_coordination_request.sql").read_text(encoding="utf-8")
     third = (APP / "migrations" / "003_follow_up_human_attribution.sql").read_text(encoding="utf-8")

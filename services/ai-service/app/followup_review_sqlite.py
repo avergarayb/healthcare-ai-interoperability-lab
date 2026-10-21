@@ -46,6 +46,7 @@ from app.followup_review import (
     canonical_reason_codes,
     utc_now,
     utc_timestamp,
+    validate_narrative_text,
     validate_review_case,
     validate_review_detail,
     validate_review_event,
@@ -62,7 +63,7 @@ from app.human_attribution import (
 )
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 BUSY_TIMEOUT_MS = 5_000
 _MIGRATION = Path(__file__).with_name("migrations") / "001_follow_up_review.sql"
 _COORDINATION_REQUEST_MIGRATION = (
@@ -74,12 +75,16 @@ _HUMAN_ATTRIBUTION_MIGRATION = (
 _COORDINATION_WORKFLOW_MIGRATION = (
     Path(__file__).with_name("migrations") / "004_follow_up_coordination_workflow.sql"
 )
+_NARRATIVE_MIGRATION = (
+    Path(__file__).with_name("migrations") / "005_follow_up_review_narrative.sql"
+)
 _TABLES = (
     "follow_up_review_cases",
     "follow_up_review_case_events",
     "follow_up_coordination_requests",
     "follow_up_human_attributions",
     "follow_up_coordination_request_events",
+    "follow_up_review_narratives",
 )
 
 
@@ -121,6 +126,9 @@ class SQLiteFollowUpReviewCaseRepository:
                     version = int(connection.execute("PRAGMA user_version").fetchone()[0])
                 if version == 3:
                     _apply_migration(connection, _COORDINATION_WORKFLOW_MIGRATION)
+                    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                if version == 4:
+                    _apply_migration(connection, _NARRATIVE_MIGRATION)
                 self._validate_schema(connection)
         except ReviewStoreInitializationError:
             raise
@@ -184,7 +192,11 @@ class SQLiteFollowUpReviewCaseRepository:
                         (row["id"],),
                     ).fetchall()
                 )
-                detail = None if row is None else _detail_from_rows(row, event_rows)
+                detail = (
+                    None
+                    if row is None
+                    else _detail_from_rows(connection, row, event_rows)
+                )
                 connection.commit()
             if detail is None:
                 raise ReviewPersistenceUnavailable
@@ -202,7 +214,49 @@ class SQLiteFollowUpReviewCaseRepository:
                     "SELECT * FROM follow_up_review_cases WHERE id = ?",
                     (review_case_id,),
                 ).fetchone()
-            return None if row is None else _case_from_row(row)
+                narrative = None if row is None else _narrative_text(connection, review_case_id)
+            return None if row is None else _case_from_row(row, narrative_text=narrative)
+        except (sqlite3.DatabaseError, OSError, ValueError) as exc:
+            raise ReviewPersistenceUnavailable from exc
+
+    def record_narrative(self, review_case_id: str, text: str) -> FollowUpReviewCase:
+        review_case_id = validate_review_case_id(review_case_id)
+        narrative = validate_narrative_text(text)
+        recorded_at = utc_timestamp(self._clock)
+        try:
+            with self._connection_scope() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                case_row = connection.execute(
+                    "SELECT * FROM follow_up_review_cases WHERE id = ?",
+                    (review_case_id,),
+                ).fetchone()
+                if case_row is None:
+                    connection.rollback()
+                    raise ReviewCaseNotFound
+                existing = connection.execute(
+                    """
+                    SELECT origin, narrative_text
+                    FROM follow_up_review_narratives
+                    WHERE review_case_id = ?
+                    """,
+                    (review_case_id,),
+                ).fetchone()
+                if existing is None:
+                    connection.execute(
+                        """
+                        INSERT INTO follow_up_review_narratives (
+                            review_case_id, origin, narrative_text, recorded_at
+                        ) VALUES (?, 'gemini', ?, ?)
+                        """,
+                        (review_case_id, narrative, recorded_at),
+                    )
+                    stored = narrative
+                else:
+                    stored = _stored_narrative(existing)
+                connection.commit()
+                return _case_from_row(case_row, narrative_text=stored)
+        except ReviewCaseNotFound:
+            raise
         except (sqlite3.DatabaseError, OSError, ValueError) as exc:
             raise ReviewPersistenceUnavailable from exc
 
@@ -225,8 +279,9 @@ class SQLiteFollowUpReviewCaseRepository:
                     """,
                     (review_case_id,),
                 ).fetchall()
+                detail = _detail_from_rows(connection, row, event_rows)
                 connection.commit()
-            return _detail_from_rows(row, event_rows)
+            return detail
         except (sqlite3.DatabaseError, OSError, ValueError) as exc:
             raise ReviewPersistenceUnavailable from exc
 
@@ -257,7 +312,12 @@ class SQLiteFollowUpReviewCaseRepository:
         try:
             with self._connection_scope() as connection:
                 rows = connection.execute(query, parameters).fetchall()
-            cases = tuple(_case_from_row(row) for row in rows[:limit])
+                visible = rows[:limit]
+                narratives = _narrative_map(connection, [str(row["id"]) for row in visible])
+                cases = tuple(
+                    _case_from_row(row, narrative_text=narratives.get(str(row["id"])))
+                    for row in visible
+                )
             next_position = None
             if len(rows) > limit and cases:
                 last = cases[-1]
@@ -298,7 +358,7 @@ class SQLiteFollowUpReviewCaseRepository:
                     """,
                     (review_case_id,),
                 ).fetchall()
-                current = _detail_from_rows(row, current_event_rows).case
+                current = _detail_from_rows(connection, row, current_event_rows).case
                 if current.status is ReviewCaseStatus.CLOSED:
                     connection.commit()
                     if current.outcome is outcome:
@@ -361,7 +421,7 @@ class SQLiteFollowUpReviewCaseRepository:
                 detail = (
                     None
                     if updated is None
-                    else _detail_from_rows(updated, updated_event_rows)
+                    else _detail_from_rows(connection, updated, updated_event_rows)
                 )
                 connection.commit()
             if detail is None:
@@ -712,6 +772,7 @@ def _migration_schema_contract() -> tuple[object, ...]:
         connection.executescript(_COORDINATION_REQUEST_MIGRATION.read_text(encoding="utf-8"))
         connection.executescript(_HUMAN_ATTRIBUTION_MIGRATION.read_text(encoding="utf-8"))
         connection.executescript(_COORDINATION_WORKFLOW_MIGRATION.read_text(encoding="utf-8"))
+        connection.executescript(_NARRATIVE_MIGRATION.read_text(encoding="utf-8"))
         return _schema_contract(connection)
     finally:
         connection.close()
@@ -883,7 +944,42 @@ def _load_json_array(raw: object, *, resources: bool) -> tuple[str, ...]:
     return canonical
 
 
-def _case_from_row(row: sqlite3.Row) -> FollowUpReviewCase:
+def _narrative_text(connection: sqlite3.Connection, review_case_id: str) -> str | None:
+    row = connection.execute(
+        """
+        SELECT origin, narrative_text
+        FROM follow_up_review_narratives
+        WHERE review_case_id = ?
+        """,
+        (review_case_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _stored_narrative(row)
+
+
+def _narrative_map(connection: sqlite3.Connection, review_case_ids: list[str]) -> dict[str, str]:
+    if not review_case_ids:
+        return {}
+    placeholders = ",".join("?" for _ in review_case_ids)
+    rows = connection.execute(
+        f"""
+        SELECT review_case_id, origin, narrative_text
+        FROM follow_up_review_narratives
+        WHERE review_case_id IN ({placeholders})
+        """,
+        review_case_ids,
+    ).fetchall()
+    return {str(row["review_case_id"]): _stored_narrative(row) for row in rows}
+
+
+def _stored_narrative(row: sqlite3.Row) -> str:
+    if str(row["origin"]) != "gemini":
+        raise ValueError("persisted narrative origin is invalid")
+    return validate_narrative_text(str(row["narrative_text"]))
+
+
+def _case_from_row(row: sqlite3.Row, *, narrative_text: str | None = None) -> FollowUpReviewCase:
     raw_review_case_id = str(row["id"])
     review_case_id = validate_review_case_id(raw_review_case_id)
     if review_case_id != raw_review_case_id:
@@ -912,6 +1008,7 @@ def _case_from_row(row: sqlite3.Row) -> FollowUpReviewCase:
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         closed_at=None if row["closed_at"] is None else str(row["closed_at"]),
+        narrative_text=narrative_text,
     )
     return validate_review_case(case)
 
@@ -935,12 +1032,16 @@ def _event_from_row(row: sqlite3.Row) -> FollowUpReviewCaseEvent:
 
 
 def _detail_from_rows(
+    connection: sqlite3.Connection,
     case_row: sqlite3.Row,
     event_rows: list[sqlite3.Row],
 ) -> ReviewCaseDetail:
     return validate_review_detail(
         ReviewCaseDetail(
-            case=_case_from_row(case_row),
+            case=_case_from_row(
+                case_row,
+                narrative_text=_narrative_text(connection, str(case_row["id"])),
+            ),
             events=tuple(_event_from_row(event) for event in event_rows),
         )
     )

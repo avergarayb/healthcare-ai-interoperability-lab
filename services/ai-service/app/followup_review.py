@@ -71,6 +71,7 @@ class FollowUpReviewCase:
     created_at: str
     updated_at: str
     closed_at: str | None
+    narrative_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,8 @@ class FollowUpReviewCaseRepository(Protocol):
     ) -> FollowUpReviewCase: ...
 
     def events(self, review_case_id: str) -> tuple[FollowUpReviewCaseEvent, ...]: ...
+
+    def record_narrative(self, review_case_id: str, text: str) -> FollowUpReviewCase: ...
 
 
 def canonical_matched_resources(resources: Sequence[str]) -> tuple[str, ...]:
@@ -290,6 +293,20 @@ def validate_utc_timestamp(value: str) -> datetime:
     return parsed
 
 
+MAX_NARRATIVE_TEXT = 4000
+
+
+def validate_narrative_text(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or "\x00" in value
+        or not value.strip()
+        or len(value) > MAX_NARRATIVE_TEXT
+    ):
+        raise ValueError("persisted narrative is invalid")
+    return value
+
+
 def validate_review_case(case: FollowUpReviewCase) -> FollowUpReviewCase:
     if not isinstance(case.status, ReviewCaseStatus):
         raise ValueError("persisted review status is invalid")
@@ -302,6 +319,8 @@ def validate_review_case(case: FollowUpReviewCase) -> FollowUpReviewCase:
     updated_at = validate_utc_timestamp(case.updated_at)
     if created_at > updated_at:
         raise ValueError("persisted review timestamps are inconsistent")
+    if case.narrative_text is not None:
+        validate_narrative_text(case.narrative_text)
 
     validate_trigger(
         FollowUpReviewTrigger(
@@ -424,6 +443,9 @@ class FollowUpReviewCaseService:
         if case is None:
             raise ReviewCaseNotFound
         return case
+
+    def record_narrative(self, review_case_id: str, text: str) -> FollowUpReviewCase:
+        return self._repository.record_narrative(review_case_id, validate_narrative_text(text))
 
     def detail(self, review_case_id: str) -> ReviewCaseDetail:
         detail = self._repository.get_detail(review_case_id)

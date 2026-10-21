@@ -171,6 +171,9 @@ MSG_CONTEXT_SCOPE = (
 MSG_CLOSE_SCOPE = (
     "Esto registra un resultado operativo de la revisión. No es un diagnóstico ni una decisión de tratamiento."
 )
+MSG_AI_SCOPE = "Propuesta generada por inteligencia artificial. No es una decisión clínica definitiva."
+MSG_AI_REVIEW = "Requiere revisión humana. El profesional responsable decide."
+MSG_AI_MISSING = "Este caso no tiene una propuesta de inteligencia artificial guardada."
 MSG_DEMO = (
     "Demostración sintética de laboratorio. Estas páginas exigen una sesión de desarrollo. "
     "Esa sesión no es una identidad clínica verificada, ni IAM, ni SSO, ni acceso por roles. "
@@ -1199,6 +1202,7 @@ def _case_body(
         parts.append(_error(notice))
     parts.append(_operational_section(case))
     parts.append(_provenance_section(case))
+    parts.append(_proposal_section(case))
     parts.append(_context_section(context, context_message))
     parts.append(_history_section(detail.events))
     parts.append(_attribution_section(case, attributions))
@@ -1346,6 +1350,37 @@ def _provenance_section(case: FollowUpReviewCase) -> str:
         + "".join(reasons)
         + "</ul>"
         + matched
+        + "</section>"
+    )
+
+
+def _proposal_section(case: FollowUpReviewCase) -> str:
+    label = _PROTOCOL_LABELS.get(case.protocol_id, case.protocol_id)
+    reasons = "".join(
+        f"<li>{esc(_PAGE_REASONS.get(reason, reason))}</li>" for reason in case.reason_codes
+    )
+    references = "".join(f"<li>{esc(reference)}</li>" for reference in case.matched_resources)
+    if case.narrative_text:
+        narrative = f'<div class="ai-proposal">{esc(case.narrative_text)}</div>'
+    else:
+        narrative = _p(MSG_AI_MISSING)
+    return (
+        "<section><h2>Propuesta generada por IA</h2>"
+        f"<p>{esc(MSG_AI_SCOPE)}</p>"
+        f"<p>{esc(MSG_AI_REVIEW)}</p>"
+        "<dl>"
+        f"<dt>Caso</dt><dd>{esc(case.case_id)}</dd>"
+        f"<dt>Estado</dt><dd>{esc(_status_label(case.status.value))}</dd>"
+        f"<dt>Protocolo</dt><dd>{esc(label)}</dd>"
+        f"<dt>Identificador del protocolo</dt><dd>{esc(case.protocol_id)}</dd>"
+        f"<dt>Versión</dt><dd>{esc(str(case.version))}</dd>"
+        "</dl>"
+        "<h3>Motivos</h3><ul>"
+        + reasons
+        + "</ul><h3>Referencias FHIR</h3><ul>"
+        + references
+        + "</ul><h3>Texto de la propuesta</h3>"
+        + narrative
         + "</section>"
     )
 

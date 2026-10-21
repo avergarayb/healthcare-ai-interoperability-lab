@@ -197,8 +197,8 @@ class MiniHisSimulatorTest {
         mockMvc.perform(post("/synthetic/reset"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.patients").value(6))
-                .andExpect(jsonPath("$.consultations").value(3))
-                .andExpect(jsonPath("$.results").value(6));
+                .andExpect(jsonPath("$.consultations").value(4))
+                .andExpect(jsonPath("$.results").value(7));
         mockMvc.perform(get("/patients/MHS-PAT-003"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.patientId").value("MHS-PAT-003"));
@@ -264,7 +264,9 @@ class MiniHisSimulatorTest {
                 .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-006"));
         mockMvc.perform(get("/patients/MHS-PAT-006/consultations"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].consultationId").value("MHS-CON-015"))
+                .andExpect(jsonPath("$[0].status").value("completed"));
         mockMvc.perform(get("/appointments").param("patientId", "MHS-PAT-006"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));

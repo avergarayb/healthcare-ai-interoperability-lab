@@ -106,6 +106,14 @@ public final class SyntheticSeed {
                     "Control sintetico de funcion renal",
                     "Dra. Nora Demo",
                     "completed",
+                    AMBULATORY_CARE),
+            new ConsultationSeed(
+                    "MHS-CON-015",
+                    "MHS-PAT-006",
+                    "2026-06-01T10:00:00Z",
+                    "Control sintetico de hemoglobina",
+                    "Dra. Luz Demo",
+                    "completed",
                     AMBULATORY_CARE));
 
     public static final List<ResultSeed> RESULTS = List.of(
@@ -168,6 +176,16 @@ public final class SyntheticSeed {
                     "36.6",
                     "C",
                     "2026-07-20T19:05:00Z",
+                    FINAL_RESULT),
+            new ResultSeed(
+                    "MHS-RES-015",
+                    "MHS-CON-015",
+                    "MHS-PAT-006",
+                    "laboratory",
+                    "Hemoglobina",
+                    "12.1",
+                    "g/dL",
+                    "2026-06-01T10:20:00Z",
                     FINAL_RESULT));
 
     /**

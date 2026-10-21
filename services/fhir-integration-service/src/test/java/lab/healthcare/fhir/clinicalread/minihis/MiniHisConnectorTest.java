@@ -81,6 +81,7 @@ class MiniHisConnectorTest {
         assertThat(encounter.path("class").path("display").asText()).isEqualTo("ambulatory");
         assertThat(encounter.path("subject").path("reference").asText()).isEqualTo("Patient/MHS-PAT-001");
         assertThat(encounter.path("period").path("start").asText()).isEqualTo("2026-09-01T15:00:00Z");
+        assertThat(encounter.path("period").has("end")).isFalse();
         assertThat(observation.path("status").asText()).isEqualTo("final");
         assertThat(observation.path("subject").path("reference").asText()).isEqualTo("Patient/MHS-PAT-001");
         assertThat(observation.path("encounter").path("reference").asText()).isEqualTo("Encounter/MHS-CON-001");
@@ -88,7 +89,23 @@ class MiniHisConnectorTest {
         assertThat(observation.path("valueQuantity").path("value").decimalValue()).isEqualByComparingTo("13.4");
         assertThat(observation.path("valueQuantity").path("unit").asText()).isEqualTo("g/dL");
         assertThat(observation.path("effectiveDateTime").asText()).isEqualTo("2026-09-01T15:10:00Z");
+        assertThat(observation.path("issued").asText()).isEqualTo("2026-09-01T15:10:00Z");
         assertRequiredR4Elements(patient, encounter, observation);
+    }
+
+    @Test
+    void completedConsultationCopiesTheVisitInstantToPeriodEnd() {
+        MiniHisNormalizer normalizer = new MiniHisNormalizer(json);
+        ObjectNode encounter = normalizer.encounter(json.createObjectNode()
+                .put("consultationId", "MHS-CON-015")
+                .put("patientId", "MHS-PAT-006")
+                .put("occurredAt", "2026-06-01T10:00:00Z")
+                .put("status", "completed")
+                .put("careClass", "ambulatory"));
+
+        assertThat(encounter.path("status").asText()).isEqualTo("finished");
+        assertThat(encounter.path("period").path("start").asText()).isEqualTo("2026-06-01T10:00:00Z");
+        assertThat(encounter.path("period").path("end").asText()).isEqualTo("2026-06-01T10:00:00Z");
     }
 
     @Test

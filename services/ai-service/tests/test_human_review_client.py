@@ -357,7 +357,8 @@ def test_open_case_page_separates_sections_and_renders_context(tmp_path):
     assert "Quedó registrado un resultado posterior a la consulta" in response.text
     visible, technical = response.text.split("<details>", 1)
     assert "Technical provenance" not in response.text
-    assert "Encounter/encounter-008" not in visible
+    assert "<h2>Propuesta generada por IA</h2>" in visible
+    assert "Encounter/encounter-008" in visible
     assert "Encounter/encounter-008" in technical
     assert "&lt;b&gt;unsafe&lt;/b&gt;" in response.text
     assert "<b>unsafe</b>" not in response.text
@@ -1102,7 +1103,7 @@ def test_slice1_queue_detail_and_coordination_sentences(tmp_path):
     assert _RULE not in technical
     assert "matched" not in visible
     assert ">matched<" in technical
-    assert "Encounter/encounter-008" not in visible
+    assert "Encounter/encounter-008" in visible
     assert "Encounter/encounter-008" in technical
     assert "Observation/observation-008" in technical
     assert "<h2>Historial operativo</h2>" in visible
@@ -1199,7 +1200,7 @@ def test_slice2_origin_appointment_is_shown_once_and_other_stays_technical(tmp_p
     visible, technical = page.text.split("<details>", 1)
     origin, appointments = visible.split("<h3>Appointments</h3>", 1)
     assert origin.count("<h3>Cita que originó el caso</h3>") == 1
-    assert origin.count("Appointment/noshow-013") == 1
+    assert origin.count("Appointment/noshow-013") == 2
     assert "Appointment/noshow-013" not in appointments
     assert "La cita que originó este caso está arriba." in appointments
     assert appointments.count("Estado operativo de la cita no clasificado") == 1
@@ -1224,7 +1225,52 @@ def test_slice2_origin_appointment_is_shown_once_and_other_stays_technical(tmp_p
     alone = client.get(f"/review-cases/{separate.id}")
     alone_visible = alone.text.split("<details>", 1)[0]
     alone_origin, alone_list = alone_visible.split("<h3>Appointments</h3>", 1)
-    assert alone_origin.count("Appointment/noshow-014") == 1
+    assert alone_origin.count("Appointment/noshow-014") == 2
     assert "Appointment/noshow-014" not in alone_list
     assert "La cita que originó este caso está arriba." not in alone.text
     assert "<h3>Cita que originó el caso</h3>" in alone_origin
+
+
+def test_persisted_gemini_proposal_is_visible_and_does_not_change_the_case(tmp_path):
+    repository = _repository(tmp_path)
+    case = _create(repository)
+    proposal = 'Propuesta <script>alert(1)</script> y "><img src=x onerror=alert(1)>'
+    stored = FollowUpReviewCaseService(repository).record_narrative(case.id, proposal)
+    assert stored.version == 1
+    assert stored.status is case.status
+    response = _client(repository, ScriptedFhir()).get(f"/review-cases/{case.id}")
+    assert response.status_code == 200
+    visible = response.text.split("<details>", 1)[0]
+    assert "<h2>Propuesta generada por IA</h2>" in visible
+    assert "Propuesta generada por inteligencia artificial. No es una decisión clínica definitiva." in visible
+    assert "Requiere revisión humana. El profesional responsable decide." in visible
+    assert case.case_id in visible
+    assert "Abierto" in visible
+    assert "POST_CONSULTATION_RESULT_REVIEW_V1" in visible
+    assert "Quedó registrado un resultado posterior a la consulta" in visible
+    assert "Encounter/encounter-008" in visible
+    assert "Observation/observation-008" in visible
+    assert f"<dt>Versión</dt><dd>{case.version}</dd>" in visible
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in visible
+    assert "&lt;img src=x onerror=alert(1)&gt;" in visible
+    assert "<script>alert(1)</script>" not in response.text
+    assert "<img" not in response.text
+    assert 'class="ai-proposal"' in visible
+    reloaded = repository.get(case.id)
+    assert reloaded is not None
+    assert reloaded.version == case.version == 1
+    assert reloaded.status is case.status
+    assert reloaded.narrative_text == proposal
+    assert reloaded.review_identity == case.review_identity
+
+
+def test_case_without_narrative_says_so_without_failing(tmp_path):
+    repository = _repository(tmp_path)
+    case = _create(repository)
+    assert case.narrative_text is None
+    response = _client(repository, ScriptedFhir()).get(f"/review-cases/{case.id}")
+    assert response.status_code == 200
+    assert "Este caso no tiene una propuesta de inteligencia artificial guardada." in response.text
+    assert "Propuesta generada por inteligencia artificial. No es una decisión clínica definitiva." in response.text
+    assert 'class="ai-proposal"' not in response.text
+    assert repository.get(case.id).version == 1

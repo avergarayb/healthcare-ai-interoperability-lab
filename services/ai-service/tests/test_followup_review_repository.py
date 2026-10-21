@@ -29,6 +29,9 @@ from app.followup_review import (
     validate_utc_timestamp,
 )
 from app.followup_review_sqlite import (
+    _COORDINATION_REQUEST_MIGRATION,
+    _COORDINATION_WORKFLOW_MIGRATION,
+    _HUMAN_ATTRIBUTION_MIGRATION,
     _MIGRATION,
     SQLiteFollowUpReviewCaseRepository,
     _normalize_schema_sql,
@@ -244,7 +247,7 @@ def test_empty_database_initializes_supported_schema(tmp_path):
     repository = SQLiteFollowUpReviewCaseRepository(path)
     repository.initialize()
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
         tables = {
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -867,3 +870,106 @@ def test_persisted_schema_and_values_are_minimized(tmp_path):
     assert columns.isdisjoint(forbidden_columns)
     for token in ("resourceType", "valueString", "Gemini", "reviewer"):
         assert token not in stored
+
+
+def test_narrative_stays_out_of_the_case_row_and_keeps_the_first_text(tmp_path):
+    repository = _repository(tmp_path)
+    created = _create(repository)
+    service = FollowUpReviewCaseService(repository)
+    proposal = "Exact proposal text."
+    recorded = service.record_narrative(created.id, proposal)
+    assert recorded.narrative_text == proposal
+    assert recorded.review_identity == created.review_identity
+    assert recorded.version == 1
+    assert recorded.updated_at == created.updated_at
+    assert recorded.status is ReviewCaseStatus.OPEN
+    assert recorded.matched_resources == created.matched_resources
+    kept = service.record_narrative(created.id, "A different later proposal.")
+    assert kept.narrative_text == proposal
+    assert kept.review_identity == created.review_identity
+    with pytest.raises(ValueError, match="persisted narrative is invalid"):
+        service.record_narrative(created.id, " ")
+    with sqlite3.connect(repository.database_path) as connection:
+        case_row = json.dumps(
+            tuple(
+                connection.execute(
+                    "SELECT * FROM follow_up_review_cases WHERE id = ?",
+                    (created.id,),
+                ).fetchone()
+            )
+        )
+        stored = connection.execute(
+            """
+            SELECT origin, narrative_text
+            FROM follow_up_review_narratives
+            WHERE review_case_id = ?
+            """,
+            (created.id,),
+        ).fetchone()
+    assert proposal not in case_row
+    assert tuple(stored) == ("gemini", proposal)
+
+
+def test_version_four_case_loads_without_a_narrative(tmp_path):
+    path = tmp_path / "review.sqlite3"
+    review_case_id = "00000000-0000-4000-8000-000000000115"
+    event_id = "00000000-0000-4000-8000-000000000116"
+    created_at = utc_timestamp(lambda: NOW)
+    identity = build_review_identity(CASE, POST_CONSULTATION_RESULT_REVIEW_V1, RESOURCES)
+    connection = sqlite3.connect(path)
+    try:
+        for migration in (
+            _MIGRATION,
+            _COORDINATION_REQUEST_MIGRATION,
+            _HUMAN_ATTRIBUTION_MIGRATION,
+            _COORDINATION_WORKFLOW_MIGRATION,
+        ):
+            connection.executescript(migration.read_text(encoding="utf-8"))
+        connection.execute(
+            """
+            INSERT INTO follow_up_review_cases (
+                id, review_identity, case_id, protocol_id,
+                protocol_evaluation_status, reason_codes_json,
+                matched_resources_json, status, outcome, version,
+                created_at, updated_at, closed_at
+            ) VALUES (?, ?, ?, ?, 'matched', ?, ?, 'open', NULL, 1, ?, ?, NULL)
+            """,
+            (
+                review_case_id,
+                identity,
+                CASE,
+                POST_CONSULTATION_RESULT_REVIEW_V1,
+                json.dumps(["post_consultation_result_requires_review"], separators=(",", ":")),
+                json.dumps(list(RESOURCES), separators=(",", ":")),
+                created_at,
+                created_at,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO follow_up_review_case_events (
+                event_id, review_case_id, case_version, event_type,
+                from_status, to_status, outcome, occurred_at
+            ) VALUES (?, ?, 1, 'created', NULL, 'open', NULL, ?)
+            """,
+            (event_id, review_case_id, created_at),
+        )
+        connection.commit()
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+    finally:
+        connection.close()
+    repository = SQLiteFollowUpReviewCaseRepository(path, clock=lambda: NOW)
+    repository.initialize()
+    loaded = repository.get(review_case_id)
+    assert loaded is not None
+    assert loaded.narrative_text is None
+    assert loaded.review_identity == identity
+    assert loaded.status is ReviewCaseStatus.OPEN
+    assert loaded.version == 1
+    assert loaded.matched_resources == RESOURCES
+    detail = repository.get_detail(review_case_id)
+    assert detail is not None
+    assert detail.case.narrative_text is None
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("SELECT COUNT(*) FROM follow_up_review_narratives").fetchone()[0] == 0

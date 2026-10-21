@@ -70,13 +70,21 @@ SYSTEM_INSTRUCTION = (
     "Skip that call when the context is enough to decide. "
     "Appointment classifications are operational facts about records that were read. "
     "They do not by themselves decide whether follow-up is clinically required. "
+    "Describe the findings that were read and the limits of that evidence. "
+    "One observation is not enough to state that follow-up is unnecessary. "
+    "Do not state that follow-up is not needed. "
+    "The responsible clinician makes that decision. "
     "Do not invent clinical data. Do not call any other tool. "
     "When you are not calling a tool, respond with a JSON object that has "
-    "answer and follow_up_required. follow_up_required is true, false, or unknown."
+    "answer and follow_up_required. follow_up_required is true, false, or unknown. "
+    "That token records the operational reading. It is not a clinical determination "
+    "that follow-up is unnecessary."
 )
 FINAL_DECISION_REQUEST = (
     "Respond with the JSON object only. "
     "Do not call a tool. "
+    "Describe the findings that were read, their limits, and that the responsible clinician decides. "
+    "Do not state that follow-up is unnecessary because of one result. "
     "follow_up_required must be true, false, or unknown."
 )
 FINAL_DECISION_FIELDS = ("true", "false", "unknown")

@@ -546,24 +546,70 @@ def test_matched_case_is_persisted_before_model_and_projected(monkeypatch, tmp_p
 
 def test_model_output_cannot_change_review_identity_state_or_provenance(monkeypatch, tmp_path):
     repository = _repository(tmp_path)
-    response = _matched_workflow_factory(
+    proposal = "The model says dismiss and close it."
+    client = _matched_workflow_factory(
         repository,
         monkeypatch,
         lambda _messages: AIMessage(
-            content="The model says dismiss and close it.",
+            content=proposal,
             additional_kwargs={"follow_up_required": "false"},
         ),
-    ).post("/internal/agent/follow-up", json={"caseId": CASE}, headers=AUTH)
+    )
+    response = client.post("/internal/agent/follow-up", json={"caseId": CASE}, headers=AUTH)
     assert response.status_code == 200
-    review_case = repository.get(response.json()["reviewCase"]["reviewCaseId"])
+    assert response.json()["answer"] == proposal
+    assert response.json()["followUpRequired"] == "false"
+    review_case_id = response.json()["reviewCase"]["reviewCaseId"]
+    review_case = repository.get(review_case_id)
     assert review_case is not None
     assert review_case.status is ReviewCaseStatus.OPEN
     assert review_case.outcome is None
+    assert review_case.version == 1
+    assert review_case.narrative_text == proposal
     assert review_case.reason_codes == ("post_consultation_result_requires_review",)
     assert review_case.matched_resources == (
         "Encounter/encounter-synthetic-001",
         "Observation/observation-008",
     )
+    detail = client.get(f"/internal/follow-up-review-cases/{review_case_id}", headers=AUTH)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["status"] == "open"
+    assert body["protocolId"] == POST_CONSULTATION_RESULT_REVIEW_V1
+    assert body["narrative"] == {"origin": "gemini", "text": proposal}
+    assert body["matchedResources"] == [
+        "Encounter/encounter-synthetic-001",
+        "Observation/observation-008",
+    ]
+    assert "resourceType" not in detail.text
+    with sqlite3.connect(repository.database_path) as connection:
+        case_row = json.dumps(
+            tuple(
+                connection.execute(
+                    "SELECT * FROM follow_up_review_cases WHERE id = ?",
+                    (review_case_id,),
+                ).fetchone()
+            )
+        )
+    assert proposal not in case_row
+
+    _matched_workflow_factory(
+        repository,
+        monkeypatch,
+        lambda _messages: AIMessage(
+            content="A later proposal that must not replace the first.",
+            additional_kwargs={"follow_up_required": "true"},
+        ),
+    )
+    second = client.post("/internal/agent/follow-up", json={"caseId": CASE}, headers=AUTH)
+    assert second.status_code == 200
+    kept = repository.get(review_case_id)
+    assert kept is not None
+    assert kept.id == review_case_id
+    assert kept.narrative_text == proposal
+    assert kept.review_identity == review_case.review_identity
+    assert kept.status is ReviewCaseStatus.OPEN
+    assert kept.version == 1
 
 
 def test_persistence_failure_is_503_and_model_is_not_invoked(monkeypatch, tmp_path):

@@ -85,11 +85,16 @@ final class MiniHisNormalizer {
         String id = required(source, "consultationId");
         String patientId = required(source, "patientId");
         String occurredAt = instant(required(source, "occurredAt"));
+        String status = encounterStatus(required(source, "status"));
         ObjectNode resource = resource("Encounter", id, CONSULTATION_SYSTEM);
-        resource.put("status", encounterStatus(required(source, "status")));
+        resource.put("status", status);
         resource.set("class", encounterClass(required(source, "careClass")));
         resource.putObject("subject").put("reference", "Patient/" + patientId);
-        resource.putObject("period").put("start", occurredAt);
+        ObjectNode period = resource.putObject("period");
+        period.put("start", occurredAt);
+        if ("finished".equals(status)) {
+            period.put("end", occurredAt);
+        }
         String reason = optional(source, "reason");
         if (reason != null) {
             resource.putArray("reasonCode").addObject().put("text", reason);
@@ -117,7 +122,9 @@ final class MiniHisNormalizer {
         resource.putObject("encounter").put("reference", "Encounter/" + consultationId);
         String observedAt = optional(source, "observedAt");
         if (observedAt != null) {
-            resource.put("effectiveDateTime", instant(observedAt));
+            String observed = instant(observedAt);
+            resource.put("effectiveDateTime", observed);
+            resource.put("issued", observed);
         }
         JsonNode components = source.get("components");
         if (components == null || components.isNull() || (components.isArray() && components.isEmpty())) {

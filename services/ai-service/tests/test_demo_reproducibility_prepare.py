@@ -397,7 +397,7 @@ def test_invalid_review_database_path(tmp_path: Path, path_kind: str, reason: st
     assert gateway.puts == []
 
 
-@pytest.mark.parametrize("version", [3, 5])
+@pytest.mark.parametrize("version", [3, 6])
 def test_incompatible_schema_is_left_unchanged(tmp_path: Path, version: int):
     review = _review_db(tmp_path)
     connection = sqlite3.connect(review)

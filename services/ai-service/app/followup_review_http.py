@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
@@ -60,10 +60,18 @@ class ReviewTransitionResponse(BaseModel):
     occurred_at: str = Field(alias="occurredAt")
 
 
+class ReviewNarrativeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    origin: Literal["gemini"]
+    text: str
+
+
 class ReviewCaseDetailResponse(ReviewCaseSummaryResponse):
     protocol_evaluation_status: str = Field(alias="protocolEvaluationStatus")
     reason_codes: list[str] = Field(alias="reasonCodes")
     matched_resources: list[str] = Field(alias="matchedResources")
+    narrative: ReviewNarrativeResponse | None = None
     transitions: list[ReviewTransitionResponse]
 
 
@@ -228,6 +236,11 @@ def _detail(
         protocolEvaluationStatus=case.protocol_evaluation_status,
         reasonCodes=list(case.reason_codes),
         matchedResources=list(case.matched_resources),
+        narrative=(
+            ReviewNarrativeResponse(origin="gemini", text=case.narrative_text)
+            if case.narrative_text is not None
+            else None
+        ),
         transitions=[
             ReviewTransitionResponse(
                 eventId=event.event_id,

@@ -554,7 +554,7 @@ def test_version_three_upgrade_keeps_requested_rows(tmp_path):
     repository = SQLiteFollowUpReviewCaseRepository(path, clock=lambda: NOW)
     repository.initialize()
     with sqlite3.connect(path) as upgraded:
-        assert upgraded.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
+        assert upgraded.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 5
         status = upgraded.execute(
             "SELECT status, created_at FROM follow_up_coordination_requests WHERE id = ?",
             (request_id,),

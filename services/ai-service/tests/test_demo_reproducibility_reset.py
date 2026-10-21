@@ -381,7 +381,7 @@ def test_schema_four_reset_keeps_historical_coordination_history(tmp_path: Path)
     before = _preserved_dump(review)
     assert before["follow_up_coordination_request_events"]
     with sqlite3.connect(review) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
     report = _reset(tmp_path, review)
     assert report.removed_case_ids == ("SYN-DEMO-101",)
     assert _preserved_dump(review) == before
@@ -391,10 +391,10 @@ def test_schema_four_reset_keeps_historical_coordination_history(tmp_path: Path)
         (demo.id,),
     ) == []
     with sqlite3.connect(review) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
 
 
-@pytest.mark.parametrize("version", [3, 5])
+@pytest.mark.parametrize("version", [3, 6])
 def test_incompatible_schema_is_left_unchanged(tmp_path: Path, version: int):
     review = _review_db(tmp_path)
     connection = sqlite3.connect(review)
@@ -491,6 +491,46 @@ def test_delete_failure_rolls_back_the_whole_transaction(tmp_path: Path):
     cases = [tuple(row) for row in _rows(review, "SELECT * FROM follow_up_review_cases ORDER BY id")]
     assert attributions == before
     assert cases == cases_before
+
+
+def test_reset_deletes_disposable_narratives_and_keeps_the_others(tmp_path: Path):
+    review = _review_db(tmp_path)
+    repository = SQLiteFollowUpReviewCaseRepository(review)
+    preserved = _seed_case(
+        repository,
+        "SYN-FOLLOWUP-006",
+        POST_CONSULTATION_RESULT_REVIEW_V1,
+        "Encounter/historical-enc-006",
+    )
+    demo = _seed_demo(
+        repository,
+        "SYN-DEMO-101",
+        POST_CONSULTATION_RESULT_REVIEW_V1,
+        "Encounter/syn-demo-enc-101",
+        coordination=False,
+    )
+    repository.record_narrative(preserved.id, "Preserved proposal.")
+    repository.record_narrative(demo.id, "Disposable proposal.")
+    before = repository.get(preserved.id)
+    assert before is not None
+    report = _reset(tmp_path, review)
+    assert report.removed_case_ids == ("SYN-DEMO-101",)
+    kept = repository.get(preserved.id)
+    assert kept is not None
+    assert kept.narrative_text == "Preserved proposal."
+    assert kept.version == before.version
+    assert kept.status is before.status
+    assert repository.get(demo.id) is None
+    assert _rows(
+        review,
+        "SELECT narrative_text FROM follow_up_review_narratives WHERE review_case_id = ?",
+        (demo.id,),
+    ) == []
+    assert _rows(
+        review,
+        "SELECT origin, narrative_text FROM follow_up_review_narratives WHERE review_case_id = ?",
+        (preserved.id,),
+    )[0]["narrative_text"] == "Preserved proposal."
 
 
 def test_reset_does_not_call_preparation_or_fhir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
