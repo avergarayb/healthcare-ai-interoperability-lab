@@ -154,7 +154,7 @@ class MiniHisConnectorTest {
                         .put("patientId", "MHS-PAT-001")
                         .put("resultType", "laboratory")
                         .put("displayName", "Hemoglobina")
-                        .put("status", "preliminary")))
+                        .put("status", "amended")))
                 .isInstanceOf(ClinicalReadException.class)
                 .extracting(ex -> ((ClinicalReadException) ex).code())
                 .isEqualTo("invalid_source");
@@ -296,11 +296,10 @@ class MiniHisConnectorTest {
                 .isInstanceOf(ClinicalReadException.class)
                 .extracting(ex -> ((ClinicalReadException) ex).code())
                 .isEqualTo("invalid_source");
-        assertThatThrownBy(() -> normalizer.appointment(json.readTree(
-                confirmedAppointmentJson().replace(",\"start\":\"2099-01-01T12:00:00Z\"", ""))))
-                .isInstanceOf(ClinicalReadException.class)
-                .extracting(ex -> ((ClinicalReadException) ex).code())
-                .isEqualTo("invalid_source");
+        JsonNode undated = normalizer.appointment(json.readTree(
+                confirmedAppointmentJson().replace(",\"start\":\"2099-01-01T12:00:00Z\"", "")));
+        assertThat(undated.has("start")).isFalse();
+        assertThat(undated.path("status").asText()).isEqualTo("booked");
 
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {

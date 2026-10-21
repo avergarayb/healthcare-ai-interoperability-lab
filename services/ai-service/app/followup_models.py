@@ -22,6 +22,15 @@ CASE_IDS = (
     "SYN-FOLLOWUP-013",
     "SYN-FOLLOWUP-014",
     "SYN-FOLLOWUP-015",
+    "SYN-FOLLOWUP-016",
+    "SYN-FOLLOWUP-017",
+    "SYN-FOLLOWUP-018",
+    "SYN-FOLLOWUP-019",
+    "SYN-FOLLOWUP-020",
+    "SYN-FOLLOWUP-021",
+    "SYN-FOLLOWUP-022",
+    "SYN-FOLLOWUP-023",
+    "SYN-FOLLOWUP-024",
 )
 
 FollowUpCaseId = Literal[
@@ -39,6 +48,15 @@ FollowUpCaseId = Literal[
     "SYN-FOLLOWUP-013",
     "SYN-FOLLOWUP-014",
     "SYN-FOLLOWUP-015",
+    "SYN-FOLLOWUP-016",
+    "SYN-FOLLOWUP-017",
+    "SYN-FOLLOWUP-018",
+    "SYN-FOLLOWUP-019",
+    "SYN-FOLLOWUP-020",
+    "SYN-FOLLOWUP-021",
+    "SYN-FOLLOWUP-022",
+    "SYN-FOLLOWUP-023",
+    "SYN-FOLLOWUP-024",
 ]
 
 
@@ -202,6 +220,7 @@ class FollowUpEndpointResponse(BaseModel):
         )
     )
     review_case: ReviewCaseLink | None = Field(default=None, alias="reviewCase")
+    longitudinal_context: dict | None = Field(default=None, alias="longitudinalContext")
     follow_up_required: FollowUpRequired = Field(alias="followUpRequired")
     answer: str
     evidence: list[Evidence]

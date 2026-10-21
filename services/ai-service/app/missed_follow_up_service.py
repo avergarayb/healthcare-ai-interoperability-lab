@@ -74,6 +74,7 @@ class MissedFollowUpResponse(BaseModel):
     reason_codes: list[str] = Field(alias="reasonCodes")
     provenance_resources: list[str] = Field(alias="provenanceResources")
     review_cases: list[MissedFollowUpReviewCaseRef] = Field(alias="reviewCases")
+    longitudinal_context: dict | None = Field(default=None, alias="longitudinalContext")
 
 
 def dump_missed_follow_up_response(response: MissedFollowUpResponse) -> dict:
@@ -111,6 +112,8 @@ def run_missed_follow_up_http(
         review_cases = _ensure_review_cases(request, parsed.case_id, evaluation)
         attachments = _attach_narratives(request, settings, review_cases, facts, evaluation)
         payload = _project(parsed.case_id, evaluation, attachments)
+        if payload is not None:
+            payload = _with_longitudinal_context(payload, adapter, parsed.case_id)
     except (ReviewPersistenceUnavailable, InvalidReviewTrigger):
         _log(correlation_id, "persistence_unavailable")
         return JSONResponse(status_code=503, content={"detail": REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL})
@@ -261,6 +264,21 @@ def _attach_narratives(
         stored = service.record_narrative(case.id, generated.text)
         attached.append((stored, "stored", None))
     return tuple(attached)
+
+
+def _with_longitudinal_context(payload: MissedFollowUpResponse, adapter: Any, case_id: str) -> MissedFollowUpResponse:
+    client = getattr(getattr(adapter, "transport", None), "client", None)
+    if client is None or client.__class__.__name__ != "ClinicalReadClient":
+        return payload
+    try:
+        from app.longitudinal_context import build_longitudinal_context
+
+        context = build_longitudinal_context(client, case_id)
+    except Exception:
+        return payload
+    return payload.model_copy(
+        update={"longitudinal_context": context.model_dump(by_alias=True, mode="json", exclude_none=True)}
+    )
 
 
 def _project(

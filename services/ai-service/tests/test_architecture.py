@@ -27,6 +27,7 @@ FHIR_REUSE_MODULES = {
     "clinical_review_context.py",
     "clinical_review_context_http.py",
     "missed_follow_up_service.py",
+    "longitudinal_context.py",
 }
 PRODUCTION_SOURCE = "\n".join(
     _read(path) for path in sorted(APP.glob("*.py")) if path.name not in LESSON_MODULES

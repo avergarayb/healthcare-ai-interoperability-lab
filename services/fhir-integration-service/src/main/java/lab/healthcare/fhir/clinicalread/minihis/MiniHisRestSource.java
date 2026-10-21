@@ -9,6 +9,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
 final class MiniHisRestSource implements MiniHisClinicalSource {
 
     static final String DESTINATION = "mini-his";
@@ -94,6 +98,7 @@ final class MiniHisRestSource implements MiniHisClinicalSource {
                 resources.add(encounter);
             }
         }
+        sortResources(resources, "period", "start");
         return collection("Encounter", resources, response.truncated());
     }
 
@@ -131,6 +136,7 @@ final class MiniHisRestSource implements MiniHisClinicalSource {
             }
             resources.add(observation);
         }
+        sortResources(resources, "issued", null);
         return collection("Observation", resources, response.truncated());
     }
 
@@ -163,6 +169,7 @@ final class MiniHisRestSource implements MiniHisClinicalSource {
             }
             resources.add(normalizer.appointment(item));
         }
+        sortResources(resources, "start", null);
         return collection("Appointment", resources, response.truncated());
     }
 
@@ -178,6 +185,32 @@ final class MiniHisRestSource implements MiniHisClinicalSource {
             }
         }
         return false;
+    }
+
+    private void sortResources(ArrayNode resources, String field, String nested) {
+        List<ObjectNode> ordered = new ArrayList<>();
+        resources.forEach(node -> {
+            if (node instanceof ObjectNode object) {
+                ordered.add(object);
+            }
+        });
+        ordered.sort(Comparator
+                .comparing((ObjectNode node) -> instantText(node, field, nested).isEmpty())
+                .thenComparing(node -> instantText(node, field, nested))
+                .thenComparing(node -> node.path("id").asText()));
+        resources.removeAll();
+        ordered.forEach(resources::add);
+    }
+
+    private static String instantText(ObjectNode node, String field, String nested) {
+        JsonNode value = node.get(field);
+        if (nested != null && value != null && value.isObject()) {
+            value = value.get(nested);
+        }
+        if (value == null || value.isNull()) {
+            return "";
+        }
+        return value.asText("");
     }
 
     private ObjectNode readEnvelope(ObjectNode resource) {

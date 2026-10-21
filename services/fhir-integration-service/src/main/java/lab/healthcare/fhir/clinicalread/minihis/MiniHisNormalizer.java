@@ -43,6 +43,8 @@ final class MiniHisNormalizer {
      * not copied onto the participant: confirmed does not become accepted.
      */
     static final String PARTICIPANT_NEEDS_ACTION = "needs-action";
+    static final String REPLACES_APPOINTMENT = "https://lab.local/mini-his/StructureDefinition/replaces-appointment";
+    private static final Pattern LOGICAL_ID = Pattern.compile("[A-Za-z0-9\\-.]{1,64}");
     private static final String AMBULATORY_CARE = "ambulatory";
     private static final TerminologyRegistry TERMINOLOGY = StaticTerminologyRegistry.miniHis();
     private static final QuantityUnitRegistry UNITS = StaticQuantityUnitRegistry.miniHis();
@@ -93,7 +95,14 @@ final class MiniHisNormalizer {
         ObjectNode period = resource.putObject("period");
         period.put("start", occurredAt);
         if ("finished".equals(status)) {
-            period.put("end", occurredAt);
+            if (source.has("endedAt")) {
+                String endedAt = optional(source, "endedAt");
+                if (endedAt != null) {
+                    period.put("end", instant(endedAt));
+                }
+            } else {
+                period.put("end", occurredAt);
+            }
         }
         String reason = optional(source, "reason");
         if (reason != null) {
@@ -140,7 +149,19 @@ final class MiniHisNormalizer {
         String patientId = required(source, "patientId");
         ObjectNode resource = resource("Appointment", id, APPOINTMENT_SYSTEM);
         resource.put("status", appointmentStatus(required(source, "status")));
-        resource.put("start", instant(required(source, "start")));
+        String start = optional(source, "start");
+        if (start != null) {
+            resource.put("start", instant(start));
+        }
+        String replaces = optional(source, "replacesAppointmentId");
+        if (replaces != null) {
+            if (!LOGICAL_ID.matcher(replaces).matches() || replaces.equals(id)) {
+                throw ClinicalReadException.invalidSource();
+            }
+            ObjectNode extension = resource.putArray("extension").addObject();
+            extension.put("url", REPLACES_APPOINTMENT);
+            extension.putObject("valueReference").put("reference", "Appointment/" + replaces);
+        }
         ObjectNode participant = resource.putArray("participant").addObject();
         participant.put("status", PARTICIPANT_NEEDS_ACTION);
         participant.putObject("actor").put("reference", "Patient/" + patientId);

@@ -17,6 +17,8 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -55,7 +57,7 @@ class MiniHisSimulatorTest {
 
         mockMvc.perform(get("/patients"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(6))
+                .andExpect(jsonPath("$.length()").value(SyntheticSeed.PATIENTS.size()))
                 .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-001"))
                 .andExpect(jsonPath("$[0].familyName").value("Quispe"))
                 .andExpect(jsonPath("$[0].givenName").value("Ana"))
@@ -182,6 +184,7 @@ class MiniHisSimulatorTest {
 
     @Test
     void resetRestoresTheStableSeedAndRejectsRemoteCallers() throws Exception {
+        jdbc.update("DELETE FROM clinical_event WHERE patient_id = 'MHS-PAT-003'");
         jdbc.update("DELETE FROM clinical_result WHERE consultation_id = 'MHS-CON-003'");
         jdbc.update("DELETE FROM consultation WHERE consultation_id = 'MHS-CON-003'");
         jdbc.update("DELETE FROM patient WHERE patient_id = 'MHS-PAT-003'");
@@ -196,9 +199,9 @@ class MiniHisSimulatorTest {
 
         mockMvc.perform(post("/synthetic/reset"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.patients").value(6))
-                .andExpect(jsonPath("$.consultations").value(4))
-                .andExpect(jsonPath("$.results").value(7));
+                .andExpect(jsonPath("$.patients").value(SyntheticSeed.PATIENTS.size()))
+                .andExpect(jsonPath("$.consultations").value(SyntheticSeed.CONSULTATIONS.size()))
+                .andExpect(jsonPath("$.results").value(SyntheticSeed.RESULTS.size()));
         mockMvc.perform(get("/patients/MHS-PAT-003"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.patientId").value("MHS-PAT-003"));
@@ -350,6 +353,46 @@ class MiniHisSimulatorTest {
         } finally {
             jdbc.execute("ALTER TABLE appointment_hidden RENAME TO appointment");
         }
+    }
+
+    @Test
+    void longitudinalRecordsKeepRelationsDatesAndEvents() throws Exception {
+        mockMvc.perform(get("/patients/MHS-PAT-013/consultations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].consultationId").value("MHS-CON-022"))
+                .andExpect(jsonPath("$[0].endedAt").value("2026-02-01T10:00:00Z"));
+        mockMvc.perform(get("/patients/MHS-PAT-013/results"))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].resultId").value("MHS-RES-022"))
+                .andExpect(jsonPath("$[0].status").value("final"))
+                .andExpect(jsonPath("$[1].resultId").value("MHS-RES-023"));
+        mockMvc.perform(get("/patients/MHS-PAT-011/consultations"))
+                .andExpect(jsonPath("$[0].consultationId").value("MHS-CON-020"))
+                .andExpect(jsonPath("$[0].status").value("completed"))
+                .andExpect(jsonPath("$[0].endedAt").value(nullValue()));
+        mockMvc.perform(get("/results/MHS-RES-019"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.observedAt").value(nullValue()))
+                .andExpect(jsonPath("$.status").value("final"));
+        mockMvc.perform(get("/appointments").param("patientId", "MHS-PAT-009"))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].appointmentId").value("MHS-APT-013"))
+                .andExpect(jsonPath("$[0].status").value("not_attended"))
+                .andExpect(jsonPath("$[0].start").value(nullValue()));
+        mockMvc.perform(get("/appointments/MHS-APT-011"))
+                .andExpect(jsonPath("$.status").value("confirmed"))
+                .andExpect(jsonPath("$.replacesAppointmentId").value("MHS-APT-010"));
+        mockMvc.perform(get("/patients/MHS-PAT-015/consultations"))
+                .andExpect(jsonPath("$.length()").value(5));
+        mockMvc.perform(get("/patients/MHS-PAT-015/events"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.eventId == 'EVT-MHS-CON-024')].detail").value(hasItem("consultation_recorded")))
+                .andExpect(jsonPath("$[?(@.eventId == 'EVT-MHS-APT-021-replaces')].detail").value(hasItem("replaces:MHS-APT-020")));
+        mockMvc.perform(get("/patients").param("system", SyntheticSeed.FOLLOW_UP_CASE_SYSTEM).param("value", "SYN-FOLLOWUP-015"))
+                .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-006"));
+        mockMvc.perform(get("/patients").param("system", SyntheticSeed.FOLLOW_UP_CASE_SYSTEM).param("value", "SYN-FOLLOWUP-013"))
+                .andExpect(jsonPath("$[0].patientId").value("MHS-PAT-004"));
     }
 
     @Test

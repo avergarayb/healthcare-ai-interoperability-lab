@@ -1,8 +1,9 @@
 package lab.healthcare.minihis;
 
 import org.junit.jupiter.api.Test;
+import org.sqlite.SQLiteConfig;
+import org.sqlite.SQLiteDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -48,9 +49,9 @@ class MiniHisSchemaMigrationTest {
             MiniHisSchema schema = new MiniHisSchema(jdbc);
             schema.createIfAbsent();
 
-            assertThat(count(jdbc, "patient")).isEqualTo(patients + 3);
-            assertThat(count(jdbc, "consultation")).isEqualTo(consultations);
-            assertThat(count(jdbc, "clinical_result")).isEqualTo(results);
+            assertThat(count(jdbc, "patient")).isEqualTo(patients + patientsAtOrAfter004());
+            assertThat(count(jdbc, "consultation")).isEqualTo(consultations + backfilledConsultations());
+            assertThat(count(jdbc, "clinical_result")).isEqualTo(results + backfilledResults());
             assertThat(text(jdbc, "SELECT care_class FROM consultation WHERE consultation_id = 'MHS-CON-001'"))
                     .isEqualTo(SyntheticSeed.AMBULATORY_CARE);
             assertThat(text(jdbc, "SELECT status FROM clinical_result WHERE result_id = 'MHS-RES-001'"))
@@ -67,7 +68,7 @@ class MiniHisSchemaMigrationTest {
                     .isEqualTo("specialist");
             assertThat(text(jdbc, "SELECT care_class FROM consultation WHERE consultation_id = 'LOCAL-CON-9'"))
                     .isNull();
-            assertThat(count(jdbc, "patient")).isEqualTo(patients + 3);
+            assertThat(count(jdbc, "patient")).isEqualTo(patients + patientsAtOrAfter004());
         } finally {
             Files.deleteIfExists(database);
         }
@@ -128,7 +129,7 @@ class MiniHisSchemaMigrationTest {
             assertThat(text(jdbc, "SELECT value_decimal FROM clinical_result_component WHERE component_id = 'MHS-CMP-002-1'"))
                     .isEqualTo("119");
             assertThat(count(jdbc, "clinical_result_component")).isEqualTo(2);
-            assertThat(count(jdbc, "clinical_result")).isEqualTo(3);
+            assertThat(count(jdbc, "clinical_result")).isEqualTo(3 + backfilledResults());
         } finally {
             Files.deleteIfExists(database);
         }
@@ -173,8 +174,8 @@ class MiniHisSchemaMigrationTest {
             assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-001'")).isZero();
             assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-004'")).isEqualTo(1);
             assertThat(countWhere(jdbc, "appointment", "patient_id = 'MHS-PAT-005'")).isEqualTo(2);
-            assertThat(count(jdbc, "appointment")).isEqualTo(4);
-            assertThat(count(jdbc, "patient")).isEqualTo(5);
+            assertThat(count(jdbc, "appointment")).isEqualTo(4 + backfilledAppointments());
+            assertThat(count(jdbc, "patient")).isEqualTo(5 + backfilledPatients());
         } finally {
             Files.deleteIfExists(database);
         }
@@ -197,7 +198,7 @@ class MiniHisSchemaMigrationTest {
             schema.createIfAbsent();
             schema.createIfAbsent();
 
-            assertThat(count(jdbc, "patient_identifier")).isEqualTo(3);
+            assertThat(count(jdbc, "patient_identifier")).isEqualTo(SyntheticSeed.PATIENT_IDENTIFIERS.size());
             assertThat(text(jdbc, "SELECT patient_id FROM patient_identifier WHERE identifier_value = 'SYN-FOLLOWUP-013'"))
                     .isEqualTo("MHS-PAT-004");
             assertThat(text(jdbc, "SELECT patient_id FROM patient_identifier WHERE identifier_value = 'SYN-FOLLOWUP-014'"))
@@ -222,7 +223,7 @@ class MiniHisSchemaMigrationTest {
                     SyntheticSeed.FOLLOW_UP_CASE_SYSTEM);
             schema.createIfAbsent();
 
-            assertThat(count(jdbc, "patient_identifier")).isEqualTo(3);
+            assertThat(count(jdbc, "patient_identifier")).isEqualTo(SyntheticSeed.PATIENT_IDENTIFIERS.size());
             assertThat(text(jdbc, "SELECT patient_id FROM patient_identifier WHERE identifier_value = 'SYN-FOLLOWUP-013'"))
                     .isEqualTo("LOCAL-PAT-9");
             assertThatThrownBy(() -> jdbc.update(
@@ -238,8 +239,9 @@ class MiniHisSchemaMigrationTest {
     }
 
     private static JdbcTemplate jdbc(Path database) {
-        DriverManagerDataSource dataSource = new DriverManagerDataSource();
-        dataSource.setDriverClassName("org.sqlite.JDBC");
+        SQLiteConfig config = new SQLiteConfig();
+        config.enforceForeignKeys(true);
+        SQLiteDataSource dataSource = new SQLiteDataSource(config);
         dataSource.setUrl("jdbc:sqlite:" + database.toAbsolutePath());
         return new JdbcTemplate(dataSource);
     }
@@ -276,6 +278,36 @@ class MiniHisSchemaMigrationTest {
                     observed_at TEXT NOT NULL
                 )
                 """);
+    }
+
+    private static int patientsAtOrAfter004() {
+        return (int) SyntheticSeed.PATIENTS.stream()
+                .filter(patient -> patient.patientId().compareTo("MHS-PAT-004") >= 0)
+                .count();
+    }
+
+    private static int backfilledPatients() {
+        return (int) SyntheticSeed.PATIENTS.stream()
+                .filter(patient -> SyntheticSeed.backfilledPatient(patient.patientId()))
+                .count();
+    }
+
+    private static int backfilledConsultations() {
+        return (int) SyntheticSeed.CONSULTATIONS.stream()
+                .filter(consultation -> SyntheticSeed.backfilledConsultation(consultation.consultationId()))
+                .count();
+    }
+
+    private static int backfilledResults() {
+        return (int) SyntheticSeed.RESULTS.stream()
+                .filter(result -> SyntheticSeed.backfilledResult(result.resultId()))
+                .count();
+    }
+
+    private static int backfilledAppointments() {
+        return (int) SyntheticSeed.APPOINTMENTS.stream()
+                .filter(appointment -> SyntheticSeed.backfilledAppointment(appointment.appointmentId()))
+                .count();
     }
 
     private static int count(JdbcTemplate jdbc, String table) {

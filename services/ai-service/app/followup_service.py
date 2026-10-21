@@ -142,8 +142,23 @@ def run_followup_http(
     if payload is None:
         _log(correlation_id, "error")
         return JSONResponse(status_code=502, content={"detail": WORKFLOW_FAILED_DETAIL})
+    payload = _with_longitudinal_context(payload, getattr(workflow, "fhir_client", None), parsed.case_id)
     _log(correlation_id, payload.status.value)
     return JSONResponse(status_code=200, content=dump_followup_endpoint_response(payload))
+
+
+def _with_longitudinal_context(payload, client, case_id: str):
+    if client is None or client.__class__.__name__ != "ClinicalReadClient":
+        return payload
+    try:
+        from app.longitudinal_context import build_longitudinal_context
+
+        context = build_longitudinal_context(client, case_id)
+    except Exception:
+        return payload
+    return payload.model_copy(
+        update={"longitudinal_context": context.model_dump(by_alias=True, mode="json", exclude_none=True)}
+    )
 
 
 def _project(result: FollowUpWorkflowResult) -> FollowUpEndpointResponse | None:

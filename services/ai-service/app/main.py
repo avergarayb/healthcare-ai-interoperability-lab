@@ -9,12 +9,13 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings
 from app.consumer import consume
 from app.experimental_service import load_json_body, run_experimental_summary
+from app.followup_models import CASE_IDS
 from app.followup_service import run_followup_http
 from app.missed_follow_up_service import run_missed_follow_up_http
 from app.clinical_review_context_http import get_clinical_review_context_http
@@ -237,6 +238,23 @@ async def experimental_summary(
 ) -> Response:
     body = load_json_body(await request.body())
     return run_experimental_summary(request, settings, provider, body)
+
+
+@app.get("/internal/longitudinal-context")
+def longitudinal_context(
+    caseId: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if not authenticate(request, settings):
+        return Response(status_code=401)
+    if caseId not in CASE_IDS:
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    from app.clinical_read_client import ClinicalReadClient
+    from app.longitudinal_context import build_longitudinal_context
+
+    context = build_longitudinal_context(ClinicalReadClient.from_settings(settings), caseId)
+    return JSONResponse(content=context.model_dump(by_alias=True, mode="json", exclude_none=True))
 
 
 @app.post("/internal/agent/follow-up")

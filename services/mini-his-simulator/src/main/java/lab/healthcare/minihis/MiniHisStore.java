@@ -35,7 +35,9 @@ public class MiniHisStore {
     @Transactional
     public SeedCounts reset() {
         schema.migrateExistingRows();
+        jdbc.update("DELETE FROM clinical_event");
         jdbc.update("DELETE FROM patient_identifier");
+        jdbc.update("UPDATE appointment SET replaces_appointment_id = NULL");
         jdbc.update("DELETE FROM appointment");
         jdbc.update("DELETE FROM clinical_result_component");
         jdbc.update("DELETE FROM clinical_result");
@@ -115,7 +117,7 @@ public class MiniHisStore {
         }
         return Optional.of(jdbc.query(
                 """
-                SELECT consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class
+                SELECT consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class, ended_at
                 FROM consultation
                 WHERE patient_id = ?
                 ORDER BY occurred_at DESC, consultation_id ASC
@@ -129,7 +131,7 @@ public class MiniHisStore {
     public Optional<ConsultationView> findConsultation(String consultationId) {
         List<ConsultationView> rows = jdbc.query(
                 """
-                SELECT consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class
+                SELECT consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class, ended_at
                 FROM consultation
                 WHERE consultation_id = ?
                 """,
@@ -148,7 +150,7 @@ public class MiniHisStore {
                        value_text, unit, observed_at, status
                 FROM clinical_result
                 WHERE consultation_id = ?
-                ORDER BY observed_at ASC, result_id ASC
+                ORDER BY observed_at IS NULL, observed_at ASC, result_id ASC
                 LIMIT ?
                 """,
                 (rs, row) -> result(rs),
@@ -166,7 +168,7 @@ public class MiniHisStore {
                        value_text, unit, observed_at, status
                 FROM clinical_result
                 WHERE patient_id = ?
-                ORDER BY observed_at ASC, result_id ASC
+                ORDER BY observed_at IS NULL, observed_at ASC, result_id ASC
                 LIMIT ?
                 """,
                 (rs, row) -> result(rs),
@@ -183,7 +185,7 @@ public class MiniHisStore {
                                value_text, unit, observed_at, status
                         FROM clinical_result
                         WHERE patient_id = ?
-                        ORDER BY observed_at ASC, result_id ASC
+                        ORDER BY observed_at IS NULL, observed_at ASC, result_id ASC
                         LIMIT ?
                         """,
                         (rs, row) -> result(rs),
@@ -195,7 +197,7 @@ public class MiniHisStore {
                                value_text, unit, observed_at, status
                         FROM clinical_result
                         WHERE patient_id = ? AND status = ?
-                        ORDER BY observed_at ASC, result_id ASC
+                        ORDER BY observed_at IS NULL, observed_at ASC, result_id ASC
                         LIMIT ?
                         """,
                         (rs, row) -> result(rs),
@@ -226,10 +228,10 @@ public class MiniHisStore {
         int probe = limit + 1;
         List<AppointmentView> rows = jdbc.query(
                 """
-                SELECT appointment_id, patient_id, status, start_offset_days
+                SELECT appointment_id, patient_id, status, start_offset_days, replaces_appointment_id
                 FROM appointment
                 WHERE patient_id = ?
-                ORDER BY start_offset_days ASC, appointment_id ASC
+                ORDER BY start_offset_days IS NULL, start_offset_days ASC, appointment_id ASC
                 LIMIT ?
                 """,
                 (rs, row) -> appointment(rs),
@@ -245,13 +247,37 @@ public class MiniHisStore {
     public Optional<AppointmentView> findAppointment(String appointmentId) {
         List<AppointmentView> rows = jdbc.query(
                 """
-                SELECT appointment_id, patient_id, status, start_offset_days
+                SELECT appointment_id, patient_id, status, start_offset_days, replaces_appointment_id
                 FROM appointment
                 WHERE appointment_id = ?
                 """,
                 (rs, row) -> appointment(rs),
                 appointmentId);
         return rows.stream().findFirst();
+    }
+
+    public Optional<List<EventView>> listEvents(String patientId, int limit) {
+        if (findPatient(patientId).isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(jdbc.query(
+                """
+                SELECT event_id, patient_id, resource_type, resource_id, change_type, occurred_at, detail
+                FROM clinical_event
+                WHERE patient_id = ?
+                ORDER BY occurred_at IS NULL, occurred_at ASC, event_id ASC
+                LIMIT ?
+                """,
+                (rs, row) -> new EventView(
+                        rs.getString("event_id"),
+                        rs.getString("patient_id"),
+                        rs.getString("resource_type"),
+                        rs.getString("resource_id"),
+                        rs.getString("change_type"),
+                        rs.getString("occurred_at"),
+                        rs.getString("detail")),
+                patientId,
+                limit));
     }
 
     public boolean foreignKeysEnabled() {
@@ -286,8 +312,8 @@ public class MiniHisStore {
             jdbc.update(
                     """
                     INSERT INTO consultation (
-                        consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        consultation_id, patient_id, occurred_at, reason, clinician_name, status, care_class, ended_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     consultation.consultationId(),
                     consultation.patientId(),
@@ -295,7 +321,8 @@ public class MiniHisStore {
                     consultation.reason(),
                     consultation.clinicianName(),
                     consultation.status(),
-                    consultation.careClass());
+                    consultation.careClass(),
+                    consultation.endedAt());
         }
         for (SyntheticSeed.ResultSeed result : SyntheticSeed.RESULTS) {
             jdbc.update(
@@ -331,14 +358,17 @@ public class MiniHisStore {
         for (SyntheticSeed.AppointmentSeed appointment : SyntheticSeed.APPOINTMENTS) {
             jdbc.update(
                     """
-                    INSERT INTO appointment (appointment_id, patient_id, status, start_offset_days)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO appointment (
+                        appointment_id, patient_id, status, start_offset_days, replaces_appointment_id
+                    ) VALUES (?, ?, ?, ?, ?)
                     """,
                     appointment.appointmentId(),
                     appointment.patientId(),
                     appointment.status(),
-                    appointment.startOffsetDays());
+                    appointment.startOffsetDays(),
+                    appointment.replacesAppointmentId());
         }
+        schema.recordSeedEvents();
     }
 
     private int count(String table) {
@@ -396,7 +426,8 @@ public class MiniHisStore {
                 rs.getString("reason"),
                 rs.getString("clinician_name"),
                 rs.getString("status"),
-                rs.getString("care_class"));
+                rs.getString("care_class"),
+                rs.getString("ended_at"));
     }
 
     private static ResultView result(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -453,10 +484,15 @@ public class MiniHisStore {
     }
 
     private AppointmentView appointment(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Object offset = rs.getObject("start_offset_days");
+        String start = offset instanceof Number number
+                ? AppointmentStart.atOffset(number.intValue(), clock)
+                : null;
         return new AppointmentView(
                 rs.getString("appointment_id"),
                 rs.getString("patient_id"),
                 rs.getString("status"),
-                AppointmentStart.atOffset(rs.getInt("start_offset_days"), clock));
+                start,
+                rs.getString("replaces_appointment_id"));
     }
 }

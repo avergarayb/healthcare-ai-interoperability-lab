@@ -406,6 +406,9 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
             return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
         notice = MSG_CHANGED if request.query_params.get("notice") == "changed" else ""
         context, context_message = _load_context(request, detail.case)
+        timeline_html = ""
+        if request.query_params.get("timeline") == "1":
+            timeline_html = _timeline_section(detail.case.case_id, settings)
         ticket = request.cookies.get(_HANDOFF_COOKIE)
         assistance = _ASSISTANCE_HANDOFF.take(ticket, review_case_id) if ticket else None
         body = _case_body(
@@ -418,6 +421,7 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
             coordination=coordination,
             attributions=attributions,
             session_id=session.session_id,
+            timeline_html=timeline_html,
         )
         response = _html(_page("Caso de revisión", body))
         response.delete_cookie(_HANDOFF_COOKIE, path=_handoff_path(review_case_id))
@@ -1207,6 +1211,7 @@ def _case_body(
     coordination: FollowUpCoordinationRequest | None,
     attributions: tuple[StoredDevelopmentAttribution, ...],
     session_id: str,
+    timeline_html: str = "",
 ) -> str:
     case = detail.case
     parts = [_demo_banner(), _queue_home()]
@@ -1214,12 +1219,28 @@ def _case_body(
         parts.append(_error(notice))
     parts.append(_case_header(case))
     parts.append(_context_section(context, context_message))
+    if timeline_html:
+        parts.append(timeline_html)
     parts.append(_proposal_section(case))
     parts.append(_assistance_section(case, settings, assistance, session_id))
     parts.append(_outcome_section(case, settings, coordination, session_id))
     parts.append(_controlled_action_section(case, settings, coordination, attributions, session_id))
     parts.append(_technical_details(detail, context, coordination, attributions))
     return "".join(parts)
+
+
+def _timeline_section(case_id: str, settings: Settings) -> str:
+    try:
+        from app.clinical_read_client import ClinicalReadClient
+        from app.longitudinal_context import build_longitudinal_context, render_timeline_html
+
+        context = build_longitudinal_context(ClinicalReadClient.from_settings(settings), case_id)
+    except Exception:
+        return (
+            "<section><h2>Historial longitudinal</h2>"
+            "<p>El historial longitudinal no está disponible.</p></section>"
+        )
+    return render_timeline_html(context)
 
 
 def _controlled_action_eligible(case: FollowUpReviewCase) -> bool:

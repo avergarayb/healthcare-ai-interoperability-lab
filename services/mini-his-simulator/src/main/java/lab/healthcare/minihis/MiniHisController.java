@@ -162,6 +162,26 @@ public class MiniHisController {
                 .body(search.appointments());
     }
 
+    @GetMapping(path = "/patients/{patientId}/events", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<?> events(
+            @PathVariable String patientId,
+            @RequestParam(name = "limit", required = false) Integer limit) {
+        if (!IDENTIFIER.matcher(patientId).matches()) {
+            return invalidRequest();
+        }
+        Integer bounded = boundLimit(limit);
+        if (bounded == null) {
+            return invalidLimit();
+        }
+        try {
+            return store.listEvents(patientId, bounded)
+                    .<ResponseEntity<?>>map(ResponseEntity::ok)
+                    .orElseGet(MiniHisController::notFound);
+        } catch (DataAccessException ex) {
+            return ResponseEntity.status(503).body(Map.of("error", "unavailable"));
+        }
+    }
+
     @GetMapping(path = "/appointments/{appointmentId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> appointment(@PathVariable String appointmentId) {
         try {

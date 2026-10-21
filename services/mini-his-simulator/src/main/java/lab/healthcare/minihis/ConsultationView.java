@@ -7,5 +7,6 @@ public record ConsultationView(
         String reason,
         String clinicianName,
         String status,
-        String careClass) {
+        String careClass,
+        String endedAt) {
 }

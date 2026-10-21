@@ -13,12 +13,16 @@ class StaticTerminologyRegistryTest {
     void resolvesEveryMiniHisMappingInItsDomain() {
         assertStatus(TerminologyDomain.ENCOUNTER_STATUS, "completed", "finished");
         assertStatus(TerminologyDomain.ENCOUNTER_STATUS, "in_progress", "in-progress");
+        assertStatus(TerminologyDomain.ENCOUNTER_STATUS, "scheduled", "planned");
+        assertStatus(TerminologyDomain.ENCOUNTER_STATUS, "cancelled", "cancelled");
         assertCoded(
                 TerminologyDomain.ENCOUNTER_CLASS,
                 "ambulatory",
                 "AMB",
                 StaticTerminologyRegistry.ENCOUNTER_CLASS_SYSTEM);
         assertStatus(TerminologyDomain.OBSERVATION_STATUS, "final", "final");
+        assertStatus(TerminologyDomain.OBSERVATION_STATUS, "preliminary", "preliminary");
+        assertStatus(TerminologyDomain.OBSERVATION_STATUS, "corrected", "corrected");
         assertCoded(
                 TerminologyDomain.OBSERVATION_CATEGORY,
                 "laboratory",
@@ -31,6 +35,9 @@ class StaticTerminologyRegistryTest {
                 StaticTerminologyRegistry.OBSERVATION_CATEGORY_SYSTEM);
         assertStatus(TerminologyDomain.APPOINTMENT_STATUS, "not_attended", "noshow");
         assertStatus(TerminologyDomain.APPOINTMENT_STATUS, "confirmed", "booked");
+        assertStatus(TerminologyDomain.APPOINTMENT_STATUS, "scheduled", "pending");
+        assertStatus(TerminologyDomain.APPOINTMENT_STATUS, "completed", "fulfilled");
+        assertStatus(TerminologyDomain.APPOINTMENT_STATUS, "cancelled", "cancelled");
     }
 
     @Test
@@ -39,7 +46,7 @@ class StaticTerminologyRegistryTest {
                 StaticTerminologyRegistry.MINI_HIS, TerminologyDomain.ENCOUNTER_STATUS, "arrived"))
                 .isInstanceOf(TerminologyMappingNotFound.class);
         assertThatThrownBy(() -> registry.resolve(
-                StaticTerminologyRegistry.MINI_HIS, TerminologyDomain.APPOINTMENT_STATUS, "completed"))
+                StaticTerminologyRegistry.MINI_HIS, TerminologyDomain.APPOINTMENT_STATUS, "arrived"))
                 .isInstanceOf(TerminologyMappingNotFound.class);
         assertThatThrownBy(() -> registry.resolve(
                 "epic-sandbox", TerminologyDomain.ENCOUNTER_STATUS, "completed"))
