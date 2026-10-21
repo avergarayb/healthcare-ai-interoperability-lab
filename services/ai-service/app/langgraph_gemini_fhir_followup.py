@@ -78,12 +78,18 @@ SYSTEM_INSTRUCTION = (
     "When you are not calling a tool, respond with a JSON object that has "
     "answer and follow_up_required. follow_up_required is true, false, or unknown. "
     "That token records the operational reading. It is not a clinical determination "
-    "that follow-up is unnecessary."
+    "that follow-up is unnecessary. "
+    "Write answer in clear Spanish for health professionals in Peru and Latin America. "
+    "Keep FHIR resource identifiers and clinical units unchanged. "
+    "Describe the evidence that was read and its limits. "
+    "State that the responsible professional makes the clinical decision."
 )
 FINAL_DECISION_REQUEST = (
     "Respond with the JSON object only. "
     "Do not call a tool. "
-    "Describe the findings that were read, their limits, and that the responsible clinician decides. "
+    "Write answer in clear Spanish for health professionals in Peru and Latin America. "
+    "Keep FHIR resource identifiers, clinical units, the evidence that was read, and its limits. "
+    "State that the responsible professional makes the clinical decision. "
     "Do not state that follow-up is unnecessary because of one result. "
     "follow_up_required must be true, false, or unknown."
 )

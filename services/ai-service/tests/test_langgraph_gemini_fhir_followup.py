@@ -49,6 +49,7 @@ from app.langgraph_gemini_fhir_followup import (
     describe_followup_contents,
     followup_message_from_response,
     FINAL_DECISION_REQUEST,
+    SYSTEM_INSTRUCTION,
     followup_tool_schema,
     gemini_error_diagnostics,
     gemini_followup_message,
@@ -744,6 +745,17 @@ def test_unstructured_stop_requests_one_schema_turn_without_tools():
     assert closing_dump["response_mime_type"] == "application/json"
     assert closing.automatic_function_calling.disable is True
     assert "true" not in result["final_answer"]
+
+
+def test_narrative_instructions_request_spanish_without_changing_the_operational_token():
+    for text in (SYSTEM_INSTRUCTION, FINAL_DECISION_REQUEST):
+        assert "clear Spanish" in text
+        assert "Peru and Latin America" in text
+        assert "follow_up_required" in text
+        assert "true, false, or unknown" in text
+    assert "FHIR resource identifiers" in SYSTEM_INSTRUCTION
+    assert "clinical units" in SYSTEM_INSTRUCTION
+    assert "responsible professional" in FINAL_DECISION_REQUEST
 
 
 def test_thought_signature_is_kept_across_both_tool_calls():

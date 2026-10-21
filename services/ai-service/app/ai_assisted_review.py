@@ -138,17 +138,21 @@ SYSTEM_INSTRUCTION = "\n".join(
         "Do not decide whether a confirmed appointment blocks review.",
         "Cite only chunkId values present in institutionalDocumentData.",
         "Return JSON matching the output contract and no other fields.",
+        "Write summary.text, every reviewPoints text, and every limitations item in clear Spanish for health professionals in Peru and Latin America.",
+        "Keep every chunkId exactly as provided.",
+        "Do not translate, rewrite, or replace institutionalDocumentData.",
+        "Document titles, section names, and source text stay in their stored form so the citation can be traced.",
     )
 )
 _NEUTRAL_MESSAGES = {
-    "context_unavailable": "Current clinical context is temporarily unavailable.",
-    "retrieval_unavailable": "Institutional guidance is temporarily unavailable.",
-    "no_relevant_guidance": "No relevant institutional guidance was retrieved.",
-    "provider_unavailable": "AI assistance is temporarily unavailable.",
-    "invalid_output": "AI assistance could not be shown.",
-    "case_not_open": "AI assistance is available only for an open review case.",
-    "not_configured": "This demo is not configured.",
-    "invalid_case_context": "AI assistance is unavailable for this case.",
+    "context_unavailable": "El contexto clínico actual no está disponible en este momento.",
+    "retrieval_unavailable": "La guía institucional no está disponible en este momento.",
+    "no_relevant_guidance": "No se recuperó guía institucional pertinente.",
+    "provider_unavailable": "La asistencia adicional no está disponible en este momento.",
+    "invalid_output": "No se pudo mostrar la asistencia adicional.",
+    "case_not_open": "La asistencia adicional solo está disponible para un caso abierto.",
+    "not_configured": "Esta demostración no está configurada.",
+    "invalid_case_context": "La asistencia adicional no está disponible para este caso.",
 }
 
 
@@ -363,15 +367,21 @@ def render_assistance_section(
 ) -> str:
     parts = [
         "<section>",
-        "<h2>AI-assisted review</h2>",
-        f"<p>{_esc(DISCLAIMER)}</p>",
+        "<h2>Asistencia adicional</h2>",
+        "<p>Esta ayuda se pide con el botón. No sustituye la propuesta del agente de seguimiento "
+        "y no se genera al abrir la página.</p>",
+        "<p>Usa los datos actuales del caso y la guía institucional para sugerir puntos de revisión. "
+        "No cierra el caso ni elige un resultado operativo.</p>",
     ]
     if result is None:
-        parts.append("<p>Not generated.</p>")
+        parts.append("<p>Aún no se ha generado.</p>")
     elif result.status == "available" and result.summary is not None:
         parts.append(_available_html(result))
     else:
-        message = _NEUTRAL_MESSAGES.get(result.reason or "", "AI assistance is temporarily unavailable.")
+        message = _NEUTRAL_MESSAGES.get(
+            result.reason or "",
+            "La asistencia adicional no está disponible en este momento.",
+        )
         parts.append(f'<p class="notice">{_esc(message)}</p>')
     if open_case and token is not None and (result is None or result.reason != "case_not_open"):
         token_value, expiry = token
@@ -380,7 +390,7 @@ def render_assistance_section(
             f'<form method="post" action="{action}">'
             f'<input type="hidden" name="assistanceExpiry" value="{_esc(str(expiry))}">'
             f'<input type="hidden" name="assistanceToken" value="{_esc(token_value)}">'
-            '<button type="submit">Generate AI assistance</button>'
+            '<button type="submit">Generar asistencia adicional</button>'
             "</form>"
         )
     parts.append("</section>")
@@ -660,7 +670,7 @@ def _available_html(result: AssistanceResult) -> str:
         points.append(
             "<li><p class=\"generated-assistance\">"
             + _esc(point.text)
-            + "</p><p>Cited institutional section: "
+            + "</p><p>Sección institucional citada: "
             + _esc(cited)
             + "</p></li>"
         )
@@ -668,11 +678,11 @@ def _available_html(result: AssistanceResult) -> str:
     for source in result.sources:
         sources.append(
             '<article class="institutional-source">'
-            "<p>Institutional source.</p>"
+            "<p>Fuente institucional.</p>"
             "<dl>"
-            f"<dt>Title</dt><dd>{_esc(source.title)}</dd>"
-            f"<dt>Version</dt><dd>{_esc(source.version)}</dd>"
-            f"<dt>Section</dt><dd>{_esc(source.section)}</dd>"
+            f"<dt>Título</dt><dd>{_esc(source.title)}</dd>"
+            f"<dt>Versión</dt><dd>{_esc(source.version)}</dd>"
+            f"<dt>Sección</dt><dd>{_esc(source.section)}</dd>"
             "</dl>"
             f"<p>{_esc(source.text)}</p>"
             "</article>"
@@ -680,21 +690,21 @@ def _available_html(result: AssistanceResult) -> str:
     limitations = ""
     if result.limitations:
         items = "".join(f"<li>{_esc(item)}</li>" for item in result.limitations)
-        limitations = "<h3>Limitations</h3><ul>" + items + "</ul>"
+        limitations = "<h3>Limitaciones</h3><ul>" + items + "</ul>"
     summary_cited = ", ".join(
         f"{citation.title} {citation.version} / {citation.section}" for citation in result.summary.citations
     )
     return (
-        "<h3>Summary</h3>"
+        "<h3>Resumen</h3>"
         '<p class="generated-assistance">'
         + _esc(result.summary.text)
-        + "</p><p>Cited institutional section: "
+        + "</p><p>Sección institucional citada: "
         + _esc(summary_cited)
         + "</p>"
-        "<h3>Operational review points</h3><ul>"
+        "<h3>Puntos para la revisión</h3><ul>"
         + "".join(points)
         + "</ul>"
-        "<h3>Institutional guidance</h3>"
+        "<h3>Guía institucional</h3>"
         + "".join(sources)
         + limitations
     )

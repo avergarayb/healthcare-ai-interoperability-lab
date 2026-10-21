@@ -743,6 +743,25 @@ def test_tokens_are_purpose_separated():
     )
 
 
+def test_assistance_instructions_request_spanish_and_keep_citation_rules():
+    assert "clear Spanish" in SYSTEM_INSTRUCTION
+    assert "Peru and Latin America" in SYSTEM_INSTRUCTION
+    assert "summary.text" in SYSTEM_INSTRUCTION
+    assert "reviewPoints" in SYSTEM_INSTRUCTION
+    assert "limitations" in SYSTEM_INSTRUCTION
+    assert "Keep every chunkId exactly as provided." in SYSTEM_INSTRUCTION
+    assert "Do not translate, rewrite, or replace institutionalDocumentData." in SYSTEM_INSTRUCTION
+    assert "Document titles, section names, and source text stay in their stored form" in SYSTEM_INSTRUCTION
+    for rule in (
+        "Human review remains required.",
+        "Do not diagnose.",
+        "Do not recommend treatment.",
+        "Do not select a review outcome.",
+        "Cite only chunkId values present in institutionalDocumentData.",
+    ):
+        assert rule in SYSTEM_INSTRUCTION
+
+
 @pytest.mark.parametrize("protocol_id", [POST_CONSULTATION_RESULT_REVIEW_V1, MISSED_FOLLOW_UP_REVIEW_V1])
 def test_open_case_generation_projects_trusted_sources(protocol_id):
     case = _standalone_case(protocol_id)
@@ -1068,7 +1087,7 @@ def test_refresh_after_generation_does_not_call_gemini_again(tmp_path):
     provider = FakeProvider(text=_valid_output(summary="SENTINEL-GENERATED-ONCE"))
     client = _client(repository, fhir, knowledge, provider)
     page = client.get(f"/review-cases/{case.id}")
-    assert "Not generated." in page.text
+    assert "Aún no se ha generado." in page.text
     assert 'method="post"' in page.text
     posted = client.post(
         f"/review-cases/{case.id}/ai-assistance",
@@ -1083,11 +1102,11 @@ def test_refresh_after_generation_does_not_call_gemini_again(tmp_path):
     shown = client.get(posted.headers["location"])
     assert shown.status_code == 200
     assert "SENTINEL-GENERATED-ONCE" in shown.text
-    assert "Not generated." not in shown.text
+    assert "Aún no se ha generado." not in shown.text
     refreshed = client.get(f"/review-cases/{case.id}")
-    assert "Not generated." in refreshed.text
+    assert "Aún no se ha generado." in refreshed.text
     assert "SENTINEL-GENERATED-ONCE" not in refreshed.text
-    assert "Generate AI assistance" in refreshed.text
+    assert "Generar asistencia adicional" in refreshed.text
     assert len(provider.calls) == 1
     assert len(knowledge.requests) == 1
     stored = FollowUpReviewCaseService(repository).get(case.id)
@@ -1119,7 +1138,7 @@ def test_assistance_ticket_does_not_cross_cases(tmp_path):
     client.cookies.set("ai_assistance_once", cookie)
     crossed = client.get(f"/review-cases/{other.id}")
     assert "SENTINEL-CASE-A-ONLY" not in crossed.text
-    assert "Not generated." in crossed.text
+    assert "Aún no se ha generado." in crossed.text
     shown = client.get(f"/review-cases/{case.id}")
     assert "SENTINEL-CASE-A-ONLY" in shown.text
     assert len(provider.calls) == 1
@@ -1166,8 +1185,8 @@ def test_http_generation_escapes_html_and_keeps_the_case(tmp_path, caplog):
     caplog.set_level(logging.INFO, logger="ai-service.ai-assistance")
     client = _client(repository, fhir, knowledge, provider)
     page = client.get(f"/review-cases/{case.id}")
-    assert "Not generated." in page.text
-    assert "Generate AI assistance" in page.text
+    assert "Aún no se ha generado." in page.text
+    assert "Generar asistencia adicional" in page.text
     assert "SENTINEL-OBS-VALUE" in page.text
     response = _post_assistance(client, case.id, page.text)
     assert response.status_code == 200
@@ -1175,7 +1194,7 @@ def test_http_generation_escapes_html_and_keeps_the_case(tmp_path, caplog):
     assert "<script>alert(1)</script>" not in response.text
     assert 'class="generated-assistance"' in response.text
     assert 'class="institutional-source"' in response.text
-    assert "Institutional source." in response.text
+    assert "Fuente institucional." in response.text
     assert "Procedure title" in response.text
     assert "0.9137" not in response.text
     assert "Cerrar la revisión" in response.text
@@ -1225,7 +1244,7 @@ def test_missed_follow_up_http_uses_its_own_query(tmp_path):
     page = client.get(f"/review-cases/{case.id}")
     response = _post_assistance(client, case.id, page.text)
     assert response.status_code == 200
-    assert "Summary" in response.text
+    assert "Resumen" in response.text
     assert knowledge.requests[0].queryText == "missed follow-up appointment"
     assert "2020-01-01T00:00:00Z" not in provider.calls[0]["contents"]
     assert FollowUpReviewCaseService(repository).get(case.id).version == 1
@@ -1241,7 +1260,7 @@ def test_failures_leave_close_available(tmp_path):
     page = client.get(f"/review-cases/{case.id}")
     response = _post_assistance(client, case.id, page.text)
     assert response.status_code == 200
-    assert "No relevant institutional guidance was retrieved." in response.text
+    assert "No se recuperó guía institucional pertinente." in response.text
     assert provider.calls == []
     assert "Cerrar la revisión" in response.text
     assert FollowUpReviewCaseService(repository).get(case.id).status is ReviewCaseStatus.OPEN
@@ -1249,13 +1268,13 @@ def test_failures_leave_close_available(tmp_path):
     client_unavailable = _client(repository, fhir, unavailable, provider)
     unavailable_page = client_unavailable.get(f"/review-cases/{case.id}")
     again = _post_assistance(client_unavailable, case.id, unavailable_page.text)
-    assert "Institutional guidance is temporarily unavailable." in again.text
+    assert "La guía institucional no está disponible en este momento." in again.text
     assert provider.calls == []
     invalid = FakeProvider(text="not-json")
     client_invalid = _client(repository, fhir, FakeKnowledge(chunks=(_chunk(),)), invalid)
     invalid_page = client_invalid.get(f"/review-cases/{case.id}")
     rejected = _post_assistance(client_invalid, case.id, invalid_page.text)
-    assert "AI assistance could not be shown." in rejected.text
+    assert "No se pudo mostrar la asistencia adicional." in rejected.text
     assert FollowUpReviewCaseService(repository).get(case.id).version == case.version
 
 
@@ -1268,8 +1287,8 @@ def test_closed_post_and_missing_secret_do_not_call_providers(tmp_path):
     provider = FakeProvider(text=_valid_output())
     client = _client(repository, fhir, knowledge, provider)
     closed_page = client.get(f"/review-cases/{case.id}")
-    assert "Generate AI assistance" not in closed_page.text
-    assert "Not generated." in closed_page.text
+    assert "Generar asistencia adicional" not in closed_page.text
+    assert "Aún no se ha generado." in closed_page.text
     assert fhir.calls == []
     token, expiry = issue_assistance_token(
         secret=SIGNING_SECRET, review_case_id=case.id, session_id=_session_id(client)
@@ -1287,7 +1306,7 @@ def test_closed_post_and_missing_secret_do_not_call_providers(tmp_path):
     open_case = _create(repository, case_id="SENTINEL-CASE-2")
     detail = blank.get(f"/review-cases/{open_case.id}")
     assert detail.status_code == 200
-    assert "Generate AI assistance" not in detail.text
+    assert "Generar asistencia adicional" not in detail.text
     refused = blank.post(
         f"/review-cases/{open_case.id}/ai-assistance",
         content=urlencode({"assistanceExpiry": "1", "assistanceToken": "ab"}),

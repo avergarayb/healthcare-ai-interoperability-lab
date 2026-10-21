@@ -172,8 +172,11 @@ MSG_CLOSE_SCOPE = (
     "Esto registra un resultado operativo de la revisión. No es un diagnóstico ni una decisión de tratamiento."
 )
 MSG_AI_SCOPE = "Propuesta generada por inteligencia artificial. No es una decisión clínica definitiva."
+MSG_AI_ORIGIN = (
+    "Origen: agente de seguimiento. El texto se guardó con el caso y no se vuelve a generar al abrir esta página."
+)
 MSG_AI_REVIEW = "Requiere revisión humana. El profesional responsable decide."
-MSG_AI_MISSING = "Este caso no tiene una propuesta de inteligencia artificial guardada."
+MSG_AI_MISSING = "Este caso no tiene una propuesta del agente de seguimiento guardada."
 MSG_DEMO = (
     "Demostración sintética de laboratorio. Estas páginas exigen una sesión de desarrollo. "
     "Esa sesión no es una identidad clínica verificada, ni IAM, ni SSO, ni acceso por roles. "
@@ -1118,6 +1121,15 @@ def _expiry(value: str | None) -> int | None:
     return int(value)
 
 
+def _shown_instant(value: str | None) -> str:
+    """Clinical instant for the page. Review timestamps keep their own formatter."""
+    if not value or value == "None":
+        return "No consta"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value):
+        return _readable_utc(value[:-1] + ".000000Z")
+    return _readable_utc(value)
+
+
 def _readable_utc(value: str) -> str:
     """Readable UTC for a review timestamp. Any other string stays unchanged."""
     match = _REVIEW_TIMESTAMP.fullmatch(value)
@@ -1200,16 +1212,13 @@ def _case_body(
     parts = [_demo_banner(), _queue_home()]
     if notice:
         parts.append(_error(notice))
-    parts.append(_operational_section(case))
-    parts.append(_provenance_section(case))
-    parts.append(_proposal_section(case))
+    parts.append(_case_header(case))
     parts.append(_context_section(context, context_message))
-    parts.append(_history_section(detail.events))
-    parts.append(_attribution_section(case, attributions))
+    parts.append(_proposal_section(case))
     parts.append(_assistance_section(case, settings, assistance, session_id))
     parts.append(_outcome_section(case, settings, coordination, session_id))
     parts.append(_controlled_action_section(case, settings, coordination, attributions, session_id))
-    parts.append(_technical_details(detail, context, coordination))
+    parts.append(_technical_details(detail, context, coordination, attributions))
     return "".join(parts)
 
 
@@ -1324,62 +1333,41 @@ def _assistance_section(
     )
 
 
-def _operational_section(case: FollowUpReviewCase) -> str:
-    closed = _readable_utc(case.closed_at) if case.closed_at else "Ninguno"
+def _case_header(case: FollowUpReviewCase) -> str:
+    reasons = "".join(
+        f"<li>{esc(_PAGE_REASONS.get(reason, reason))}</li>" for reason in case.reason_codes
+    )
+    rule = f"<p>{esc(_RULE_MATCHED)}</p>" if case.protocol_evaluation_status == "matched" else ""
+    closed = ""
+    if case.closed_at:
+        closed = f"<dt>Cerrado</dt><dd>{esc(_readable_utc(case.closed_at))}</dd>"
     return (
-        "<section><h2>Resumen del caso</h2>"
+        "<section>"
         "<dl>"
-        f"<dt>Caso</dt><dd>{esc(case.case_id)}</dd>"
+        f"<dt>Identificador</dt><dd>{esc(case.case_id)}</dd>"
         f"<dt>Estado</dt><dd>{esc(_status_label(case.status.value))}</dd>"
         f"<dt>Creado</dt><dd>{esc(_readable_utc(case.created_at))}</dd>"
-        f"<dt>Cerrado</dt><dd>{esc(closed)}</dd>"
-        "</dl></section>"
-    )
-
-
-def _provenance_section(case: FollowUpReviewCase) -> str:
-    label = _PROTOCOL_LABELS.get(case.protocol_id, case.protocol_id)
-    reasons = []
-    for reason in case.reason_codes:
-        reasons.append(f"<li>{esc(_PAGE_REASONS.get(reason, reason))}</li>")
-    matched = f"<p>{esc(_RULE_MATCHED)}</p>" if case.protocol_evaluation_status == "matched" else ""
-    return (
-        "<section><h2>Por qué está en revisión</h2>"
-        f"<p>{esc(label)}</p>"
-        "<ul>"
-        + "".join(reasons)
+        f"{closed}"
+        "</dl>"
+        "<h3>Motivo de revisión</h3><ul>"
+        + reasons
         + "</ul>"
-        + matched
+        + rule
         + "</section>"
     )
 
 
 def _proposal_section(case: FollowUpReviewCase) -> str:
-    label = _PROTOCOL_LABELS.get(case.protocol_id, case.protocol_id)
-    reasons = "".join(
-        f"<li>{esc(_PAGE_REASONS.get(reason, reason))}</li>" for reason in case.reason_codes
-    )
-    references = "".join(f"<li>{esc(reference)}</li>" for reference in case.matched_resources)
     if case.narrative_text:
         narrative = f'<div class="ai-proposal">{esc(case.narrative_text)}</div>'
     else:
         narrative = _p(MSG_AI_MISSING)
     return (
-        "<section><h2>Propuesta generada por IA</h2>"
+        "<section><h2>Propuesta del agente de seguimiento</h2>"
         f"<p>{esc(MSG_AI_SCOPE)}</p>"
+        f"<p>{esc(MSG_AI_ORIGIN)}</p>"
         f"<p>{esc(MSG_AI_REVIEW)}</p>"
-        "<dl>"
-        f"<dt>Caso</dt><dd>{esc(case.case_id)}</dd>"
-        f"<dt>Estado</dt><dd>{esc(_status_label(case.status.value))}</dd>"
-        f"<dt>Protocolo</dt><dd>{esc(label)}</dd>"
-        f"<dt>Identificador del protocolo</dt><dd>{esc(case.protocol_id)}</dd>"
-        f"<dt>Versión</dt><dd>{esc(str(case.version))}</dd>"
-        "</dl>"
-        "<h3>Motivos</h3><ul>"
-        + reasons
-        + "</ul><h3>Referencias FHIR</h3><ul>"
-        + references
-        + "</ul><h3>Texto de la propuesta</h3>"
+        "<h3>Texto de la propuesta</h3>"
         + narrative
         + "</section>"
     )
@@ -1394,7 +1382,7 @@ def _context_section(context: ClinicalReviewContextResponse | None, message: str
     if message:
         parts.append(_p(message))
     if context is not None:
-        parts.append(f"<p>Leído {esc(_readable_utc(context.retrieval.retrieved_at))}</p>")
+        parts.append(f"<p>Fecha de lectura: {esc(_readable_utc(context.retrieval.retrieved_at))}</p>")
         if context.current_context.encounter is not None:
             parts.append(_encounter_html(context))
         if context.current_context.observation is not None:
@@ -1413,11 +1401,11 @@ def _encounter_html(context: ClinicalReviewContextResponse) -> str:
     else:
         period = ""
         if encounter.period is not None:
-            start = encounter.period.start or "None"
-            end = encounter.period.end or "None"
-            period = f"<dt>Period start</dt><dd>{esc(start)}</dd><dt>Period end</dt><dd>{esc(end)}</dd>"
-        body = f"<dl><dt>Status</dt><dd>{esc(encounter.status)}</dd>{period}</dl>"
-    return "<h3>Encounter</h3>" + body
+            start = _shown_instant(encounter.period.start)
+            end = _shown_instant(encounter.period.end)
+            period = f"<dt>Inicio</dt><dd>{esc(start)}</dd><dt>Fin</dt><dd>{esc(end)}</dd>"
+        body = f"<dl><dt>Estado</dt><dd>{esc(encounter.status)}</dd>{period}</dl>"
+    return "<h3>Consulta</h3>" + body
 
 
 def _observation_html(context: ClinicalReviewContextResponse) -> str:
@@ -1425,18 +1413,18 @@ def _observation_html(context: ClinicalReviewContextResponse) -> str:
     if observation.availability == "not_found":
         body = _p(MSG_OBSERVATION_MISSING)
     else:
-        issued = observation.issued or "None"
+        issued = _shown_instant(observation.issued)
         body = (
             "<dl>"
-            f"<dt>Status</dt><dd>{esc(observation.status)}</dd>"
-            f"<dt>Issued</dt><dd>{esc(issued)}</dd>"
+            f"<dt>Estado</dt><dd>{esc(observation.status)}</dd>"
+            f"<dt>Fecha del resultado</dt><dd>{esc(issued)}</dd>"
             "</dl>"
-            "<h4>Code</h4>"
+            "<h4>Código</h4>"
             + _code_html(observation.code)
-            + "<h4>Value</h4>"
+            + "<h4>Valor</h4>"
             + render_observation_value(observation.content)
         )
-    return "<h3>Observation</h3>" + body
+    return "<h3>Resultados disponibles</h3>" + body
 
 
 def _trigger_appointment_html(context: ClinicalReviewContextResponse) -> str:
@@ -1446,11 +1434,11 @@ def _trigger_appointment_html(context: ClinicalReviewContextResponse) -> str:
     if trigger.availability == "not_found":
         body = _p(MSG_APPOINTMENT_MISSING)
     else:
-        start = trigger.start or "None"
+        start = _shown_instant(trigger.start)
         body = (
             "<dl>"
-            f"<dt>Status</dt><dd>{esc(trigger.status)}</dd>"
-            f"<dt>Start</dt><dd>{esc(start)}</dd>"
+            f"<dt>Estado</dt><dd>{esc(trigger.status)}</dd>"
+            f"<dt>Inicio</dt><dd>{esc(start)}</dd>"
             "</dl>"
         )
     return (
@@ -1473,20 +1461,20 @@ def _appointments_html(context: ClinicalReviewContextResponse) -> str:
         if trigger_reference is not None and item.reference == trigger_reference:
             omitted_origin = True
             continue
-        start = item.start or "None"
+        start = _shown_instant(item.start)
         items.append(
             "<li>"
             f"<p>{esc(_APPOINTMENT_LABELS.get(item.classification, item.classification))}</p>"
             "<dl>"
-            f"<dt>Status</dt><dd>{esc(item.status)}</dd>"
-            f"<dt>Start</dt><dd>{esc(start)}</dd>"
+            f"<dt>Estado</dt><dd>{esc(item.status)}</dd>"
+            f"<dt>Inicio</dt><dd>{esc(start)}</dd>"
             "</dl>"
             "</li>"
         )
     item_html = "<ul>" + "".join(items) + "</ul>" if items else ""
     pointer = _p(_ORIGIN_POINTER) if omitted_origin else ""
     return (
-        "<h3>Appointments</h3><ul>"
+        "<h3>Citas</h3><ul>"
         + "".join(labels)
         + "</ul>"
         + pointer
@@ -1523,7 +1511,7 @@ def _quantity_html(content: QuantityContent | QuantityFields) -> str:
     lines = [_p(f"{comparator}{content.value}{unit}")]
     if content.system or content.code:
         lines.append(
-            "<p>Technical quantity code: "
+            "<p>Código de la magnitud: "
             + esc(" | ".join(bit for bit in (content.system, content.code) if bit))
             + "</p>"
         )
@@ -1629,6 +1617,7 @@ def _technical_details(
     detail: ReviewCaseDetail,
     context: ClinicalReviewContextResponse | None,
     coordination: FollowUpCoordinationRequest | None,
+    attributions: tuple[StoredDevelopmentAttribution, ...],
 ) -> str:
     """Original identifiers and timestamps. The group is closed and does not fetch FHIR."""
     case = detail.case
@@ -1637,7 +1626,8 @@ def _technical_details(
         "<details>",
         "<summary>Detalles técnicos</summary>",
         "<dl>",
-        f"<dt>Protocolo</dt><dd>{esc(case.protocol_id)}</dd>",
+        f"<dt>Protocolo</dt><dd>{esc(_PROTOCOL_LABELS.get(case.protocol_id, case.protocol_id))}</dd>",
+        f"<dt>Identificador del protocolo</dt><dd>{esc(case.protocol_id)}</dd>",
         f"<dt>Evaluación</dt><dd>{esc(case.protocol_evaluation_status)}</dd>",
         f"<dt>Versión</dt><dd>{esc(str(case.version))}</dd>",
         f"<dt>Estado</dt><dd>{esc(case.status.value)}</dd>",
@@ -1653,9 +1643,6 @@ def _technical_details(
     parts.append("</ul><h3>Recursos coincidentes</h3><ul>")
     for resource in case.matched_resources:
         parts.append(f"<li>{esc(resource)}</li>")
-    parts.append("</ul><h3>Eventos</h3><ul>")
-    for event in detail.events:
-        parts.append(f"<li>{esc(event.event_type.value)} {esc(event.occurred_at)}</li>")
     parts.append("</ul>")
     if context is not None:
         parts.append(f"<p>{esc(context.retrieval.retrieved_at)}</p>")
@@ -1674,6 +1661,8 @@ def _technical_details(
             f"<dt>Creada</dt><dd>{esc(coordination.created_at)}</dd>"
             "</dl>"
         )
+    parts.append(_history_section(detail.events))
+    parts.append(_attribution_section(detail.case, attributions))
     parts.append("</details>")
     return "".join(parts)
 

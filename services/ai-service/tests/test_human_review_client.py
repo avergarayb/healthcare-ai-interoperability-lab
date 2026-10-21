@@ -345,11 +345,13 @@ def test_open_case_page_separates_sections_and_renders_context(tmp_path):
     response = _client(repository, fhir).get(f"/review-cases/{case.id}")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
+    assert "<h1>Caso de revisión</h1>" in response.text
+    assert "<h2>Caso de revisión</h2>" not in response.text
     for heading in (
-        "Resumen del caso",
-        "Por qué está en revisión",
         "Contexto clínico actual",
-        "Historial operativo",
+        "Propuesta del agente de seguimiento",
+        "Asistencia adicional",
+        "Resultado operativo",
         "Resultado operativo",
     ):
         assert f"<h2>{heading}</h2>" in response.text
@@ -357,8 +359,8 @@ def test_open_case_page_separates_sections_and_renders_context(tmp_path):
     assert "Quedó registrado un resultado posterior a la consulta" in response.text
     visible, technical = response.text.split("<details>", 1)
     assert "Technical provenance" not in response.text
-    assert "<h2>Propuesta generada por IA</h2>" in visible
-    assert "Encounter/encounter-008" in visible
+    assert "<h2>Propuesta del agente de seguimiento</h2>" in visible
+    assert "Encounter/encounter-008" not in visible
     assert "Encounter/encounter-008" in technical
     assert "&lt;b&gt;unsafe&lt;/b&gt;" in response.text
     assert "<b>unsafe</b>" not in response.text
@@ -484,7 +486,7 @@ def test_context_unavailable_keeps_the_close_form(tmp_path):
     assert MSG_CONTEXT_UNAVAILABLE in response.text
     assert "Cerrar la revisión" in response.text
     assert "secret-fhir-failure" not in response.text
-    assert "Resumen del caso" in response.text
+    assert "Caso de revisión" in response.text
 
 
 def test_invalid_and_missing_case(tmp_path):
@@ -1031,8 +1033,8 @@ def test_queue_and_case_page_cover_missed_follow_up_without_encounter(tmp_path):
     assert "no había otra cita futura confirmada" in page.text
     assert "Appointment/noshow-008" in page.text.split("<details>", 1)[1]
     assert "not rescheduled" not in page.text
-    assert "<h3>Encounter</h3>" not in page.text
-    assert "<h3>Observation</h3>" not in page.text
+    assert "<h3>Consulta</h3>" not in page.text
+    assert "<h3>Resultados disponibles</h3>" not in page.text
     assert "Próxima y confirmada" in page.text
     assert "<img" not in page.text
     assert "&lt;img src=x onerror=alert(1)&gt;" in page.text
@@ -1040,8 +1042,8 @@ def test_queue_and_case_page_cover_missed_follow_up_without_encounter(tmp_path):
     assert SIGNING_SECRET not in page.text
     assert SERVICE_TOKEN not in page.text
     first_page = client.get(f"/review-cases/{first.id}")
-    assert "<h3>Encounter</h3>" in first_page.text
-    assert "<h3>Observation</h3>" in first_page.text
+    assert "<h3>Consulta</h3>" in first_page.text
+    assert "<h3>Resultados disponibles</h3>" in first_page.text
     assert "Cita que originó el caso" not in first_page.text
     closed = _post_close(client, missed.id, page.text, "follow_up_coordination_planned")
     assert closed.status_code == 303
@@ -1103,16 +1105,30 @@ def test_slice1_queue_detail_and_coordination_sentences(tmp_path):
     assert _RULE not in technical
     assert "matched" not in visible
     assert ">matched<" in technical
-    assert "Encounter/encounter-008" in visible
+    assert "Encounter/encounter-008" not in visible
     assert "Encounter/encounter-008" in technical
     assert "Observation/observation-008" in technical
-    assert "<h2>Historial operativo</h2>" in visible
-    assert "<h2>Atribución de desarrollo</h2>" in visible
-    assert "<h2>Historial operativo</h2>" not in technical
-    assert "<h2>Atribución de desarrollo</h2>" not in technical
-    assert "Los identificadores mostrados son principales sintéticos de desarrollo" in visible
-    assert "Cierre del caso: aún no está cerrado." in visible
-    assert "AI-assisted review" in visible
+    assert "<h2>Historial operativo</h2>" not in visible
+    assert "<h2>Atribución de desarrollo</h2>" not in visible
+    assert "<h2>Historial operativo</h2>" in technical
+    assert "<h2>Atribución de desarrollo</h2>" in technical
+    assert "Los identificadores mostrados son principales sintéticos de desarrollo" in technical
+    assert "Cierre del caso: aún no está cerrado." in technical
+    assert "Asistencia adicional" in visible
+    assert "<dt>Protocolo</dt>" in technical
+    assert "<dt>Identificador del protocolo</dt>" in technical
+    assert POST_CONSULTATION_RESULT_REVIEW_V1 in technical
+    assert "<dt>Versión</dt><dd>1</dd>" in technical
+    assert "<h3>Códigos de motivo</h3>" in technical
+    assert "post_consultation_result_requires_review" in technical
+    assert "<h3>Recursos coincidentes</h3>" in technical
+    assert "<h3>Referencias FHIR</h3>" in technical
+    assert "<h3>Códigos</h3>" in technical
+    assert "http://loinc.org" in technical
+    assert "1234-5" in technical
+    assert "<th>Evento</th>" in technical
+    assert "<td>Creado</td>" in technical
+    assert technical.count("</details>") == 1
     assert page.text.count(_PENDING) == 1
     assert page.text.count(_NO_ACTION) == 1
     assert 'name="outcome" value="follow_up_coordination_planned"' in page.text
@@ -1198,9 +1214,9 @@ def test_slice2_origin_appointment_is_shown_once_and_other_stays_technical(tmp_p
 
     page = client.get(f"/review-cases/{missed.id}")
     visible, technical = page.text.split("<details>", 1)
-    origin, appointments = visible.split("<h3>Appointments</h3>", 1)
+    origin, appointments = visible.split("<h3>Citas</h3>", 1)
     assert origin.count("<h3>Cita que originó el caso</h3>") == 1
-    assert origin.count("Appointment/noshow-013") == 2
+    assert origin.count("Appointment/noshow-013") == 1
     assert "Appointment/noshow-013" not in appointments
     assert "La cita que originó este caso está arriba." in appointments
     assert appointments.count("Estado operativo de la cita no clasificado") == 1
@@ -1213,19 +1229,19 @@ def test_slice2_origin_appointment_is_shown_once_and_other_stays_technical(tmp_p
     assert ">OTHER<" in technical
     assert ">noshow<" in technical
     assert ">OTHER<" not in visible
-    assert "<h3>Encounter</h3>" not in page.text
-    assert "<h3>Observation</h3>" not in page.text
+    assert "<h3>Consulta</h3>" not in page.text
+    assert "<h3>Resultados disponibles</h3>" not in page.text
 
     post_page = client.get(f"/review-cases/{post.id}")
-    assert "<h3>Encounter</h3>" in post_page.text
-    assert "<h3>Observation</h3>" in post_page.text
+    assert "<h3>Consulta</h3>" in post_page.text
+    assert "<h3>Resultados disponibles</h3>" in post_page.text
     assert "Cita que originó el caso" not in post_page.text
     assert "La cita que originó este caso está arriba." not in post_page.text
 
     alone = client.get(f"/review-cases/{separate.id}")
     alone_visible = alone.text.split("<details>", 1)[0]
-    alone_origin, alone_list = alone_visible.split("<h3>Appointments</h3>", 1)
-    assert alone_origin.count("Appointment/noshow-014") == 2
+    alone_origin, alone_list = alone_visible.split("<h3>Citas</h3>", 1)
+    assert alone_origin.count("Appointment/noshow-014") == 1
     assert "Appointment/noshow-014" not in alone_list
     assert "La cita que originó este caso está arriba." not in alone.text
     assert "<h3>Cita que originó el caso</h3>" in alone_origin
@@ -1241,16 +1257,18 @@ def test_persisted_gemini_proposal_is_visible_and_does_not_change_the_case(tmp_p
     response = _client(repository, ScriptedFhir()).get(f"/review-cases/{case.id}")
     assert response.status_code == 200
     visible = response.text.split("<details>", 1)[0]
-    assert "<h2>Propuesta generada por IA</h2>" in visible
+    assert "<h2>Propuesta del agente de seguimiento</h2>" in visible
     assert "Propuesta generada por inteligencia artificial. No es una decisión clínica definitiva." in visible
+    assert "Origen: agente de seguimiento." in visible
     assert "Requiere revisión humana. El profesional responsable decide." in visible
+    technical = response.text.split("<details>", 1)[1]
     assert case.case_id in visible
     assert "Abierto" in visible
-    assert "POST_CONSULTATION_RESULT_REVIEW_V1" in visible
     assert "Quedó registrado un resultado posterior a la consulta" in visible
-    assert "Encounter/encounter-008" in visible
-    assert "Observation/observation-008" in visible
-    assert f"<dt>Versión</dt><dd>{case.version}</dd>" in visible
+    assert "POST_CONSULTATION_RESULT_REVIEW_V1" in technical
+    assert "Encounter/encounter-008" in technical
+    assert "Observation/observation-008" in technical
+    assert f"<dt>Versión</dt><dd>{case.version}</dd>" in technical
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in visible
     assert "&lt;img src=x onerror=alert(1)&gt;" in visible
     assert "<script>alert(1)</script>" not in response.text
@@ -1270,7 +1288,7 @@ def test_case_without_narrative_says_so_without_failing(tmp_path):
     assert case.narrative_text is None
     response = _client(repository, ScriptedFhir()).get(f"/review-cases/{case.id}")
     assert response.status_code == 200
-    assert "Este caso no tiene una propuesta de inteligencia artificial guardada." in response.text
+    assert "Este caso no tiene una propuesta del agente de seguimiento guardada." in response.text
     assert "Propuesta generada por inteligencia artificial. No es una decisión clínica definitiva." in response.text
     assert 'class="ai-proposal"' not in response.text
     assert repository.get(case.id).version == 1
