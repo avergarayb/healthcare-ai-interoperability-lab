@@ -282,7 +282,7 @@ Consumers that only needed the exception now import it from `langgraph_fhir_clie
 
 ## 12. Architectural decision
 
-The approved isolation decision is alternative B in [python-hapi-legacy-isolation-v1](python-hapi-legacy-isolation-v1.md).
+The approved isolation decision is alternative B, recorded in [section 12](#12-architectural-decision).
 
 `HapiReadClient` remains in `app/langgraph_fhir_hapi.py`. The three operational factories do not construct it. They construct `ClinicalReadClient.from_settings`. The boundary is a test over source, not a separate package. A future `app/` module that imports the legacy client fails `test_operational_python_reaches_java_through_clinical_read`. Laboratory scripts and HAPI tests may still import the module. That test does not scan `scripts/`.
 
