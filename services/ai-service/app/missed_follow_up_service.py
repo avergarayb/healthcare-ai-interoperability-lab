@@ -2,7 +2,8 @@
 
 Patient resolution and the bounded Appointment search are the existing
 application reads. This path does not acquire Encounter or Observation
-and does not call the narrative workflow.
+and does not call the follow-up workflow. A matched open review case
+receives at most one operational narrative from the configured provider.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
@@ -22,7 +23,13 @@ from app.followup_review import (
     FollowUpReviewCase,
     FollowUpReviewCaseService,
     InvalidReviewTrigger,
+    ReviewCaseStatus,
     ReviewPersistenceUnavailable,
+)
+from app.missed_follow_up_narrative import (
+    appointment_facts,
+    configured_provider,
+    generate_operational_narrative,
 )
 from app.config import Settings
 from app.missed_follow_up_review import (
@@ -54,6 +61,8 @@ class MissedFollowUpReviewCaseRef(BaseModel):
     status: str
     version: int = Field(ge=1)
     matched_resources: list[str] = Field(alias="matchedResources")
+    narrative_status: Literal["stored", "unavailable"] | None = Field(default=None, alias="narrativeStatus")
+    narrative_reason: str | None = Field(default=None, alias="narrativeReason")
 
 
 class MissedFollowUpResponse(BaseModel):
@@ -95,9 +104,13 @@ def run_missed_follow_up_http(
     factory = adapter_factory or _live_adapter
     try:
         adapter = factory(instant)
-        evaluation = evaluate_missed_follow_up_case(adapter, parsed.case_id, instant)
+        with adapter.bind_read(parsed.case_id):
+            snapshot = _read_snapshot(adapter, instant)
+            facts = appointment_facts(adapter.ledger.appointment_views)
+        evaluation = evaluate_missed_follow_up(snapshot)
         review_cases = _ensure_review_cases(request, parsed.case_id, evaluation)
-        payload = _project(parsed.case_id, evaluation, review_cases)
+        attachments = _attach_narratives(request, settings, review_cases, facts, evaluation)
+        payload = _project(parsed.case_id, evaluation, attachments)
     except (ReviewPersistenceUnavailable, InvalidReviewTrigger):
         _log(correlation_id, "persistence_unavailable")
         return JSONResponse(status_code=503, content={"detail": REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL})
@@ -206,10 +219,54 @@ def _ensure_review_cases(
     return tuple(cases)
 
 
+def _narrative_provider(settings: Settings):
+    return configured_provider(settings)
+
+
+def _attach_narratives(
+    request: Request,
+    settings: Settings,
+    review_cases: tuple[FollowUpReviewCase, ...],
+    facts: list[dict[str, str | None]],
+    evaluation: MissedFollowUpEvaluation,
+) -> tuple[tuple[FollowUpReviewCase, str | None, str | None], ...]:
+    """Store one narrative per open matched case. An existing narrative is kept."""
+    if evaluation.status is not ProtocolEvaluationStatus.MATCHED:
+        return tuple((case, None, None) for case in review_cases)
+    provider = _narrative_provider(settings)
+    repository = getattr(request.app.state, "followup_review_repository", None)
+    if repository is None:
+        raise ReviewPersistenceUnavailable
+    service = FollowUpReviewCaseService(repository)
+    attached: list[tuple[FollowUpReviewCase, str | None, str | None]] = []
+    for case in review_cases:
+        if case.narrative_text:
+            attached.append((case, "stored", None))
+            continue
+        if case.status is not ReviewCaseStatus.OPEN:
+            attached.append((case, None, None))
+            continue
+        if provider is None:
+            attached.append((case, "unavailable", "not_configured"))
+            continue
+        matched = case.matched_resources[0] if case.matched_resources else ""
+        generated = generate_operational_narrative(
+            provider,
+            matched_resource=matched,
+            appointments=facts,
+        )
+        if generated.text is None:
+            attached.append((case, "unavailable", generated.reason or "provider_unavailable"))
+            continue
+        stored = service.record_narrative(case.id, generated.text)
+        attached.append((stored, "stored", None))
+    return tuple(attached)
+
+
 def _project(
     case_id: str,
     evaluation: MissedFollowUpEvaluation,
-    review_cases: tuple[FollowUpReviewCase, ...],
+    attachments: tuple[tuple[FollowUpReviewCase, str | None, str | None], ...],
 ) -> MissedFollowUpResponse | None:
     try:
         return MissedFollowUpResponse(
@@ -224,8 +281,10 @@ def _project(
                     status=case.status.value,
                     version=case.version,
                     matchedResources=list(case.matched_resources),
+                    narrativeStatus=narrative_status,
+                    narrativeReason=narrative_reason,
                 )
-                for case in review_cases
+                for case, narrative_status, narrative_reason in attachments
             ],
         )
     except ValidationError:

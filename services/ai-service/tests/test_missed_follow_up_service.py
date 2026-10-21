@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.followup_review import ReviewOutcome, build_review_identity
 from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
+from app.llm_provider import ProviderGeneration
+from app.missed_follow_up_narrative import NARRATIVE_INSTRUCTION
 from app.langgraph_fhir_client import (
     CASE_IDENTIFIER_SYSTEM,
     BoundedSearchResult,
@@ -426,6 +428,163 @@ def _assert_local_hapi_case(client: TestClient, repository, base: str, case_id: 
     assert stored is not None
     assert stored.status.value == "open"
     assert stored.matched_resources == ("Appointment/missed-fu-noshow-014",)
+
+
+class _NarrativeProvider:
+    def __init__(self, text: str | None = None, error: str | None = None) -> None:
+        self.calls: list[dict] = []
+        self.text = text
+        self.error = error
+
+    def generate_structured(self, **kwargs):
+        self.calls.append(kwargs)
+        return ProviderGeneration(invocation_started=True, text=self.text, error=self.error)
+
+
+_SPANISH = (
+    "La cita Appointment/noshow-1 figura como noshow desde 2026-01-01T00:00:00Z. "
+    "No hay otra cita confirmada entre los datos leídos. "
+    "Esta información no permite un diagnóstico ni una comunicación. "
+    "El profesional responsable debe revisar el caso."
+)
+
+
+def _use_provider(monkeypatch, provider: _NarrativeProvider) -> None:
+    monkeypatch.setattr("app.missed_follow_up_service._narrative_provider", lambda settings: provider)
+
+
+def _narrative_count(path: Path) -> int:
+    connection = sqlite3.connect(path)
+    try:
+        return int(connection.execute("SELECT COUNT(*) FROM follow_up_review_narratives").fetchone()[0])
+    finally:
+        connection.close()
+
+
+def test_narrative_instructions_request_spanish_and_forbid_clinical_decisions():
+    for phrase in (
+        "clear Spanish",
+        "Peru and Latin America",
+        "FHIR resource identifiers",
+        "Do not diagnose.",
+        "Do not recommend treatment.",
+        "Do not assign clinical urgency.",
+        "Do not order a message, a call, or any other communication.",
+        "Do not select an operational outcome.",
+    ):
+        assert phrase in NARRATIVE_INSTRUCTION
+    assert "follow_up_required" not in NARRATIVE_INSTRUCTION
+
+
+def test_matched_case_stores_one_spanish_narrative(tmp_path, monkeypatch):
+    provider = _NarrativeProvider(text='{"answer": ' + json_answer(_SPANISH) + "}")
+    _use_provider(monkeypatch, provider)
+    prepared = PreparedReadClient(
+        case_id=CASE,
+        patient_id=PATIENT,
+        appointments=[_appointment("noshow-1", "noshow", "2026-01-01T00:00:00Z")],
+    )
+    repository = _repository(tmp_path)
+    response = _post(_client(monkeypatch, prepared, repository))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["reviewCases"][0]["narrativeStatus"] == "stored"
+    assert "narrativeReason" not in body["reviewCases"][0]
+    assert body["reviewCases"][0]["status"] == "open"
+    assert body["reviewCases"][0]["version"] == 1
+    stored = repository.get(body["reviewCases"][0]["reviewCaseId"])
+    assert stored is not None
+    assert stored.narrative_text == _SPANISH
+    assert stored.status.value == "open"
+    assert stored.version == 1
+    assert len(provider.calls) == 1
+    assert provider.calls[0]["system_instruction"] == NARRATIVE_INSTRUCTION
+    sent = provider.calls[0]["contents"]
+    assert "Appointment/noshow-1" in sent
+    assert "noshow" in sent
+    assert PATIENT not in sent
+    assert "Encounter" not in sent
+    assert _narrative_count(tmp_path / "review.sqlite3") == 1
+
+
+def test_not_matched_and_insufficient_do_not_call_the_provider(tmp_path, monkeypatch):
+    provider = _NarrativeProvider(text='{"answer": "No debe guardarse."}')
+    _use_provider(monkeypatch, provider)
+    repository = _repository(tmp_path)
+    future = PreparedReadClient(
+        case_id=CASE,
+        patient_id=PATIENT,
+        appointments=[
+            _appointment("noshow-1", "noshow", "2026-01-01T00:00:00Z"),
+            _appointment("booked-1", "booked", "2099-01-01T00:00:00Z"),
+        ],
+    )
+    blocked = _post(_client(monkeypatch, future, repository))
+    assert blocked.json()["evaluationStatus"] == "not_matched"
+    assert blocked.json()["reviewCases"] == []
+    invalid = PreparedReadClient(
+        case_id=CASE,
+        patient_id=PATIENT,
+        appointments=[_appointment("noshow-blank", "noshow", None)],
+    )
+    insufficient = _post(_client(monkeypatch, invalid, repository))
+    assert insufficient.json()["evaluationStatus"] == "insufficient"
+    assert insufficient.json()["reviewCases"] == []
+    assert provider.calls == []
+    assert _narrative_count(tmp_path / "review.sqlite3") == 0
+
+
+def test_retry_keeps_the_stored_narrative_without_another_generation(tmp_path, monkeypatch):
+    provider = _NarrativeProvider(text='{"answer": ' + json_answer(_SPANISH) + "}")
+    _use_provider(monkeypatch, provider)
+    prepared = PreparedReadClient(
+        case_id=CASE,
+        patient_id=PATIENT,
+        appointments=[_appointment("noshow-1", "noshow", "2026-01-01T00:00:00Z")],
+    )
+    repository = _repository(tmp_path)
+    client = _client(monkeypatch, prepared, repository)
+    first = _post(client).json()
+    provider.text = '{"answer": "Una segunda propuesta que no debe reemplazar la primera."}'
+    second = _post(client).json()
+    assert second["reviewCases"][0]["reviewCaseId"] == first["reviewCases"][0]["reviewCaseId"]
+    assert second["reviewCases"][0]["narrativeStatus"] == "stored"
+    assert second["reviewCases"][0]["version"] == 1
+    assert len(provider.calls) == 1
+    assert _count(tmp_path / "review.sqlite3") == 1
+    assert _narrative_count(tmp_path / "review.sqlite3") == 1
+    stored = repository.get(first["reviewCases"][0]["reviewCaseId"])
+    assert stored is not None
+    assert stored.narrative_text == _SPANISH
+
+
+def test_provider_failure_keeps_the_open_case_without_a_narrative(tmp_path, monkeypatch):
+    provider = _NarrativeProvider(error="http_5xx")
+    _use_provider(monkeypatch, provider)
+    prepared = PreparedReadClient(
+        case_id=CASE,
+        patient_id=PATIENT,
+        appointments=[_appointment("noshow-1", "noshow", "2026-01-01T00:00:00Z")],
+    )
+    repository = _repository(tmp_path)
+    response = _post(_client(monkeypatch, prepared, repository))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["reviewCases"][0]["status"] == "open"
+    assert body["reviewCases"][0]["version"] == 1
+    assert body["reviewCases"][0]["narrativeStatus"] == "unavailable"
+    assert body["reviewCases"][0]["narrativeReason"] == "provider_unavailable"
+    stored = repository.get(body["reviewCases"][0]["reviewCaseId"])
+    assert stored is not None
+    assert stored.narrative_text is None
+    assert stored.status.value == "open"
+    assert len(provider.calls) == 1
+
+
+def json_answer(text: str) -> str:
+    import json
+
+    return json.dumps(text, ensure_ascii=False)
 
 
 def test_protocol_path_does_not_invoke_the_narrative_workflow():
