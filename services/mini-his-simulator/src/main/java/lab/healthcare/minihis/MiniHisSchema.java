@@ -94,6 +94,20 @@ public class MiniHisSchema {
                     PRIMARY KEY (identifier_system, identifier_value)
                 )
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS lab_order (
+                    order_id TEXT PRIMARY KEY,
+                    patient_id TEXT NOT NULL REFERENCES patient(patient_id),
+                    destination_system_key TEXT NOT NULL,
+                    test_code TEXT NOT NULL,
+                    test_description TEXT NOT NULL,
+                    requested_at TEXT NOT NULL,
+                    local_status TEXT NOT NULL CHECK (local_status IN ('recorded', 'submitted', 'failed')),
+                    correlation_id TEXT,
+                    destination_order_id TEXT,
+                    destination_organization_id TEXT
+                )
+                """);
         addColumnIfAbsent("consultation", "care_class", "TEXT");
         addColumnIfAbsent("clinical_result", "status", "TEXT");
         backfillSyntheticCareClass();

@@ -18,6 +18,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - Laboratory Clinical Read API v1 for Patient, Encounter, Observation, and Appointment. The same service token protects it. The default source is local HAPI. Contract: [clinical-read-v1](contracts/clinical-read-v1.md). This line records source. It does not record a test run.
 - Mini HIS Simulator as a separate process with its own SQLite database and a proprietary REST API. Java reads it only when `clinical-read.source=mini-his` and normalizes the payload to FHIR R4. It is not in the HAPI Docker stack and it is not an organizational exchange.
 - Mini LIS as a separate Spring Boot process with its own PostgreSQL database and a proprietary REST API. Java reads it only when `clinical-read.source=mini-lis` and normalizes Patient, ServiceRequest, Observation, and DiagnosticReport to FHIR R4. The default Clinical Read source stays local HAPI. This read is not a bidirectional exchange. A typed source registry lists declared systems. A new system still needs its own connector. Contract: [mini-lis-rest-v1](contracts/mini-lis-rest-v1.md). Mapping: [mini-lis-fhir-v1](contracts/mini-lis-fhir-v1.md).
+- Laboratory order exchange from Mini HIS to Mini LIS through FHIR Integration Service. Java builds a FHIR R4 ServiceRequest, submits the proprietary Mini LIS command, stores the HIS, FHIR, and LIS identifier correlation in its own SQLite file, and returns Observation and DiagnosticReport to Mini HIS. There is no direct Mini HIS to Mini LIS connection. Patient matching uses the identifier system, value, and requesting organization. A repeated request does not create a second order. A report before any result is empty. Clinical Read stays a single source. This route is not multi-system federation and HL7 v2 is not implemented. Contract: [cross-org-lab-exchange-v1](contracts/cross-org-lab-exchange-v1.md).
 - Static Mini HIS maps `mini-his-maps-v1` and UCUM maps `mini-his-ucum-v1` for `g/dL` and `mmHg`. No terminology server, no general LOINC or SNOMED, and no numeric unit conversion. Contract: [mini-his-terminology-v1](contracts/mini-his-terminology-v1.md).
 
 ### Healthcare AI
@@ -59,7 +60,7 @@ The following capabilities are not established by the current repository:
 - autonomous actions or FHIR writes from Healthcare AI;
 - retirement of `HapiReadClient` and `FHIR_BASE_URL`;
 - UCUM beyond `g/dL` and `mmHg`, and a terminology server, ValueSet, or ConceptMap;
-- SOAP, HL7 v2 message transport, file connectors, and a route among organizations. Mini LIS keeps one domain service so a later HL7 v2 adapter can submit the same orders and results. ORM/OML, ORU^R01, ACK, and MLLP are not implemented.
+- SOAP, HL7 v2 message transport, and file connectors. A laboratory order can move from Mini HIS to Mini LIS through FHIR Integration Service. That route is not a production network and it is not HL7 v2. Mini LIS keeps one domain service so a later HL7 v2 adapter can submit the same orders and results. ORM/OML, ORU^R01, ACK, and MLLP are not implemented.
 - protocol registry/lifecycle beyond the current versioned contract;
 - production packaging for SaaS, customer-hosted or hybrid operation;
 - completed governance and legal assessment for real clinical data sent to an external model.

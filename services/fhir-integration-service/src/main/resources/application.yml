@@ -133,3 +133,17 @@ interop:
         - service-request
         - observation
         - diagnostic-report
+
+exchange:
+  store-path: ${EXCHANGE_STORE_PATH:${java.io.tmpdir}/healthcare-lab-exchange/correlation.sqlite}
+  participants:
+    mini-his:
+      service-token: ${EXCHANGE_MINI_HIS_TOKEN:}
+    mini-lis:
+      service-token: ${EXCHANGE_MINI_LIS_TOKEN:}
+  connectors:
+    mini-lis:
+      base-url: ${EXCHANGE_MINI_LIS_BASE_URL:http://127.0.0.1:8096}
+      service-token: ${EXCHANGE_MINI_LIS_SERVICE_TOKEN:}
+      connect-timeout: 2s
+      read-timeout: 5s

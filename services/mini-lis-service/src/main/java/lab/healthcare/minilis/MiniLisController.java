@@ -85,7 +85,16 @@ public class MiniLisController {
     }
 
     @GetMapping(path = "/orders", produces = MediaType.APPLICATION_JSON_VALUE)
-    public Object orders(@RequestParam(required = false) Integer limit) {
+    public Object orders(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String requestingOrganizationId,
+            @RequestParam(required = false) String externalRequestId) {
+        if (requestingOrganizationId != null || externalRequestId != null) {
+            if (requestingOrganizationId == null || externalRequestId == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "invalid_request"));
+            }
+            return records.orderByExternalRequest(requestingOrganizationId, externalRequestId);
+        }
         Integer bounded = bound(limit);
         if (bounded == null) {
             return invalidLimit();
