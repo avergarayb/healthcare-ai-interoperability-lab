@@ -29,7 +29,8 @@ A result is accepted only while the order is `ORDERED` or `IN_PROGRESS`. The fir
 | `GET /patients` | 200 list. Optional `organizationId` and `externalId` together | 400 when only one of those parameters is present |
 | `GET /patients/{patientId}` | 200 patient | 404 `not_found` |
 | `POST /orders` | 201 order in `ORDERED` | 404 unknown patient, 409 duplicate external request |
-| `GET /orders` and `GET /orders/{orderId}` | 200 | 404 for an unknown id |
+| `GET /orders` | 200 list, or one order when `requestingOrganizationId` and `externalRequestId` are both present | 400 when only one of those parameters is present, 404 when that pair is unknown |
+| `GET /orders/{orderId}` | 200 | 404 for an unknown id |
 | `GET /patients/{patientId}/orders` | 200 | 404 unknown patient |
 | `POST /orders/{orderId}/results` | 201 result | 400 invalid body, 404 unknown order, 409 `invalid_transition` or `duplicate` |
 | `GET /orders/{orderId}/results` | 200 | 404 unknown order |

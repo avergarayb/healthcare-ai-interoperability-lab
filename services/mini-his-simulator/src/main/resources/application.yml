@@ -4,3 +4,9 @@ server:
 
 mini-his:
   sqlite-path: data/mini-his.sqlite
+  organization-id: org-mini-his
+  exchange:
+    base-url: ${MINI_HIS_EXCHANGE_BASE_URL:}
+    service-token: ${MINI_HIS_EXCHANGE_TOKEN:}
+    connect-timeout: 2s
+    read-timeout: 5s

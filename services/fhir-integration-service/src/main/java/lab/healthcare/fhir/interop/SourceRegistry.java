@@ -37,6 +37,10 @@ public class SourceRegistry {
         return sources;
     }
 
+    public java.util.Optional<SourceDescriptor> find(String key) {
+        return sources.stream().filter(source -> source.key().equals(key)).findFirst();
+    }
+
     private static SourceDescriptor descriptor(String key, InteropSourcesProperties.SourceProperties value) {
         if (key == null || !KEY.matcher(key).matches() || value == null) {
             throw new IllegalStateException("Interop source key is invalid");

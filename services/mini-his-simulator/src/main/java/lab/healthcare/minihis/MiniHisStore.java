@@ -35,6 +35,7 @@ public class MiniHisStore {
     @Transactional
     public SeedCounts reset() {
         schema.migrateExistingRows();
+        jdbc.update("DELETE FROM lab_order");
         jdbc.update("DELETE FROM clinical_event");
         jdbc.update("DELETE FROM patient_identifier");
         jdbc.update("UPDATE appointment SET replaces_appointment_id = NULL");

@@ -235,4 +235,19 @@ class MiniLisApiTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error").value("invalid_transition"));
     }
+
+    @Test
+    void externalRequestLookupReturnsTheStoredOrder() throws Exception {
+        mockMvc.perform(get("/orders")
+                        .header("X-Service-Token", TOKEN)
+                        .param("requestingOrganizationId", "org-mini-his")
+                        .param("externalRequestId", "EXT-REQ-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.orderId").value("MLS-ORD-001"));
+        mockMvc.perform(get("/orders")
+                        .header("X-Service-Token", TOKEN)
+                        .param("externalRequestId", "EXT-REQ-001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"));
+    }
 }

@@ -108,6 +108,13 @@ public class LaboratoryRecordService {
         return repository.findOrder(orderId).orElseThrow(MiniLisException::notFound);
     }
 
+    public LabOrder orderByExternalRequest(String requestingOrganizationId, String externalRequestId) {
+        requireId(requestingOrganizationId);
+        requireId(externalRequestId);
+        return repository.findOrderByExternalRequest(requestingOrganizationId, externalRequestId)
+                .orElseThrow(MiniLisException::notFound);
+    }
+
     public List<LabOrder> listOrders(int limit) {
         return repository.listOrders(limit);
     }

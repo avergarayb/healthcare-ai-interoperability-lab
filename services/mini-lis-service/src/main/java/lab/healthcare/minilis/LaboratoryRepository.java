@@ -127,6 +127,24 @@ public class LaboratoryRepository {
         return one("SELECT * FROM lab_orders WHERE order_id = ?", ORDER, orderId);
     }
 
+    public Optional<LabOrder> findOrderByExternalRequest(String requestingOrganizationId, String externalRequestId) {
+        List<LabOrder> rows = jdbc.query(
+                """
+                SELECT * FROM lab_orders
+                WHERE requesting_organization_id = ? AND external_request_id = ?
+                """,
+                ORDER,
+                requestingOrganizationId,
+                externalRequestId);
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        if (rows.size() != 1) {
+            throw MiniLisException.unavailable();
+        }
+        return Optional.of(rows.get(0));
+    }
+
     public List<LabOrder> listOrders(int limit) {
         return jdbc.query("SELECT * FROM lab_orders ORDER BY requested_at, order_id LIMIT ?", ORDER, limit);
     }
