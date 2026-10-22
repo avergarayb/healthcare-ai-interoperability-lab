@@ -4,6 +4,7 @@ import lab.healthcare.fhir.exception.FhirClientException;
 import lab.healthcare.fhir.exception.FhirErrorCategory;
 import lab.healthcare.fhir.exception.FhirErrorClassifier;
 import lab.healthcare.fhir.clinicalread.minihis.MiniHisClinicalSource;
+import lab.healthcare.fhir.clinicalread.minilis.MiniLisClinicalSource;
 import lab.healthcare.fhir.routing.RoutingException;
 import lab.healthcare.fhir.routing.RoutingService;
 import lab.healthcare.fhir.server.FhirServersProperties;
@@ -36,15 +37,17 @@ public class ClinicalReadService {
     private static final int MAX_TOKEN_LENGTH = 200;
 
     private static final String MINI_HIS = "mini-his";
+    private static final String MINI_LIS = "mini-lis";
 
     private final RoutingService routing;
     private final FhirServersProperties servers;
     private final ObjectMapper json;
     private final String source;
     private final MiniHisClinicalSource miniHis;
+    private final MiniLisClinicalSource miniLis;
 
     public ClinicalReadService(RoutingService routing, FhirServersProperties servers, ObjectMapper json) {
-        this(routing, servers, json, ClinicalReadLimits.DESTINATION, (MiniHisClinicalSource) null);
+        this(routing, servers, json, ClinicalReadLimits.DESTINATION, (MiniHisClinicalSource) null, (MiniLisClinicalSource) null);
     }
 
     @Autowired
@@ -53,8 +56,9 @@ public class ClinicalReadService {
             FhirServersProperties servers,
             ObjectMapper json,
             @Value("${clinical-read.source:local-hapi}") String source,
-            ObjectProvider<MiniHisClinicalSource> miniHis) {
-        this(routing, servers, json, source, miniHis.getIfAvailable());
+            ObjectProvider<MiniHisClinicalSource> miniHis,
+            ObjectProvider<MiniLisClinicalSource> miniLis) {
+        this(routing, servers, json, source, miniHis.getIfAvailable(), miniLis.getIfAvailable());
     }
 
     public ClinicalReadService(
@@ -63,6 +67,16 @@ public class ClinicalReadService {
             ObjectMapper json,
             String source,
             MiniHisClinicalSource miniHis) {
+        this(routing, servers, json, source, miniHis, null);
+    }
+
+    public ClinicalReadService(
+            RoutingService routing,
+            FhirServersProperties servers,
+            ObjectMapper json,
+            String source,
+            MiniHisClinicalSource miniHis,
+            MiniLisClinicalSource miniLis) {
         if (routing == null) {
             throw new IllegalArgumentException("Routing service must be provided");
         }
@@ -78,12 +92,16 @@ public class ClinicalReadService {
         String selected = source == null ? "" : source.trim();
         this.source = selected.isEmpty() ? ClinicalReadLimits.DESTINATION : selected;
         this.miniHis = miniHis;
+        this.miniLis = miniLis;
     }
 
     public JsonNode readPatient(String logicalId) {
         String id = logicalId(logicalId);
         if (miniHisSelected()) {
             return miniHis().readPatient(id);
+        }
+        if (miniLisSelected()) {
+            return miniLis().readPatient(id);
         }
         return readResource("Patient", () -> routing.readPatientByLogicalId(ClinicalReadLimits.DESTINATION, id), id);
     }
@@ -93,6 +111,9 @@ public class ClinicalReadService {
         String value = token(identifierValue);
         if (miniHisSelected()) {
             return miniHis().searchPatients(system, value);
+        }
+        if (miniLisSelected()) {
+            return miniLis().searchPatients(system, value);
         }
         return search(
                 "Patient",
@@ -105,6 +126,9 @@ public class ClinicalReadService {
         if (miniHisSelected()) {
             return miniHis().readEncounter(id);
         }
+        if (miniLisSelected()) {
+            throw ClinicalReadException.operationNotSupported();
+        }
         return readResource("Encounter", () -> routing.readEncounter(ClinicalReadLimits.DESTINATION, id), id);
     }
 
@@ -113,6 +137,9 @@ public class ClinicalReadService {
         String encounterStatus = status(status);
         if (miniHisSelected()) {
             return miniHis().searchEncounters(patient, encounterStatus);
+        }
+        if (miniLisSelected()) {
+            throw ClinicalReadException.operationNotSupported();
         }
         return search(
                 "Encounter",
@@ -125,6 +152,9 @@ public class ClinicalReadService {
         if (miniHisSelected()) {
             return miniHis().readObservation(id);
         }
+        if (miniLisSelected()) {
+            return miniLis().readObservation(id);
+        }
         return readResource(
                 "Observation", () -> routing.readObservationByLogicalId(ClinicalReadLimits.DESTINATION, id), id);
     }
@@ -134,6 +164,9 @@ public class ClinicalReadService {
         String observationStatus = status(status);
         if (miniHisSelected()) {
             return miniHis().searchObservations(patient, observationStatus);
+        }
+        if (miniLisSelected()) {
+            return miniLis().searchObservations(patient, observationStatus);
         }
         return search(
                 "Observation",
@@ -146,6 +179,9 @@ public class ClinicalReadService {
         if (miniHisSelected()) {
             return miniHis().readAppointment(id);
         }
+        if (miniLisSelected()) {
+            throw ClinicalReadException.operationNotSupported();
+        }
         return readResource("Appointment", () -> routing.readAppointment(ClinicalReadLimits.DESTINATION, id), id);
     }
 
@@ -154,14 +190,69 @@ public class ClinicalReadService {
         if (miniHisSelected()) {
             return miniHis().searchAppointments(patient);
         }
+        if (miniLisSelected()) {
+            throw ClinicalReadException.operationNotSupported();
+        }
         return search(
                 "Appointment",
                 () -> routing.searchAppointmentsByPatient(
                         ClinicalReadLimits.DESTINATION, patient, ClinicalReadLimits.PAGE_SIZE));
     }
 
+    public JsonNode readServiceRequest(String logicalId) {
+        String id = logicalId(logicalId);
+        if (!miniLisSelected()) {
+            throw ClinicalReadException.operationNotSupported();
+        }
+        return miniLis().readServiceRequest(id);
+    }
+
+    public JsonNode searchServiceRequests(String patientId, String status) {
+        String patient = logicalId(patientId);
+        String requestStatus = optionalStatus(status);
+        if (!miniLisSelected()) {
+            throw ClinicalReadException.operationNotSupported();
+        }
+        return miniLis().searchServiceRequests(patient, requestStatus);
+    }
+
+    public JsonNode readDiagnosticReport(String logicalId) {
+        String id = logicalId(logicalId);
+        if (!miniLisSelected()) {
+            throw ClinicalReadException.operationNotSupported();
+        }
+        return miniLis().readDiagnosticReport(id);
+    }
+
+    public JsonNode searchDiagnosticReports(String patientId, String status) {
+        String patient = logicalId(patientId);
+        String reportStatus = optionalStatus(status);
+        if (!miniLisSelected()) {
+            throw ClinicalReadException.operationNotSupported();
+        }
+        return miniLis().searchDiagnosticReports(patient, reportStatus);
+    }
+
     private boolean miniHisSelected() {
         return MINI_HIS.equals(source);
+    }
+
+    private boolean miniLisSelected() {
+        return MINI_LIS.equals(source);
+    }
+
+    private MiniLisClinicalSource miniLis() {
+        if (!miniLisSelected() || miniLis == null) {
+            throw ClinicalReadException.unavailable();
+        }
+        return miniLis;
+    }
+
+    private static String optionalStatus(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return status(value);
     }
 
     private MiniHisClinicalSource miniHis() {

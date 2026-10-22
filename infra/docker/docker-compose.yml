@@ -63,5 +63,43 @@ services:
     volumes:
       - ./fhir-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
 
+  mini-lis-postgres:
+    image: postgres:16-alpine
+    container_name: mini-lis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: minilis
+      POSTGRES_USER: minilis
+      POSTGRES_PASSWORD: minilis
+    ports:
+      - "5433:5432"
+    volumes:
+      - mini-lis-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minilis -d minilis"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mini-lis:
+    build:
+      context: ../../services/mini-lis-service
+    container_name: mini-lis
+    restart: unless-stopped
+    depends_on:
+      mini-lis-postgres:
+        condition: service_healthy
+    ports:
+      - "8096:8096"
+    environment:
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: "8096"
+      MINI_LIS_ALLOW_EXTERNAL_BIND: "true"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://mini-lis-postgres:5432/minilis
+      SPRING_DATASOURCE_USERNAME: minilis
+      SPRING_DATASOURCE_PASSWORD: minilis
+      MINI_LIS_SERVICE_TOKEN: ${MINI_LIS_SERVICE_TOKEN:-lab-mini-lis-dev}
+
 volumes:
   hapi-fhir-postgres-data:
+  mini-lis-postgres-data:

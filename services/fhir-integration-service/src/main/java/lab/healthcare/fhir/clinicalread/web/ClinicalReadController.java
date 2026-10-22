@@ -76,6 +76,30 @@ public class ClinicalReadController {
         return clinicalRead.searchAppointments(patient);
     }
 
+    @GetMapping(path = "/api/clinical-read/v1/service-requests/{logicalId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public JsonNode readServiceRequest(@PathVariable String logicalId) {
+        return clinicalRead.readServiceRequest(logicalId);
+    }
+
+    @GetMapping(path = "/api/clinical-read/v1/service-requests", produces = MediaType.APPLICATION_JSON_VALUE)
+    public JsonNode searchServiceRequests(
+            @RequestParam(required = false) String patient,
+            @RequestParam(required = false) String status) {
+        return clinicalRead.searchServiceRequests(patient, status);
+    }
+
+    @GetMapping(path = "/api/clinical-read/v1/diagnostic-reports/{logicalId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public JsonNode readDiagnosticReport(@PathVariable String logicalId) {
+        return clinicalRead.readDiagnosticReport(logicalId);
+    }
+
+    @GetMapping(path = "/api/clinical-read/v1/diagnostic-reports", produces = MediaType.APPLICATION_JSON_VALUE)
+    public JsonNode searchDiagnosticReports(
+            @RequestParam(required = false) String patient,
+            @RequestParam(required = false) String status) {
+        return clinicalRead.searchDiagnosticReports(patient, status);
+    }
+
     @ExceptionHandler(ClinicalReadException.class)
     public ResponseEntity<Map<String, String>> failed(ClinicalReadException ex) {
         log.info("clinical_read_failed error={}", ex.code());

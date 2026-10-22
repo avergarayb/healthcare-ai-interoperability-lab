@@ -107,3 +107,29 @@ clinical-read:
     base-url: http://127.0.0.1:8095
     connect-timeout: 2s
     read-timeout: 5s
+  mini-lis:
+    base-url: http://127.0.0.1:8096
+    service-token: ${MINI_LIS_SERVICE_TOKEN:lab-mini-lis-dev}
+    connect-timeout: 2s
+    read-timeout: 5s
+
+interop:
+  sources:
+    mini-his:
+      organization-id: org-mini-his
+      display-name: Mini HIS
+      base-url: http://127.0.0.1:8095
+      capabilities:
+        - patient
+        - encounter
+        - observation
+        - appointment
+    mini-lis:
+      organization-id: org-mini-lis
+      display-name: Mini LIS
+      base-url: http://127.0.0.1:8096
+      capabilities:
+        - patient
+        - service-request
+        - observation
+        - diagnostic-report

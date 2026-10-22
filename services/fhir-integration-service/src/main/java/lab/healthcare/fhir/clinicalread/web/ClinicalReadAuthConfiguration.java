@@ -15,7 +15,7 @@ public class ClinicalReadAuthConfiguration {
             ModelBoundaryServiceTokenSettings settings) {
         FilterRegistrationBean<ClinicalReadServiceAuthFilter> registration = new FilterRegistrationBean<>();
         registration.setFilter(new ClinicalReadServiceAuthFilter(settings));
-        registration.addUrlPatterns("/api/clinical-read/v1/*");
+        registration.addUrlPatterns("/api/clinical-read/v1/*", "/api/interop/v1/*");
         registration.setName("clinicalReadServiceAuthFilter");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
         return registration;
