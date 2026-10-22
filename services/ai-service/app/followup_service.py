@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.followup_models import (
+    CASE_IDS,
     ActionState,
     ActionStatus,
     ClinicalAssessment,
@@ -37,7 +38,9 @@ from app.followup_models import (
 from app.followup_review import (
     FollowUpReviewCaseService,
     InvalidReviewTrigger,
+    ReviewCaseStatus,
     ReviewPersistenceUnavailable,
+    validate_review_case_id,
 )
 from app.langgraph_fhir_client import InMemoryAuditSink, default_clock
 from app.langgraph_followup_workflow import (
@@ -269,3 +272,179 @@ def _log(correlation_id: str, status: str) -> None:
     if "x-service-token=" in lowered or "gemini_api_key=" in lowered:
         raise RuntimeError("follow-up log line must not contain secrets")
     log.info(line)
+
+
+def run_agent_workflow_http(request: Request, settings: Settings, raw_body: bytes) -> Response:
+    """Start one orchestrated workflow. Existing follow-up routes stay unchanged."""
+    denied = _workflow_guard(request, settings)
+    if denied is not None:
+        return denied
+    body = _load_body(raw_body)
+    case_id = body.get("caseId") if isinstance(body, dict) else None
+    workflow_type = body.get("workflowType") if isinstance(body, dict) else None
+    if case_id not in CASE_IDS or workflow_type not in {"post_consultation", "missed_follow_up"}:
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    repository = getattr(request.app.state, "followup_review_repository", None)
+    if repository is None:
+        return JSONResponse(status_code=503, content={"detail": REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL})
+    from app.langgraph_workflow_orchestration import build_live_ports, saver_for, start_workflow, workflow_db_path
+
+    ports = getattr(request.app.state, "agent_workflow_ports", None) or build_live_ports(settings, repository)
+    saver = getattr(request.app.state, "agent_workflow_saver", None) or saver_for(workflow_db_path(settings))
+    view = start_workflow(saver, ports, case_id, workflow_type)
+    return JSONResponse(status_code=200, content=view)
+
+
+def get_agent_workflow_http(request: Request, settings: Settings, workflow_id: str) -> Response:
+    return _workflow_read(request, settings, workflow_id, None)
+
+
+def get_agent_workflow_steps_http(request: Request, settings: Settings, workflow_id: str) -> Response:
+    return _workflow_read(
+        request,
+        settings,
+        workflow_id,
+        ("workflowId", "status", "currentStep", "steps"),
+    )
+
+
+def get_agent_workflow_evidence_http(request: Request, settings: Settings, workflow_id: str) -> Response:
+    return _workflow_read(
+        request,
+        settings,
+        workflow_id,
+        ("workflowId", "protocol", "evidence", "clinicalContext", "clinicalContextIntelligence"),
+    )
+
+
+def get_agent_workflow_errors_http(request: Request, settings: Settings, workflow_id: str) -> Response:
+    return _workflow_read(
+        request,
+        settings,
+        workflow_id,
+        ("workflowId", "status", "currentStep", "errorCode"),
+    )
+
+
+def resume_agent_workflow_http(
+    request: Request,
+    settings: Settings,
+    workflow_id: str,
+    raw_body: bytes,
+) -> Response:
+    """Resume only after Human Review has stored the same decision for the same case."""
+    denied = _workflow_guard(request, settings)
+    if denied is not None:
+        return denied
+    canonical_id = _canonical_workflow_id(workflow_id)
+    if canonical_id is None:
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    body = _load_body(raw_body)
+    review_case_id = body.get("reviewCaseId") if isinstance(body, dict) else None
+    decision = body.get("decision") if isinstance(body, dict) else None
+    if not isinstance(review_case_id, str) or not isinstance(decision, str):
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    try:
+        review_case_id = validate_review_case_id(review_case_id)
+    except ValueError:
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    repository = getattr(request.app.state, "followup_review_repository", None)
+    if repository is None:
+        return JSONResponse(status_code=503, content={"detail": REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL})
+    try:
+        case = repository.get(review_case_id)
+    except ReviewPersistenceUnavailable:
+        return JSONResponse(status_code=503, content={"detail": REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL})
+    from app.langgraph_workflow_orchestration import (
+        WorkflowDecisionRejected,
+        WorkflowNotFound,
+        WorkflowNotSuspended,
+        build_live_ports,
+        resume_workflow,
+        saver_for,
+        workflow_db_path,
+    )
+
+    path = workflow_db_path(settings)
+    saver = getattr(request.app.state, "agent_workflow_saver", None)
+    if saver is None and path.exists():
+        saver = saver_for(path)
+    if saver is None or saver.index_get(canonical_id) is None:
+        return JSONResponse(status_code=404, content={"error": "workflow_not_found"})
+    ports = getattr(request.app.state, "agent_workflow_ports", None) or build_live_ports(settings, repository)
+    closed = case is not None and case.status is ReviewCaseStatus.CLOSED and case.outcome is not None
+    stored = None if case is None or case.outcome is None else case.outcome.value
+    try:
+        view = resume_workflow(
+            saver,
+            ports,
+            canonical_id,
+            decision,
+            review_case_id=review_case_id,
+            stored_outcome=stored,
+            case_is_closed=closed,
+        )
+    except WorkflowNotFound:
+        return JSONResponse(status_code=404, content={"error": "workflow_not_found"})
+    except WorkflowNotSuspended:
+        return JSONResponse(status_code=409, content={"error": "workflow_not_suspended"})
+    except WorkflowDecisionRejected:
+        return JSONResponse(status_code=403, content={"error": "decision_rejected"})
+    return JSONResponse(status_code=200, content=view)
+
+
+def workflow_views_for_case(settings: Settings, case_id: str) -> list[dict]:
+    """Read workflow projections for a review page. This does not resume anything."""
+    from app.langgraph_workflow_orchestration import read_workflows_for_case, workflow_db_path
+
+    return read_workflows_for_case(workflow_db_path(settings), case_id)
+
+
+def resume_after_human_decision(settings: Settings, repository: Any, review_case_id: str, outcome: str):
+    """Hook used after a successful close. A missing workflow is not an error."""
+    from app.langgraph_workflow_orchestration import resume_after_human_decision as resume_saved
+
+    return resume_saved(settings, repository, review_case_id, outcome)
+
+
+def _workflow_guard(request: Request, settings: Settings) -> Response | None:
+    if not authenticate(request, settings):
+        return Response(status_code=401)
+    if not settings.followup_agent_enabled:
+        return JSONResponse(status_code=503, content={"detail": DISABLED_DETAIL})
+    return None
+
+
+def _workflow_read(
+    request: Request,
+    settings: Settings,
+    workflow_id: str,
+    fields: tuple[str, ...] | None,
+) -> Response:
+    denied = _workflow_guard(request, settings)
+    if denied is not None:
+        return denied
+    canonical_id = _canonical_workflow_id(workflow_id)
+    if canonical_id is None:
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    from app.langgraph_workflow_orchestration import read_workflow_record, workflow_db_path
+
+    saver = getattr(request.app.state, "agent_workflow_saver", None)
+    if saver is not None:
+        view = saver.index_get(canonical_id)
+    else:
+        view = read_workflow_record(workflow_db_path(settings), canonical_id)
+    if view is None:
+        return JSONResponse(status_code=404, content={"error": "workflow_not_found"})
+    if fields is not None:
+        view = {name: view.get(name) for name in fields}
+    return JSONResponse(status_code=200, content=view)
+
+
+def _canonical_workflow_id(value: str) -> str | None:
+    if not isinstance(value, str) or len(value) != 35 or not value.startswith("wf-"):
+        return None
+    digest = value[3:]
+    if any(char not in "0123456789abcdef" for char in digest):
+        return None
+    return value

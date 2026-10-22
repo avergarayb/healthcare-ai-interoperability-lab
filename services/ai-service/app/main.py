@@ -16,7 +16,15 @@ from app.config import Settings
 from app.consumer import consume
 from app.experimental_service import load_json_body, run_experimental_summary
 from app.followup_models import CASE_IDS
-from app.followup_service import run_followup_http
+from app.followup_service import (
+    get_agent_workflow_errors_http,
+    get_agent_workflow_evidence_http,
+    get_agent_workflow_http,
+    get_agent_workflow_steps_http,
+    resume_agent_workflow_http,
+    run_agent_workflow_http,
+    run_followup_http,
+)
 from app.missed_follow_up_service import run_missed_follow_up_http
 from app.clinical_review_context_http import get_clinical_review_context_http
 from app.human_development_auth import (
@@ -292,6 +300,59 @@ async def missed_follow_up(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     return run_missed_follow_up_http(request, settings, await request.body())
+
+
+@app.post("/internal/workflows")
+async def start_agent_workflow(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return run_agent_workflow_http(request, settings, await request.body())
+
+
+@app.get("/internal/workflows/{workflow_id}/steps")
+def get_agent_workflow_steps(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_agent_workflow_steps_http(request, settings, workflow_id)
+
+
+@app.get("/internal/workflows/{workflow_id}/evidence")
+def get_agent_workflow_evidence(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_agent_workflow_evidence_http(request, settings, workflow_id)
+
+
+@app.get("/internal/workflows/{workflow_id}/errors")
+def get_agent_workflow_errors(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_agent_workflow_errors_http(request, settings, workflow_id)
+
+
+@app.get("/internal/workflows/{workflow_id}")
+def get_agent_workflow(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_agent_workflow_http(request, settings, workflow_id)
+
+
+@app.post("/internal/workflows/{workflow_id}/resume")
+async def resume_agent_workflow(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return resume_agent_workflow_http(request, settings, workflow_id, await request.body())
 
 
 @app.get("/internal/follow-up-review-cases")

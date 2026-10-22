@@ -46,5 +46,9 @@ __pycache__/
 /data/human-session.sqlite3*
 /services/ai-service/data/human-session.sqlite3*
 
+# Agent workflow checkpoints. Separate from Mini HIS and from Human Review.
+/data/agent-workflow.sqlite3*
+/services/ai-service/data/agent-workflow.sqlite3*
+
 # Local Docker bind-mount data (named volumes are preferred)
 infra/docker/data/

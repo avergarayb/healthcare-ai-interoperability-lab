@@ -20,6 +20,7 @@ LESSON_MODULES = {
     "langgraph_fhir_followup.py",
     "langgraph_gemini_fhir_followup.py",
     "langgraph_followup_workflow.py",
+    "langgraph_workflow_orchestration.py",
 }
 # These modules reuse the FHIR read implementation. They must not import LangGraph or Gemini.
 FHIR_REUSE_MODULES = {
@@ -137,6 +138,7 @@ _OPERATIONAL_FACTORIES = (
     ("langgraph_followup_workflow.py", "build_live_followup_workflow"),
     ("missed_follow_up_service.py", "_live_adapter"),
     ("clinical_review_context_http.py", "_fhir_client"),
+    ("langgraph_workflow_orchestration.py", "build_live_ports"),
 )
 
 

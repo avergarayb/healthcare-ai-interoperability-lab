@@ -508,6 +508,7 @@ def close_review_case(
                 return _redirect(review_case_id)
             return _redirect(review_case_id, notice=True)
         status = 303
+        _resume_closed_workflow(settings, repository, review_case_id, outcome.value)
         return _redirect(review_case_id)
     finally:
         _log(request, "/review-cases/{reviewCaseId}/close", status, started, review_case_id)
@@ -1221,12 +1222,92 @@ def _case_body(
     parts.append(_context_section(context, context_message))
     if timeline_html:
         parts.append(timeline_html)
+    parts.append(_workflow_section(case, settings))
     parts.append(_proposal_section(case))
     parts.append(_assistance_section(case, settings, assistance, session_id))
     parts.append(_outcome_section(case, settings, coordination, session_id))
     parts.append(_controlled_action_section(case, settings, coordination, attributions, session_id))
     parts.append(_technical_details(detail, context, coordination, attributions))
     return "".join(parts)
+
+
+def _resume_closed_workflow(settings: Settings, repository: object, review_case_id: str, outcome: str) -> None:
+    """A successful close can continue a waiting workflow. The close still redirects if it cannot."""
+    try:
+        from app.followup_service import resume_after_human_decision
+
+        resume_after_human_decision(settings, repository, review_case_id, outcome)
+    except Exception:
+        return
+
+
+def _workflow_section(case: FollowUpReviewCase, settings: Settings) -> str:
+    """Read-only orchestration status. Viewing this section does not decide the case."""
+    try:
+        from app.followup_service import workflow_views_for_case
+
+        views = workflow_views_for_case(settings, case.case_id)
+    except Exception:
+        return (
+            "<section><h2>Orquestación del workflow</h2>"
+            "<p>El estado del workflow no está disponible.</p>"
+            "<p>Esta vista no reanuda el workflow ni registra una decisión.</p>"
+            "</section>"
+        )
+    if not views:
+        return (
+            "<section><h2>Orquestación del workflow</h2>"
+            "<p>No hay un workflow de orquestación para este caso.</p>"
+            "<p>Esta vista no reanuda el workflow ni registra una decisión.</p>"
+            "</section>"
+        )
+    return "".join(_one_workflow(case, view) for view in views)
+
+
+def _one_workflow(case: FollowUpReviewCase, view: dict) -> str:
+    protocol = view.get("protocol") if isinstance(view.get("protocol"), dict) else {}
+    evidence = view.get("evidence") if isinstance(view.get("evidence"), list) else []
+    evidence_items = "".join(f"<li>{esc(str(item))}</li>" for item in evidence)
+    reasons = protocol.get("reasonCodes") if isinstance(protocol.get("reasonCodes"), list) else []
+    reason_text = ", ".join(str(item) for item in reasons) or "sin códigos"
+    if view.get("narrativeStatus") in {"prepared", "stored"} and case.narrative_text:
+        narrative = "Narrativa generada: el texto está en la propuesta del agente de seguimiento."
+    elif view.get("narrativeStatus") == "unavailable":
+        narrative = "Narrativa generada: no disponible. No se inventó un texto."
+    elif view.get("narrativeStatus") == "not_started":
+        narrative = "Narrativa generada: no solicitada para este resultado."
+    else:
+        narrative = f"Narrativa generada: {view.get('narrativeStatus') or 'sin estado'}."
+    decision = view.get("humanDecision") or "Pendiente de decisión humana."
+    context = view.get("clinicalContext") if isinstance(view.get("clinicalContext"), dict) else {}
+    steps = view.get("steps") if isinstance(view.get("steps"), list) else []
+    step_items = "".join(f"<li>{esc(str(item))}</li>" for item in steps)
+    return (
+        "<section><h2>Orquestación del workflow</h2>"
+        "<p>Esta vista no reanuda el workflow ni registra una decisión.</p>"
+        "<h3>Referencia leída del HIS</h3>"
+        f"<p>{esc(str(view.get('patientReference') or 'sin referencia'))}. "
+        f"Contexto {esc(str(context.get('contextStatus') or 'sin estado'))}.</p>"
+        "<h3>Evaluación determinista del protocolo</h3>"
+        f"<p>{esc(str(protocol.get('protocolId') or 'sin protocolo'))}. "
+        f"Resultado {esc(str(protocol.get('evaluationStatus') or 'sin estado'))}. "
+        f"Motivos {esc(reason_text)}.</p>"
+        "<h3>Propuesta de IA</h3>"
+        f"<p>{esc(narrative)}</p>"
+        "<h3>Decisión humana del workflow</h3>"
+        f"<p>{esc(str(decision))}</p>"
+        "<dl>"
+        f"<dt>Identificador del workflow</dt><dd>{esc(str(view.get('workflowId') or ''))}</dd>"
+        f"<dt>Tipo de workflow</dt><dd>{esc(str(view.get('workflowType') or ''))}</dd>"
+        f"<dt>Estado actual</dt><dd>{esc(str(view.get('status') or ''))}</dd>"
+        f"<dt>Estado de revisión</dt><dd>{esc(str(view.get('reviewStatus') or 'sin revisión'))}</dd>"
+        "</dl>"
+        "<h3>Pasos ejecutados</h3><ol>"
+        + step_items
+        + "</ol><h3>Evidencia principal</h3><ul>"
+        + evidence_items
+        + "</ul></section>"
+    )
 
 
 def _timeline_section(case: FollowUpReviewCase, settings: Settings) -> str:
