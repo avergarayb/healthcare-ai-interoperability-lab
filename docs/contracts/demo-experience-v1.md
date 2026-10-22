@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented laboratory contract for the synthetic Human Review demonstration. Slice 1, slice 2, and slice 3 are complete. Automated tests passed. Manual validation of slice 1 is complete. Visual validation of slice 2 is still pending. Not a complete localization. Not production-ready. Not a clinical diagnosis, recommendation, or treatment decision. Not verified clinical identity. Not clinician authorization. Not a security audit. Not IAM, SSO, or RBAC.
+Implemented laboratory contract for the synthetic Human Review demonstration. Slice 1, slice 2, and slice 3 are complete. Automated tests passed. Manual validation of slice 1 is complete. Visual validation of slice 2 is complete in the laboratory. `SYN-DEMO-102` was read through Java Clinical Read against local HAPI. `SYN-DEMO-101` was read in an isolated temporary review whose FHIR facts came from an in-memory gateway. Java Clinical Read was used for `SYN-DEMO-102` only. Not a complete localization. Not production-ready. Not a clinical diagnosis, recommendation, or treatment decision. Not verified clinical identity. Not clinician authorization. Not a security audit. Not IAM, SSO, or RBAC.
 
 This contract changes only the server-rendered words and grouping on the existing queue and case pages. It does not change the behavior or authority of [HUMAN_IDENTITY_V1](human-identity-v1.md). Slice 3 adds only a later documentary reference to [HUMAN_ATTRIBUTION_V1](human-attribution-v1.md) and ADR-094. [CONTROLLED_ACTION_V1](controlled-action-v1.md), [AI_ASSISTED_REVIEW_V1](ai-assisted-review-v1.md), and [the operational review workflow](follow-up-review-workflow-v1.md) stay in force. Stored values, protocol evaluation, coordination policy, and review outcomes do not change.
 
@@ -246,6 +246,22 @@ Automated:
 Manual:
 
 - The originating missed appointment is understandable once, and the current-appointment list points back to it instead of repeating it.
+
+Laboratory visual validation, recorded on 2026-10-21:
+
+Six automated presentation tests passed in the initial slice 2 audit. The browser checks below used the running review page.
+
+`SYN-DEMO-102` stayed the persisted open case. Java Clinical Read was pointed temporarily at `local-hapi` and then restored to `mini-his`. The patient search and the exact appointment read recovered `Patient/syn-demo-patient-102` and `Appointment/syn-demo-noshow-102` from HAPI. The browser showed:
+
+- the originating appointment once, under `Cita que originó el caso`;
+- the current appointment list pointing back with `La cita que originó este caso está arriba.` and omitting that same reference;
+- `Estado operativo de la cita no clasificado` for the current `OTHER` classification;
+- `OTHER` and `noshow` inside `Detalles técnicos`;
+- the former `Other appointment status` sentence absent.
+
+`SYN-DEMO-101` stayed closed in the persistent review database. An open `POST_CONSULTATION_RESULT_REVIEW_V1` case with the same contract identifiers was prepared in a disposable review database outside the repository. The page read the versioned fixtures through an in-memory FHIR gateway. The browser showed the case open, with `Consulta` and `Resultados disponibles`. It did not show `Cita que originó el caso` and it did not show a clinical-context load error. That run did not write persistent HAPI and did not call Java Clinical Read.
+
+The seven persisted review cases were unchanged after both checks.
 
 ## Slice 3 acceptance
 
