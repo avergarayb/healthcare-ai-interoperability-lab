@@ -30,6 +30,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - Bounded, completeness-aware collection handling and case isolation. The operational post-consultation, missed-follow-up, and clinical-context factories, including the open-case page reader, call Java through `ClinicalReadClient`. `HapiReadClient` and `FHIR_BASE_URL` remain in the repository. Python does not call Mini HIS.
 - Deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` outside model authority.
 - Deterministic `MISSED_FOLLOW_UP_REVIEW_V1` from Patient and Appointment reads only, without Gemini, on the same review queue.
+- Laboratory LangGraph `StateGraph` for follow-up workflows. Java Clinical Read supplies the clinical facts. The same two deterministic protocols decide eligibility. Gemini may prepare a narrative and does not decide that eligibility. A matched case opens Human Review. `interrupt` suspends the graph. The checkpoint is a SQLite file beside the review database. A stored human decision resumes the same workflow, including after the Python process restarts. This is laboratory orchestration. It is not a production workflow engine. Design: [LangGraph workflow orchestration v1](design/langgraph-workflow-orchestration-v1.md).
 - Response-level human-review requirement and proposed review action when the protocol matches.
 - Durable SQLite-backed operational review cases with queue, provenance, bounded closure outcomes and transition history.
 - Open-case `CLINICAL_REVIEW_CONTEXT_V1` current FHIR projection without protocol reevaluation or persistence.
@@ -49,7 +50,7 @@ The following capabilities are not established by the current repository:
 
 - human-review assignment, claiming and verified reviewer identity;
 - clinical assessment or clinical decision support;
-- general workflow checkpointing beyond the operational review-case store;
+- production workflow checkpointing. The laboratory StateGraph checkpoint in SQLite is implemented for one writer process. It is not a production checkpoint store;
 - a multi-user product frontend and production human identity; the synthetic review demo has a development session and is not that frontend;
 - enterprise IAM/RBAC and multi-tenancy;
 - durable audit storage and production operations;
@@ -82,4 +83,4 @@ Each candidate requires a separate product decision, security assessment and acc
 
 The repository has an implemented interoperability foundation and an implemented Healthcare AI workflow foundation. It is beyond the former “Phase 2–3” and “future AI/LangGraph” descriptions.
 
-It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, the SQLite review store is single-instance, and deterministic follow-up review is not clinical diagnosis. An internal coordination request after an explicit POST is recorded operational evidence. It is not external execution and it is not clinical diagnosis. The synthetic review pages now use the accepted demo presentation. Slice 2 of that presentation still awaits visual confirmation. Clinical Read and the Mini HIS source are laboratory increments on this branch. They are not the bidirectional exchange in ADR-095. The 2026-10-19 laboratory E2E result is recorded separately and does not close the product gaps above.
+It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, the SQLite review store is single-instance, and deterministic follow-up review is not clinical diagnosis. An internal coordination request after an explicit POST is recorded operational evidence. It is not external execution and it is not clinical diagnosis. The synthetic review pages now use the accepted demo presentation. Slice 2 of that presentation still awaits visual confirmation. Clinical Read and the Mini HIS source are laboratory increments in this repository. They are not the bidirectional exchange in ADR-095. Laboratory LangGraph orchestration is implemented for follow-up: Clinical Read, deterministic evaluation, a narrative proposal, Human Review `interrupt` and resume, and SQLite checkpoint recovery after a Python restart. That checkpoint is not production-ready. The 2026-10-19 laboratory E2E result is recorded separately and does not close the product gaps above.

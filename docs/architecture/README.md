@@ -7,7 +7,7 @@ This is the concise architecture authority and index for the **Healthcare AI & I
 | Unit | Runtime | Current responsibility |
 |---|---|---|
 | **Healthcare Interoperability** | Java 21 / Spring Boot | Implemented: FHIR/SMART client, vendor profiles, routing, resilience, transformations, controlled projections, Model Boundary v1, and Clinical Read API v1. The default Clinical Read source is local HAPI. `mini-his` is an optional laboratory source. Target, not implemented: independent bidirectional exchange among authorized organizations. |
-| **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, deterministic protocol authority, and narrative model subflows. Operational follow-up factories acquire Patient, Encounter, Observation, and Appointment through Clinical Read API v1. |
+| **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, deterministic protocol authority, narrative model subflows, and a laboratory `StateGraph` that pauses a matched follow-up case for Human Review. Operational follow-up factories acquire Patient, Encounter, Observation, and Appointment through Clinical Read API v1. |
 
 The units are independently deployable and may be sold separately or composed. Pricing and SKU names are not decided. The commercial connectivity target is [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
 
@@ -36,6 +36,24 @@ Mini HIS Simulator (own SQLite, proprietary REST)
         -> same Clinical Read API v1 envelope
         -> Python ClinicalReadClient and the same follow-up protocols
 ```
+
+```text
+Java Clinical Read API v1
+        -> Python StateGraph
+        -> clinical_read
+        -> context_intelligence
+        -> protocol_evaluation
+        -> eligibility_router
+        -> not_matched or insufficient: completion
+        -> matched: narrative
+        -> human_review
+        -> await_human (interrupt, waiting_human)
+        -> stored Human Review decision
+        -> Command(resume)
+        -> completion
+```
+
+Java owns the clinical read. The deterministic protocol owns eligibility. The narrative step may call Gemini and does not choose the protocol result. LangGraph orders those steps, suspends the matched case, and stores the checkpoint. Human Review owns the human decision. A resume continues only after that decision is already stored. The same SQLite checkpoint is what a restarted Python process reads. One process writes that file. This laboratory graph is not a production workflow engine.
 
 Python does not call Mini HIS and does not choose the protocol outcome. `HapiReadClient` remains in the Python tree; the factories named above do not construct it. Clinical review context for an open case uses the same Java read. See [Clinical Read API v1](../contracts/clinical-read-v1.md) and [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
 
@@ -106,6 +124,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 - [Human identity V1 contract](../contracts/human-identity-v1.md) — accepted laboratory contract. The review demo requires a development session. Not production identity.
 - [Human attribution V1 contract](../contracts/human-attribution-v1.md) — accepted laboratory contract. The review UI records a synthetic development principal on close and on the first coordination request. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. No retrospective attribution and no FHIR write.
 - [Operational Follow-up Review Workflow V1 contract](../contracts/follow-up-review-workflow-v1.md)
+- [LangGraph workflow orchestration v1](../design/langgraph-workflow-orchestration-v1.md) — laboratory `StateGraph`, interrupt, resume, and SQLite checkpoint. Not production checkpointing.
 - [Healthcare Interoperability architecture](../fhir/fhir-architecture.md)
 - [Healthcare AI runbook](../../services/ai-service/README.md)
 - [AI governance](../ai-governance/README.md)
