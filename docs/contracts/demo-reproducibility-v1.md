@@ -18,7 +18,7 @@ The Healthcare AI service does not write FHIR, does not send a message, and does
 |---|---|
 | Existing deterministic evaluators | Whether a synthetic read matches a protocol |
 | `ensure_for_protocol` | Creating or reusing one durable review case for a matched trigger |
-| Review SQLite, schema version 4 | Cases, events, coordination requests, coordination history, and development attributions |
+| Review SQLite, schema version 5 | Cases, events, coordination requests, coordination history, development attributions, and stored review narratives |
 | Local HAPI | The synthetic Patient, Encounter, Observation, and Appointment resources named by this contract |
 | This contract | Which case ids are disposable, which rows a reset may delete, and when preparation or reset must abort |
 | Browser | Nothing about protocol, outcome, status, or principal |
@@ -99,19 +99,30 @@ The queue shows `SYN-DEMO-101` and `SYN-DEMO-102` open. The operator then:
 
 The stored coordination status remains `requested`. That record does not send a message, write FHIR, or schedule an appointment. The development principal recorded for those two UI operations follows [HUMAN_ATTRIBUTION_V1](human-attribution-v1.md). Internal close is not used for this walkthrough, because it does not record that attribution.
 
-On `SYN-DEMO-102`, visual validation of [DEMO_EXPERIENCE_V1](demo-experience-v1.md) slice 2 is part of acceptance: the originating appointment is understandable once, as `Cita que originó el caso`, and the current appointment list points back to it instead of repeating it. `Estado operativo de la cita no clasificado` is visible for the current `OTHER` classification. `OTHER` and `noshow` remain in `Detalles técnicos`. `SYN-DEMO-101` does not show `Cita que originó el caso`.
+The operator walkthrough above is separate from the visual check in the next section.
+
+## Slice 2 visual reproduction
+
+Visual confirmation of [DEMO_EXPERIENCE_V1](demo-experience-v1.md) slice 2 is complete in the laboratory. The two disposable cases were confirmed by different reads. Java Clinical Read and HAPI were used for `SYN-DEMO-102` only.
+
+`SYN-DEMO-102` requires its HAPI fixtures to be readable through Clinical Read with source `local-hapi`. The persisted case stayed open. In that window the patient search and the exact appointment read returned `Patient/syn-demo-patient-102` and `Appointment/syn-demo-noshow-102`. Clinical Read was restored to `mini-his` afterward. Mini HIS does not hold these demo resources, so a `mini-his` source does not supply this context. The browser showed the originating appointment once, the current list pointing back to it, the operational label `Estado operativo de la cita no clasificado`, and the codes `OTHER` and `noshow` inside `Detalles técnicos`.
+
+`SYN-DEMO-101` can be validated in a temporary review database with the versioned synthetic fixtures and an in-memory FHIR gateway. The persistent laboratory row stayed closed. That isolated page showed `Consulta` and `Resultados disponibles`, and it did not show `Cita que originó el caso`. The run did not write persistent HAPI and did not call Java.
+
+The existing reset deletes review state for `SYN-DEMO-101` and `SYN-DEMO-102` together. The repository has no utility that resets only one of those ids. Repeating the isolated `SYN-DEMO-101` check does not require a reset of the persistent laboratory database.
 
 ## Controlled reset
 
 Reset is a local utility. It is not an HTTP endpoint. It opens only the review database identified below. It does not open the session database and it does not call FHIR.
 
-The utility sets `PRAGMA foreign_keys=ON` and aborts if enforcement is not active. It checks `PRAGMA user_version` is 4, `PRAGMA integrity_check` is `ok`, and `PRAGMA foreign_key_check` returns no rows. It does not migrate the database. It then copies every historical row, and every child row of those historical cases, from:
+The utility sets `PRAGMA foreign_keys=ON` and aborts if enforcement is not active. It checks `PRAGMA user_version` is 5, `PRAGMA integrity_check` is `ok`, and `PRAGMA foreign_key_check` returns no rows. It does not migrate the database. Schema version 5 is the current review schema. Migration `005_follow_up_review_narrative.sql` adds `follow_up_review_narratives` and sets `user_version` to 5. The utilities compare `user_version` with that schema version. It then copies every historical row, and every child row of those historical cases, from:
 
 - `follow_up_review_cases`
 - `follow_up_review_case_events`
 - `follow_up_coordination_requests`
 - `follow_up_human_attributions`
 - `follow_up_coordination_request_events`
+- `follow_up_review_narratives`
 
 Inside `BEGIN IMMEDIATE` it deletes only disposable rows, in this order:
 
@@ -119,13 +130,14 @@ Inside `BEGIN IMMEDIATE` it deletes only disposable rows, in this order:
 2. `follow_up_coordination_request_events` for those ids.
 3. `follow_up_coordination_requests` for those ids.
 4. `follow_up_review_case_events` for those ids.
-5. `follow_up_review_cases` for `SYN-DEMO-101` and `SYN-DEMO-102` whose protocol matches the table above.
+5. `follow_up_review_narratives` for those ids.
+6. `follow_up_review_cases` for `SYN-DEMO-101` and `SYN-DEMO-102` whose protocol matches the table above.
 
-The transaction commits only when the historical copy still matches the database, `foreign_key_check` is still empty, and `user_version` is still 4. Otherwise it rolls back. A reset that finds no disposable rows commits only when that historical comparison succeeds. It does not delete SQLite `-wal` or `-shm` files. FHIR resources are left in place.
+The transaction commits only when the historical copy still matches the database, `foreign_key_check` is still empty, and `user_version` is still 5. Otherwise it rolls back. A reset that finds no disposable rows commits only when that historical comparison succeeds. It does not delete SQLite `-wal` or `-shm` files. FHIR resources are left in place.
 
 ## Preconditions and abort conditions
 
-Both utilities require an explicit absolute path to the review database. The path must be the configured local `AI_REVIEW_DB_PATH`, must already exist, and must be schema version 4. They abort when the version is anything else. They do not migrate it. The utility aborts if that path is missing, is the session database, is the institutional-knowledge database, or cannot be resolved to one file.
+Both utilities require an explicit absolute path to the review database. The path must be the configured local `AI_REVIEW_DB_PATH`, must already exist, and must be schema version 5. They abort when the version is anything else. They do not migrate it. The utility aborts if that path is missing, is the session database, is the institutional-knowledge database, or cannot be resolved to one file.
 
 Both utilities check that `127.0.0.1:8090` does not accept a connection. That check is necessary and is not sufficient. They also require the exclusive write lock from `BEGIN IMMEDIATE` within the existing busy timeout. If the port check fails, the check itself errors, the lock is not acquired, or any ownership or schema fact is uncertain, the utility aborts and leaves the database unchanged.
 
@@ -140,8 +152,8 @@ Automated, against a temporary database and a scripted FHIR client:
 - Preparation creates one open version-1 case for each disposable id and does not call Gemini.
 - A second preparation reuses those open cases.
 - Preparation against a closed disposable case does not write and does not reopen it.
-- Reset deletes only disposable cases, their events, their coordination requests, and their attributions.
-- Historical rows for `SYN-FOLLOWUP-006`, `SYN-FOLLOWUP-008`, and `SYN-FOLLOWUP-012`, including events, coordination requests, and attributions, are equal before and after reset.
+- Reset deletes only disposable cases, their events, their coordination requests, their attributions, and their stored narratives.
+- Historical rows for `SYN-FOLLOWUP-006`, `SYN-FOLLOWUP-008`, and `SYN-FOLLOWUP-012`, including events, coordination requests, attributions, and stored narratives, are equal before and after reset.
 - The session database is not opened.
 - `FollowUpRequest` still rejects `SYN-DEMO-101` and `SYN-DEMO-102`.
 - A PUT is refused when an existing resource is not owned by the demo Patient named for that id.
@@ -151,7 +163,7 @@ Manual:
 - With Healthcare AI stopped, preparation leaves both cases open. After the process starts, the queue shows both.
 - One case is closed with coordination planned and has one coordination request. The other is closed with no operational action.
 - The request status is `requested` and the page still says that this does not send a message, write FHIR, or schedule an appointment.
-- Slice 2 of DEMO_EXPERIENCE_V1 is visually confirmed on `SYN-DEMO-102`, and `SYN-DEMO-101` has no originating-appointment block.
+- Slice 2 of DEMO_EXPERIENCE_V1 is visually confirmed. `SYN-DEMO-102` uses Clinical Read against local HAPI. `SYN-DEMO-101` uses a temporary review database and an in-memory FHIR gateway, and its page has no originating-appointment block.
 - Reset, while the process is stopped, removes only the disposable review state. A following preparation creates open cases again. The three historical cases remain as they were.
 
 ## Implementation slices
@@ -164,7 +176,7 @@ Slice 3 is the preparation utility and the automated preparation tests. It uses 
 
 Slice 4 is the reset utility and the isolation tests. Those tests compare historical rows before and after.
 
-Slice 5 is the completed operator walkthrough. It does not change runtime product behavior. Visual confirmation of DEMO_EXPERIENCE_V1 slice 2 remains a separate presentation check.
+Slice 5 is the completed operator walkthrough. It does not change runtime product behavior. Visual confirmation of DEMO_EXPERIENCE_V1 slice 2 is a separate presentation check, and that check is complete under the two read paths in this contract.
 
 ## Out of scope
 
