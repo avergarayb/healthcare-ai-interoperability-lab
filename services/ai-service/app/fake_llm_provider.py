@@ -12,12 +12,12 @@ class FakeLLMProvider(LLMProvider):
         self.calls = 0
 
     def generate_summary(self, request: ExperimentalSummaryRequest) -> ProviderGeneration:
+        return self._respond("Synthetic laboratory summary for SYN-076-001.")
+
+    def _respond(self, success_text: str) -> ProviderGeneration:
         self.calls += 1
         if self.mode == "success":
-            return ProviderGeneration(
-                invocation_started=True,
-                text="Synthetic laboratory summary for SYN-076-001.",
-            )
+            return ProviderGeneration(invocation_started=True, text=success_text)
         if self.mode == "oversized":
             return ProviderGeneration(invocation_started=True, text="x" * 2001)
         if self.mode == "unexpected":

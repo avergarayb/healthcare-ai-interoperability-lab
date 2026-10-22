@@ -31,7 +31,10 @@ import lab.healthcare.fhir.server.FhirServerProfileRegistry;
 
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
+import org.hl7.fhir.r4.model.Appointment;
 import org.hl7.fhir.r4.model.Bundle;
+import org.hl7.fhir.r4.model.Encounter;
+import org.hl7.fhir.r4.model.Observation;
 import org.hl7.fhir.r4.model.Patient;
 import org.springframework.stereotype.Service;
 
@@ -304,6 +307,111 @@ public class RoutingService {
                 fhirClient -> new FhirService(fhirClient).searchPatientsByNameWithCount(name, 1));
     }
 
+    public Patient readPatientByLogicalId(String destination, String logicalId) {
+        String dest = requireDestination(destination);
+        String id = requireText(logicalId, "Patient logical ID must be provided");
+        return executeAgainstDestination(
+                dest,
+                readContext(dest, "Patient", id),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).readPatient(id));
+    }
+
+    public Bundle searchPatientsByIdentifier(String destination, String system, String value, int pageSize) {
+        String dest = requireDestination(destination);
+        String identifierSystem = requireText(system, "Patient identifier system must be provided");
+        String identifierValue = requireText(value, "Patient identifier value must be provided");
+        requirePageSize(pageSize);
+        return executeAgainstDestination(
+                dest,
+                searchContext(dest, FhirAuditOperation.PATIENT_SEARCH, "Patient"),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient)
+                        .searchPatientsByIdentifierAndCount(identifierSystem, identifierValue, pageSize));
+    }
+
+    public Encounter readEncounter(String destination, String logicalId) {
+        String dest = requireDestination(destination);
+        String id = requireText(logicalId, "Encounter logical ID must be provided");
+        return executeAgainstDestination(
+                dest,
+                readContext(dest, "Encounter", id),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).readEncounter(id));
+    }
+
+    public Bundle searchEncountersByPatientAndStatus(
+            String destination, String patientId, String status, int pageSize) {
+        String dest = requireDestination(destination);
+        String patient = requireText(patientId, "Patient logical ID must be provided");
+        String encounterStatus = requireText(status, "Encounter status must be provided");
+        requirePageSize(pageSize);
+        return executeAgainstDestination(
+                dest,
+                searchContext(dest, FhirAuditOperation.ENCOUNTER_SEARCH, "Encounter"),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient)
+                        .searchEncountersByPatientAndStatus(patient, encounterStatus, pageSize));
+    }
+
+    public Observation readObservationByLogicalId(String destination, String logicalId) {
+        String dest = requireDestination(destination);
+        String id = requireText(logicalId, "Observation logical ID must be provided");
+        return executeAgainstDestination(
+                dest,
+                readContext(dest, "Observation", id),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).readObservation(id));
+    }
+
+    public Bundle searchObservationsByPatientAndStatus(
+            String destination, String patientId, String status, int pageSize) {
+        String dest = requireDestination(destination);
+        String patient = requireText(patientId, "Patient logical ID must be provided");
+        String observationStatus = requireText(status, "Observation status must be provided");
+        requirePageSize(pageSize);
+        return executeAgainstDestination(
+                dest,
+                searchContext(dest, FhirAuditOperation.OBSERVATION_SEARCH, "Observation"),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient)
+                        .searchObservationsByPatientAndStatus(patient, observationStatus, pageSize));
+    }
+
+    public Appointment readAppointment(String destination, String logicalId) {
+        String dest = requireDestination(destination);
+        String id = requireText(logicalId, "Appointment logical ID must be provided");
+        return executeAgainstDestination(
+                dest,
+                readContext(dest, "Appointment", id),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).readAppointment(id));
+    }
+
+    public Bundle searchAppointmentsByPatient(String destination, String patientId, int pageSize) {
+        String dest = requireDestination(destination);
+        String patient = requireText(patientId, "Patient logical ID must be provided");
+        requirePageSize(pageSize);
+        return executeAgainstDestination(
+                dest,
+                searchContext(dest, FhirAuditOperation.APPOINTMENT_SEARCH, "Appointment"),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).searchAppointmentsByPatient(patient, pageSize));
+    }
+
+    public Bundle loadNextSearchPage(String destination, String resourceType, Bundle current) {
+        String dest = requireDestination(destination);
+        String type = requireText(resourceType, "Resource type must be provided");
+        if (current == null) {
+            throw new IllegalArgumentException("Bundle must be provided");
+        }
+        return executeAgainstDestination(
+                dest,
+                searchContext(dest, searchOperation(type), type),
+                System.nanoTime(),
+                fhirClient -> new FhirService(fhirClient).nextPage(current));
+    }
+
     private IGenericClient clientFor(String destination) {
         return clientFor(destination, null);
     }
@@ -459,6 +567,47 @@ public class RoutingService {
                 FhirAuditOperation.MEDICATION_REQUEST_SEARCH,
                 "MedicationRequest",
                 null);
+    }
+
+    private static FhirOperationContext readContext(String destination, String resourceType, String logicalId) {
+        return new FhirOperationContext(
+                UUID.randomUUID().toString(), destination, FhirAuditOperation.READ, resourceType, logicalId);
+    }
+
+    private static FhirOperationContext searchContext(
+            String destination, FhirAuditOperation operation, String resourceType) {
+        return new FhirOperationContext(
+                UUID.randomUUID().toString(), destination, operation, resourceType, null);
+    }
+
+    private static FhirAuditOperation searchOperation(String resourceType) {
+        return switch (resourceType) {
+            case "Patient" -> FhirAuditOperation.PATIENT_SEARCH;
+            case "Encounter" -> FhirAuditOperation.ENCOUNTER_SEARCH;
+            case "Observation" -> FhirAuditOperation.OBSERVATION_SEARCH;
+            case "Appointment" -> FhirAuditOperation.APPOINTMENT_SEARCH;
+            default -> throw new IllegalArgumentException("Resource type is not supported");
+        };
+    }
+
+    private static String requireDestination(String destination) {
+        if (destination == null || destination.isBlank()) {
+            throw new IllegalArgumentException("Destination must be provided");
+        }
+        return destination.trim();
+    }
+
+    private static String requireText(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(message);
+        }
+        return value.trim();
+    }
+
+    private static void requirePageSize(int pageSize) {
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Search _count must be at least 1");
+        }
     }
 
     private static FhirOperationContext searchContext(String destination, String correlationId) {

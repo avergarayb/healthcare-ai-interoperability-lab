@@ -1,91 +1,85 @@
 # Roadmap
 
-This is the official implementation roadmap for `healthcare-ai-interoperability-lab`.
+This document summarizes implemented foundations and visible product gaps for the **Healthcare AI & Interoperability Platform**. It does not select the next product increment or authorize speculative implementation.
 
-Architecture decisions live in [`PROJECT.md`](PROJECT.md). This file records the planned progression only. Do not treat later phases as permission to implement them early.
+Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries live in the [architecture index](architecture/README.md).
 
-## Target Architecture
+## Implemented foundation
 
-The laboratory is polyglot:
+### Healthcare Interoperability
 
-- **Java / Spring Boot** for healthcare interoperability and enterprise integration.
-- **Python / FastAPI** for AI/ML.
-- **Docker / Kubernetes / Azure** for infrastructure.
+- Java 21 / Spring Boot FHIR R4 client.
+- Local HAPI FHIR and PostgreSQL support stack.
+- Named FHIR destinations and bounded routing/resilience behavior.
+- SMART Authorization Code + PKCE foundations.
+- Epic and Oracle sandbox integrations.
+- Controlled snapshot, allowlist, retention ceiling and Model Boundary v1.
+- Service-token protection for the v1 boundary.
+- Laboratory Clinical Read API v1 for Patient, Encounter, Observation, and Appointment. The same service token protects it. The default source is local HAPI. Contract: [clinical-read-v1](contracts/clinical-read-v1.md). This line records source. It does not record a test run.
+- Mini HIS Simulator as a separate process with its own SQLite database and a proprietary REST API. Java reads it only when `clinical-read.source=mini-his` and normalizes the payload to FHIR R4. It is not in the HAPI Docker stack and it is not an organizational exchange.
+- Static Mini HIS maps `mini-his-maps-v1` and UCUM maps `mini-his-ucum-v1` for `g/dL` and `mmHg`. No terminology server, no general LOINC or SNOMED, and no numeric unit conversion. Contract: [mini-his-terminology-v1](contracts/mini-his-terminology-v1.md).
 
-Initial integration component:
+### Healthcare AI
 
-- `fhir-integration-service` — Java 21 / Spring Boot
+- Python / FastAPI service.
+- Authenticated Model Boundary v1 consumer without model invocation.
+- Separate disabled-by-default synthetic Gemini endpoint.
+- LangGraph narrative agent subflow with explicit tool policy.
+- Clinical Follow-up Review endpoint.
+- Mandatory application-owned Patient, Encounter, Observation and Appointment acquisition.
+- Bounded, completeness-aware collection handling and case isolation. The operational post-consultation, missed-follow-up, and clinical-context factories, including the open-case page reader, call Java through `ClinicalReadClient`. `HapiReadClient` and `FHIR_BASE_URL` remain in the repository. Python does not call Mini HIS.
+- Deterministic `POST_CONSULTATION_RESULT_REVIEW_V1` outside model authority.
+- Deterministic `MISSED_FOLLOW_UP_REVIEW_V1` from Patient and Appointment reads only, without Gemini, on the same review queue.
+- Response-level human-review requirement and proposed review action when the protocol matches.
+- Durable SQLite-backed operational review cases with queue, provenance, bounded closure outcomes and transition history.
+- Open-case `CLINICAL_REVIEW_CONTEXT_V1` current FHIR projection without protocol reevaluation or persistence.
+- Server-rendered synthetic review queue, case page and operational close inside Healthcare AI.
+- Synthetic institutional procedure retrieval through `POST /internal/knowledge/retrieve`, with Gemini embeddings, a separate SQLite index and no generated explanation.
+- On-demand AI-assisted review for an open follow-up case, with one structured Gemini explanation, claim-level citations and no stored model output.
+- One explicit internal follow-up coordination request after a closed review case whose outcome is follow-up coordination planned. The request status `requested` records that internal request. It does not send a message, write FHIR, or schedule an appointment.
+- Development authentication for the synthetic review pages: a server-side session, login and logout, and form signatures bound to that session. It is not production identity, verified reviewer identity, RBAC or institutional SSO.
+- Development attribution for a new Human Review close and for the first coordination request from that UI. The stored principal is a synthetic development principal. Manual validation passed. It is not verified clinical identity, IAM, SSO, RBAC, or a security audit. Historical rows stay unattributed. This service does not write FHIR. Security audit remains a separate later decision.
+- `DEMO_EXPERIENCE_V1` is done as presentation for the synthetic Human Review queue and case page. Implementation is complete: Spanish operational labels, readable UTC dates, one closed technical-details group, one rendering of the appointment that opened a missed-follow-up case, and the unclassified appointment label. Automated tests passed. Manual validation of slice 1 is complete. Visual validation of slice 2 is still pending. It does not change protocols, outcomes, coordination policy, sessions, or attribution. It is not production-ready and not a complete localization.
+- Deterministic, evaluation-harness and opt-in real-HAPI coverage. Live embedding and live AI-assistance checks are separate opt-ins from live Gemini narrative tests.
+- Laboratory stages 1 and 2 of Mini HIS to Java Clinical Read to the missed-follow-up agent were executed on 2026-10-19. The record is [E2E interoperability validation results](results/e2e-interoperability-validation-v1-results.md). The procedure remains [the design](design/e2e-interoperability-validation-v1.md). Post-consultation live execution was not run. This is not a production certification.
 
-Future AI component, not created yet:
+## Current product gaps
 
-- `ai-service` — Python / FastAPI
+The following capabilities are not established by the current repository:
 
-## Phases
+- human-review assignment, claiming and verified reviewer identity;
+- clinical assessment or clinical decision support;
+- general workflow checkpointing beyond the operational review-case store;
+- a multi-user product frontend and production human identity; the synthetic review demo has a development session and is not that frontend;
+- enterprise IAM/RBAC and multi-tenancy;
+- durable audit storage and production operations;
+- production secret management and enforced network architecture;
+- autonomous actions or FHIR writes from Healthcare AI;
+- retirement of `HapiReadClient` and `FHIR_BASE_URL`;
+- UCUM beyond `g/dL` and `mmHg`, and a terminology server, ValueSet, or ConceptMap;
+- SOAP, HL7 v2, file connectors, and a route among organizations;
+- protocol registry/lifecycle beyond the current versioned contract;
+- production packaging for SaaS, customer-hosted or hybrid operation;
+- completed governance and legal assessment for real clinical data sent to an external model.
 
-### Phase 0 — FHIR Fundamentals
+This list is an inventory, not a priority order.
 
-FHIR R4 resources, search, Capability Statement, and vendor-neutral interoperability basics.
+## Candidate future capabilities
 
-### Phase 1 — Local FHIR
+Future product decisions may consider:
 
-Local HAPI FHIR, PostgreSQL persistence, Docker Compose, and `fhir-integration-service`.
+- reviewer assignment and identity-backed case management;
+- additional explicitly authorized FHIR capabilities or adapters;
+- broader interoperability mechanisms such as HL7 v2 or other designed adapters;
+- production identity, tenancy, audit and deployment controls;
+- production retrieval beyond the synthetic institutional index, local models, MCP or additional providers;
+- customer-facing applications and integrations;
+- an external adapter that consumes an already recorded internal coordination request. The coordination policy remains the authorization decision;
+- production identity for human review, distinct from the accepted development session.
+Each candidate requires a separate product decision, security assessment and acceptance contract. Historical phase names under `docs/tasks/` remain development history rather than current sequencing authority.
 
-Current bootstrap belongs to this phase.
+## Current position
 
-### Phase 2 — Real EHR Integration
+The repository has an implemented interoperability foundation and an implemented Healthcare AI workflow foundation. It is beyond the former “Phase 2–3” and “future AI/LangGraph” descriptions.
 
-Connect the integration layer to real EHR FHIR APIs without coupling the lab to a single vendor.
-
-Phase 2 starts with **named FHIR server profiles** and external configuration (`local-hapi` today). OAuth 2.0 Client Credentials is available on the optional `secured-lab` profile. SMART on FHIR Authorization Code + PKCE is available on the optional `smart-lab` profile. Epic and Oracle Health sandbox destinations are disabled vendor profiles only.
-
-### Phase 3 — SMART on FHIR
-
-Authorization and app launch using SMART on FHIR. This laboratory implements a **synthetic** Authorization Code + PKCE flow (`smart-lab`) and readiness types for later real discovery (capabilities, compatibility, session `aud`). Commercial EHR SMART launch is not in this step.
-
-### Phase 4 — HL7 v2
-
-HL7 v2 message handling as a complement to FHIR, not a replacement.
-
-### Phase 5 — AI Foundation
-
-Python / FastAPI `ai-service`, model gateway, and the first AI boundary behind the Java integration layer.
-
-### Phase 6 — RAG
-
-Retrieval-augmented generation over healthcare context produced by the interoperability layer.
-
-### Phase 7 — Healthcare Agent
-
-Agent workflows that act on normalized healthcare context, not raw EHR payloads.
-
-### Phase 8 — MCP
-
-Model Context Protocol as a controlled tool interface for healthcare capabilities.
-
-### Phase 9 — Local AI
-
-Local model experiments, including Ollama, without changing the provider-agnostic gateway.
-
-### Phase 10 — LangGraph
-
-Graph-based agent orchestration for multi-step healthcare workflows.
-
-### Phase 11 — Healthcare ML
-
-Machine learning on healthcare data after interoperability and security boundaries are in place.
-
-### Phase 12 — Security & Enterprise
-
-Authentication, authorization, auditability, and enterprise integration practices.
-
-### Phase 13 — Azure
-
-Cloud deployment, Kubernetes, and CI/CD on Azure.
-
-### Phase 14 — Portfolio
-
-Package the laboratory as a coherent demonstration of healthcare interoperability and AI.
-
-## Current Position
-
-The repository is in Phase 2–3. `fhir-integration-service` remains a FHIR R4 **client**. Named server profiles (`fhir.active-server`) select connectivity. OAuth 2.0 Client Credentials is optional (`secured-lab`). SMART Authorization Code + PKCE is optional (`smart-lab`). Java packages are split by responsibility (`client`, `server`, `auth`, `auth.oauth2`, `smart`, `mapping`, `routing`, `observability`, `exception`, `resilience`); see [`docs/fhir/fhir-architecture.md`](fhir/fhir-architecture.md). External JSON can be mapped to HAPI R4 `Patient` / `Observation` without changing `FhirService`; see [`docs/fhir/fhir-mapping.md`](fhir/fhir-mapping.md). A request can be routed to a named profile without putting destination rules in `FhirService`; see [`docs/fhir/fhir-routing.md`](fhir/fhir-routing.md). Routed Patient reads emit a structured audit event (correlation ID, destination, outcome, duration) without logging FHIR payloads or tokens; see [`docs/fhir/fhir-audit-observability.md`](fhir/fhir-audit-observability.md). The same completed operations increment in-memory counters by bounded dimensions (operation, destination, resource type, outcome) without Prometheus; see [`docs/fhir/fhir-metrics-observability.md`](fhir/fhir-metrics-observability.md). FHIR/HAPI/OAuth/routing failures are classified into a bounded safe category (`NOT_FOUND`, `TIMEOUT`, `CONNECTION_ERROR`, …) without inventing HAPI types; see [`docs/fhir/fhir-error-handling.md`](fhir/fhir-error-handling.md). Routed Patient READ retries only transient categories (`TIMEOUT`, `CONNECTION_ERROR`, `SERVER_ERROR`) up to three attempts; see [`docs/fhir/fhir-retry-resilience.md`](fhir/fhir-retry-resilience.md). A per-destination circuit breaker fail-fasts after three failed logical operations on those same categories; see [`docs/fhir/fhir-circuit-breaker.md`](fhir/fhir-circuit-breaker.md). Routed READ is also admitted through a per-destination fixed-window rate limiter (10/s) and a 5-permit bulkhead; see [`docs/fhir/fhir-rate-limiting-bulkhead.md`](fhir/fhir-rate-limiting-bulkhead.md). Those sizes, plus retry and circuit thresholds, bind from `fhir.resilience` YAML; see [`docs/fhir/fhir-resilience.md`](fhir/fhir-resilience.md). SMART discovery is interpreted and validated for Authorization Code + PKCE S256 without connecting Epic or Oracle Health; see [`docs/fhir/fhir-smart-real-world-readiness.md`](fhir/fhir-smart-real-world-readiness.md). An Epic sandbox **profile** can start interactive SMART Authorization Code + PKCE when enabled; default tests leave it disabled; see [`docs/fhir/vendors/epic.md`](fhir/vendors/epic.md). An Oracle Health sandbox **profile** exists the same way; see [`docs/fhir/vendors/oracle-health.md`](fhir/vendors/oracle-health.md). Routed `GET /metadata` is interpreted into `FhirServerCapabilities` without caching or vendor `if`s; see [`docs/fhir/fhir-capability-discovery.md`](fhir/fhir-capability-discovery.md). Oracle sandbox connection readiness uses environment placeholders and a vendor-neutral metadata probe; it is not OAuth or Patient access; see [`docs/fhir/fhir-endpoint-connectivity.md`](fhir/fhir-endpoint-connectivity.md). Interactive SMART Authorization Code + PKCE can obtain an Oracle sandbox access token when credentials are provided; default tests do not require them; see [`docs/fhir/fhir-smart-interactive-authorization.md`](fhir/fhir-smart-interactive-authorization.md). The Oracle Code sandbox `GET /metadata` is public and is normalized by the existing capability model without a Bearer token. An issued SMART token can then authorize a generic Patient `SEARCH_TYPE`. A controlled Patient read requires an explicit sandbox Patient ID (`ORACLE_HEALTH_SANDBOX_PATIENT_ID`) and a runtime Patient `read` capability. The same context plus Condition `search-type` authorizes `GET /Condition?patient={id}&_count=5`. Observation `search-type` authorizes `GET /Observation?patient={id}&_count=5`. DiagnosticReport `search-type` authorizes `GET /DiagnosticReport?patient={id}&_count=5`. MedicationRequest `search-type` authorizes `GET /MedicationRequest?patient={id}&_count=5`. Those operations can be assembled sequentially into a controlled clinical snapshot of status and counts, then reduced by an application retention ceiling and an explicit allowlist, then mapped onto a vendor-neutral v1 model boundary contract exposed at `GET /api/model-boundary/v1` and observed by a non-LLM agent stub; see [`docs/fhir/vendors/oracle-health.md`](fhir/vendors/oracle-health.md). Neither vendor profile talks to a commercial EHR in default tests. Local HAPI does not ship LOINC/SNOMED CodeSystems.
+It remains a development baseline: local HAPI and vendor sandboxes are not production healthcare deployment, the SQLite review store is single-instance, and deterministic follow-up review is not clinical diagnosis. An internal coordination request after an explicit POST is recorded operational evidence. It is not external execution and it is not clinical diagnosis. The synthetic review pages now use the accepted demo presentation. Slice 2 of that presentation still awaits visual confirmation. Clinical Read and the Mini HIS source are laboratory increments on this branch. They are not the bidirectional exchange in ADR-095. The 2026-10-19 laboratory E2E result is recorded separately and does not close the product gaps above.

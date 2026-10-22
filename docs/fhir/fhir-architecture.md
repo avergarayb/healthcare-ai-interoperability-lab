@@ -216,7 +216,6 @@ lab.healthcare.fhir
 ├── aihandoffauthorization
 │   ├── AiHandoffAuthorizationStatus.java
 │   ├── AiHandoffAuthorizationReasonCodes.java
-│   ├── AiHandoffAuthorizationOperations.java
 │   ├── AiHandoffAuthorizationScopes.java
 │   ├── AiHandoffAuthorizationInput.java
 │   ├── AiHandoffAuthorizationResult.java

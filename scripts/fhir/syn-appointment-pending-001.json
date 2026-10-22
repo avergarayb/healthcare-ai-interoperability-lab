@@ -1,0 +1,15 @@
+{
+  "resourceType": "Appointment",
+  "id": "appointment-synthetic-pending-001",
+  "status": "pending",
+  "start": "2027-06-01T15:00:00Z",
+  "end": "2027-06-01T15:30:00Z",
+  "participant": [
+    {
+      "actor": {
+        "reference": "Patient/SYN-PATIENT-002"
+      },
+      "status": "accepted"
+    }
+  ]
+}

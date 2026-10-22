@@ -1,0 +1,15 @@
+{
+  "resourceType": "Appointment",
+  "id": "appointment-synthetic-past-001",
+  "status": "booked",
+  "start": "2020-01-15T15:00:00Z",
+  "end": "2020-01-15T15:30:00Z",
+  "participant": [
+    {
+      "actor": {
+        "reference": "Patient/SYN-PATIENT-004"
+      },
+      "status": "accepted"
+    }
+  ]
+}

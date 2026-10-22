@@ -1,6 +1,6 @@
 package lab.healthcare.fhir.modelboundary.web;
 
-import lab.healthcare.fhir.modelboundary.ModelBoundaryContractProvider;
+import lab.healthcare.fhir.modelboundary.ConfiguredModelBoundarySource;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryServiceTokenSettings;
 
 import org.junit.jupiter.api.Test;
@@ -26,7 +26,7 @@ class ModelBoundaryServiceAuthUnconfiguredTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private ModelBoundaryContractProvider provider;
+    private ConfiguredModelBoundarySource provider;
 
     @Test
     void missingConfiguredTokenRejectsEvenWithHeader() throws Exception {

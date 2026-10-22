@@ -1,0 +1,851 @@
+"""Clinical Read API v1 client and the missed follow-up wiring."""
+
+from __future__ import annotations
+
+import inspect
+from datetime import datetime, timezone
+from urllib.parse import parse_qs, quote, urlsplit
+
+import httpx
+import pytest
+from langchain_core.messages import AIMessage
+
+from app.clinical_read_client import ClinicalReadClient
+from app.config import Settings
+from app.langgraph_fhir_client import (
+    CASE_IDENTIFIER_SYSTEM,
+    FOLLOWUP_TOOL,
+    BoundedSearchStatus,
+    ClientFHIRTransport,
+    ExactResourceNotFound,
+    InMemoryAuditSink,
+    ReadClientError,
+)
+from app.langgraph_fhir_followup import (
+    FollowUpFHIRAdapter,
+    PostConsultationContextReader,
+    case_resolution_search_path,
+    encounter_search_path,
+    patient_resource_path,
+    protocol_appointment_search_path,
+    protocol_observation_search_path,
+)
+from app.langgraph_followup_workflow import FollowUpWorkflow, build_live_followup_workflow
+from app.missed_follow_up_review import REASON_MISSED
+from app.missed_follow_up_service import _live_adapter, evaluate_missed_follow_up_case
+from app.post_consultation_review import ProtocolEvaluationStatus, evaluate_post_consultation_review
+
+
+TOKEN = "test-model-boundary-token"
+PATIENT_ID = "syn-demo-patient-102"
+CASE_ID = "SYN-DEMO-102"
+APPOINTMENT_ID = "syn-demo-noshow-102"
+INSTANT = datetime(2026, 9, 29, tzinfo=timezone.utc)
+
+
+def _settings() -> Settings:
+    return Settings(
+        model_boundary_base_url="http://interop.test",
+        model_boundary_path="/api/model-boundary/v1",
+        model_boundary_timeout_seconds=5,
+        model_boundary_service_token=TOKEN,
+        host="127.0.0.1",
+        port=8090,
+    )
+
+
+def _patient() -> dict:
+    return {
+        "resourceType": "Patient",
+        "id": PATIENT_ID,
+        "identifier": [{"system": CASE_IDENTIFIER_SYSTEM, "value": CASE_ID}],
+        "name": [{"text": "Synthetic demo patient 102"}],
+    }
+
+
+def _appointment() -> dict:
+    return {
+        "resourceType": "Appointment",
+        "id": APPOINTMENT_ID,
+        "status": "noshow",
+        "start": "2026-01-01T00:00:00Z",
+        "end": "2026-01-01T00:30:00Z",
+        "participant": [{"actor": {"reference": f"Patient/{PATIENT_ID}"}, "status": "accepted"}],
+    }
+
+
+def _search(resource_type: str, resources: list[dict], collection_status: str = "complete") -> dict:
+    return {
+        "contractVersion": "clinical-read-v1",
+        "destination": "local-hapi",
+        "collectionStatus": collection_status,
+        "resourceType": resource_type,
+        "resources": resources,
+    }
+
+
+def _read(resource: dict) -> dict:
+    return {"contractVersion": "clinical-read-v1", "destination": "local-hapi", "resource": resource}
+
+
+def _client(handler) -> tuple[ClinicalReadClient, httpx.Client]:
+    http = httpx.Client(transport=httpx.MockTransport(handler), timeout=5.0)
+    return ClinicalReadClient.from_settings(_settings(), http_client=http), http
+
+
+def test_patient_search_read_and_appointment_keep_clinical_fields():
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        assert request.headers["X-Service-Token"] == TOKEN
+        path = request.url.path
+        if path.endswith("/patients") and "identifierSystem" in request.url.params:
+            assert request.url.params["identifierSystem"] == CASE_IDENTIFIER_SYSTEM
+            assert request.url.params["identifierValue"] == CASE_ID
+            return httpx.Response(200, json=_search("Patient", [_patient()]))
+        if path.endswith(f"/patients/{PATIENT_ID}"):
+            return httpx.Response(200, json=_read(_patient()))
+        if path.endswith("/appointments"):
+            assert request.url.params["patient"] == PATIENT_ID
+            return httpx.Response(200, json=_search("Appointment", [_appointment()]))
+        raise AssertionError(path)
+
+    client, http = _client(handler)
+    try:
+        found = client.search(case_resolution_search_path(CASE_ID), "Patient")
+        patient = client.get(patient_resource_path(PATIENT_ID))
+        appointments = client.search(protocol_appointment_search_path(PATIENT_ID), "Appointment")
+    finally:
+        http.close()
+
+    assert found.status is BoundedSearchStatus.COMPLETE
+    assert found.resources[0]["id"] == PATIENT_ID
+    assert found.resources[0]["identifier"] == [{"system": CASE_IDENTIFIER_SYSTEM, "value": CASE_ID}]
+    assert patient["id"] == PATIENT_ID
+    assert patient["name"] == [{"text": "Synthetic demo patient 102"}]
+    assert appointments.status is BoundedSearchStatus.COMPLETE
+    assert appointments.resources[0]["status"] == "noshow"
+    assert appointments.resources[0]["start"] == "2026-01-01T00:00:00Z"
+    assert appointments.resources[0]["participant"][0]["actor"]["reference"] == f"Patient/{PATIENT_ID}"
+    assert all(item.url.host == "interop.test" for item in seen)
+    assert all("/api/clinical-read/v1/" in str(item.url) for item in seen)
+
+
+def test_reserved_characters_in_the_identifier_system_stay_in_one_parameter():
+    system = "https://lab.example/sys?a=1&b=2"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raw = urlsplit(str(request.url)).query
+        parsed = parse_qs(raw, keep_blank_values=True)
+        assert parsed["identifierSystem"] == [system]
+        assert parsed["identifierValue"] == ["CASE 100"]
+        assert "%5C%7C" not in raw
+        return httpx.Response(200, json=_search("Patient", []))
+
+    client, http = _client(handler)
+    token = quote(f"{system}|CASE 100", safe="")
+    try:
+        result = client.search(f"Patient?identifier={token}&_count=2", "Patient")
+    finally:
+        http.close()
+    assert result.status is BoundedSearchStatus.COMPLETE
+    assert result.resources == ()
+
+
+def test_incomplete_unavailable_and_not_found_stay_distinct():
+    def handler(request: httpx.Request) -> httpx.Response:
+        value = request.url.params.get("identifierValue")
+        if value == "incomplete":
+            return httpx.Response(200, json=_search("Patient", [_patient()], "incomplete"))
+        if value == "down":
+            return httpx.Response(503, json={"error": "unavailable"})
+        if value == "missing-search":
+            return httpx.Response(404, json={"error": "not_found"})
+        if request.url.path.endswith("/patients/missing-patient"):
+            return httpx.Response(404, json={"error": "not_found"})
+        if request.url.path.endswith("/patients/broken"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        if request.headers.get("X-Service-Token") == "wrong":
+            return httpx.Response(401)
+        raise AssertionError(str(request.url))
+
+    client, http = _client(handler)
+    try:
+        incomplete = client.search(
+            f"Patient?identifier={quote('https://lab.local/id|incomplete', safe='')}&_count=2",
+            "Patient",
+        )
+        unavailable = client.search(
+            f"Patient?identifier={quote('https://lab.local/id|down', safe='')}&_count=2",
+            "Patient",
+        )
+        search_not_found = client.search(
+            f"Patient?identifier={quote('https://lab.local/id|missing-search', safe='')}&_count=2",
+            "Patient",
+        )
+        try:
+            client.get("Patient/missing-patient")
+        except ExactResourceNotFound:
+            missing = "not_found"
+        else:
+            missing = "returned"
+        try:
+            client.get("Patient/broken")
+        except ExactResourceNotFound:
+            broken = "not_found"
+        except Exception as exc:
+            broken = type(exc).__name__
+        else:
+            broken = "returned"
+        rejected = ClinicalReadClient(
+            "http://interop.test",
+            "wrong",
+            http_client=http,
+        ).search(
+            f"Patient?identifier={quote('https://lab.local/id|CASE', safe='')}&_count=2",
+            "Patient",
+        )
+    finally:
+        http.close()
+
+    assert incomplete.status is BoundedSearchStatus.INCOMPLETE_LIMIT
+    assert incomplete.resources[0]["id"] == PATIENT_ID
+    assert unavailable.status is BoundedSearchStatus.FAILED
+    assert unavailable.resources == ()
+    assert search_not_found.status is BoundedSearchStatus.FAILED
+    assert search_not_found.resources == ()
+    assert missing == "not_found"
+    assert broken == "ReadClientError"
+    assert rejected.status is BoundedSearchStatus.FAILED
+    assert rejected.resources == ()
+
+
+def test_blank_token_and_connection_failure_do_not_become_an_empty_collection():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("blank token must not call Java")
+
+    silent, http = _client(handler)
+    blank = ClinicalReadClient("http://interop.test", "  ", http_client=http)
+    try:
+        result = blank.search(case_resolution_search_path(CASE_ID), "Patient")
+    finally:
+        http.close()
+    assert result.status is BoundedSearchStatus.FAILED
+    assert result.resources == ()
+
+    def fail(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    failing, failing_http = _client(fail)
+    try:
+        down = failing.search(protocol_appointment_search_path(PATIENT_ID), "Appointment")
+    finally:
+        failing_http.close()
+    assert down.status is BoundedSearchStatus.FAILED
+    assert down.resources == ()
+    assert silent.base_url == "http://interop.test"
+
+
+def test_migrated_protocol_matches_a_past_noshow_and_keeps_hapi_for_post_consultation():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(f"/patients/{PATIENT_ID}"):
+            return httpx.Response(200, json=_read(_patient()))
+        if request.url.path.endswith("/appointments"):
+            return httpx.Response(200, json=_search("Appointment", [_appointment()]))
+        if request.url.path.endswith("/patients"):
+            return httpx.Response(200, json=_search("Patient", [_patient()]))
+        raise AssertionError(request.url.path)
+
+    client, http = _client(handler)
+    try:
+        evaluation = evaluate_missed_follow_up_case(
+            FollowUpFHIRAdapter(ClientFHIRTransport(client), now=lambda: INSTANT),
+            CASE_ID,
+            INSTANT,
+        )
+    finally:
+        http.close()
+    assert evaluation.status is ProtocolEvaluationStatus.MATCHED
+    assert evaluation.reason_codes == (REASON_MISSED,)
+    assert evaluation.provenance_resources == (f"Appointment/{APPOINTMENT_ID}",)
+    assert evaluation.triggers == (f"Appointment/{APPOINTMENT_ID}",)
+
+    def incomplete(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/appointments"):
+            return httpx.Response(200, json=_search("Appointment", [_appointment()], "incomplete"))
+        if request.url.path.endswith(f"/patients/{PATIENT_ID}"):
+            return httpx.Response(200, json=_read(_patient()))
+        return httpx.Response(200, json=_search("Patient", [_patient()]))
+
+    partial, partial_http = _client(incomplete)
+    try:
+        partial_result = evaluate_missed_follow_up_case(
+            FollowUpFHIRAdapter(ClientFHIRTransport(partial), now=lambda: INSTANT),
+            CASE_ID,
+            INSTANT,
+        )
+    finally:
+        partial_http.close()
+    assert partial_result.status is ProtocolEvaluationStatus.INSUFFICIENT
+    assert partial_result.reason_codes == ("appointment_search_incomplete",)
+    assert partial_result.triggers == ()
+
+    def down(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    offline, offline_http = _client(down)
+    try:
+        offline_result = evaluate_missed_follow_up_case(
+            FollowUpFHIRAdapter(ClientFHIRTransport(offline), now=lambda: INSTANT),
+            CASE_ID,
+            INSTANT,
+        )
+    finally:
+        offline_http.close()
+    assert offline_result.status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert offline_result.reason_codes == ("patient_resolution_unavailable",)
+    assert offline_result.triggers == ()
+
+    missed_source = inspect.getsource(_live_adapter)
+    workflow_source = inspect.getsource(build_live_followup_workflow)
+    assert "ClinicalReadClient" in missed_source
+    assert "HapiReadClient" not in missed_source
+    assert "ClinicalReadClient" in workflow_source
+    assert "HapiReadClient" not in workflow_source
+
+
+def test_encounter_and_observation_reads_keep_fields_and_java_errors():
+    encounter = {
+        "resourceType": "Encounter",
+        "id": "MHS-CON-001",
+        "status": "finished",
+        "class": {"system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB"},
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "period": {"start": "2026-09-01T15:00:00Z"},
+    }
+    observation = {
+        "resourceType": "Observation",
+        "id": "MHS-RES-001",
+        "status": "final",
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "encounter": {"reference": "Encounter/MHS-CON-001"},
+        "effectiveDateTime": "2026-09-01T15:10:00Z",
+        "valueQuantity": {"value": 13.4, "unit": "g/dL"},
+    }
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url}")
+        if request.headers.get("X-Service-Token") != TOKEN:
+            return httpx.Response(401)
+        assert request.url.host == "interop.test"
+        assert request.url.path.startswith("/api/clinical-read/v1/")
+        assert "8080" not in str(request.url)
+        path = request.url.path
+        if path.endswith("/encounters") and request.url.params.get("status") == "finished":
+            assert request.url.params["patient"] == PATIENT_ID
+            assert "_count" not in request.url.params
+            return httpx.Response(200, json=_search("Encounter", [encounter]))
+        if path.endswith("/encounters") and request.url.params.get("status") == "incomplete":
+            return httpx.Response(200, json=_search("Encounter", [encounter], "incomplete"))
+        if path.endswith("/encounters/MHS-CON-001"):
+            return httpx.Response(200, json=_read(encounter))
+        if path.endswith("/observations") and request.url.params.get("status") == "final":
+            assert request.url.params["patient"] == PATIENT_ID
+            return httpx.Response(200, json=_search("Observation", [observation]))
+        if path.endswith("/observations") and request.url.params.get("status") == "partial":
+            return httpx.Response(200, json=_search("Observation", [observation], "incomplete"))
+        if path.endswith("/observations/MHS-RES-001"):
+            return httpx.Response(200, json=_read(observation))
+        if path.endswith("/encounters/missing"):
+            return httpx.Response(404, json={"error": "not_found"})
+        if path.endswith("/observations/missing"):
+            return httpx.Response(404, json={"error": "not_found"})
+        if path.endswith("/observations/unsupported"):
+            return httpx.Response(409, json={"error": "operation_not_supported"})
+        if path.endswith("/observations/invalid"):
+            return httpx.Response(422, json={"error": "invalid_source"})
+        if path.endswith("/observations/down"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        if path.endswith("/encounters") and request.url.params.get("status") == "blocked":
+            return httpx.Response(409, json={"error": "operation_not_supported"})
+        if path.endswith("/observations") and request.url.params.get("status") == "invalid":
+            return httpx.Response(422, json={"error": "invalid_source"})
+        if path.endswith("/observations") and request.url.params.get("status") == "down":
+            return httpx.Response(503, json={"error": "unavailable"})
+        raise AssertionError(str(request.url))
+
+    client, http = _client(handler)
+    try:
+        encounters = client.search(encounter_search_path(PATIENT_ID), "Encounter")
+        one_encounter = client.get("Encounter/MHS-CON-001")
+        observations = client.search(protocol_observation_search_path(PATIENT_ID), "Observation")
+        one_observation = client.get("Observation/MHS-RES-001")
+        incomplete_encounters = client.search(
+            f"Encounter?patient=Patient/{PATIENT_ID}&status=incomplete&_count=25",
+            "Encounter",
+        )
+        incomplete_observations = client.search(
+            f"Observation?subject=Patient/{PATIENT_ID}&status=partial&_count=25",
+            "Observation",
+        )
+        try:
+            client.get("Encounter/missing")
+        except ExactResourceNotFound:
+            missing_encounter = "not_found"
+        else:
+            missing_encounter = "returned"
+        try:
+            client.get("Observation/missing")
+        except ExactResourceNotFound:
+            missing_observation = "not_found"
+        else:
+            missing_observation = "returned"
+        exact_errors = {}
+        for logical_id, label in (
+            ("unsupported", "conflict"),
+            ("invalid", "invalid_source"),
+            ("down", "unavailable"),
+        ):
+            try:
+                client.get(f"Observation/{logical_id}")
+            except ExactResourceNotFound:
+                exact_errors[label] = "not_found"
+            except Exception as exc:
+                exact_errors[label] = type(exc).__name__
+            else:
+                exact_errors[label] = "returned"
+        blocked = client.search(
+            f"Encounter?patient=Patient/{PATIENT_ID}&status=blocked",
+            "Encounter",
+        )
+        denied = ClinicalReadClient("http://interop.test", "wrong", http_client=http).search(
+            f"Observation?patient=Patient/{PATIENT_ID}&status=denied",
+            "Observation",
+        )
+        invalid_search = client.search(
+            f"Observation?subject=Patient/{PATIENT_ID}&status=invalid",
+            "Observation",
+        )
+        unavailable = client.search(
+            f"Observation?patient={PATIENT_ID}&status=down",
+            "Observation",
+        )
+    finally:
+        http.close()
+
+    assert encounters.status is BoundedSearchStatus.COMPLETE
+    assert encounters.resources[0]["status"] == "finished"
+    assert encounters.resources[0]["class"]["code"] == "AMB"
+    assert encounters.resources[0]["subject"]["reference"] == f"Patient/{PATIENT_ID}"
+    assert encounters.resources[0]["period"]["start"] == "2026-09-01T15:00:00Z"
+    assert one_encounter["id"] == "MHS-CON-001"
+    assert observations.status is BoundedSearchStatus.COMPLETE
+    assert observations.resources[0]["status"] == "final"
+    assert observations.resources[0]["encounter"]["reference"] == "Encounter/MHS-CON-001"
+    assert observations.resources[0]["effectiveDateTime"] == "2026-09-01T15:10:00Z"
+    assert observations.resources[0]["valueQuantity"]["value"] == 13.4
+    assert one_observation["subject"]["reference"] == f"Patient/{PATIENT_ID}"
+    assert incomplete_encounters.status is BoundedSearchStatus.INCOMPLETE_LIMIT
+    assert incomplete_observations.status is BoundedSearchStatus.INCOMPLETE_LIMIT
+    assert incomplete_observations.resources[0]["id"] == "MHS-RES-001"
+    assert missing_encounter == "not_found"
+    assert missing_observation == "not_found"
+    assert exact_errors == {
+        "conflict": "ReadClientError",
+        "invalid_source": "ReadClientError",
+        "unavailable": "ReadClientError",
+    }
+    assert blocked.status is BoundedSearchStatus.FAILED
+    assert blocked.resources == ()
+    assert denied.status is BoundedSearchStatus.FAILED
+    assert denied.resources == ()
+    assert invalid_search.status is BoundedSearchStatus.FAILED
+    assert invalid_search.resources == ()
+    assert unavailable.status is BoundedSearchStatus.FAILED
+    assert unavailable.resources == ()
+    assert all("/api/clinical-read/v1/" in item for item in seen)
+    client_source = inspect.getsource(ClinicalReadClient)
+    assert "HapiReadClient" not in client_source
+    assert "8080" not in client_source
+    assert "ClinicalReadClient" in inspect.getsource(build_live_followup_workflow)
+    assert "HapiReadClient" not in inspect.getsource(build_live_followup_workflow)
+
+
+def test_post_consultation_protocol_reads_java_and_keeps_decisions():
+    patient = _patient()
+    encounter = {
+        "resourceType": "Encounter",
+        "id": "enc-1",
+        "status": "finished",
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "period": {"end": "2026-09-01T16:00:00Z"},
+    }
+    observation = {
+        "resourceType": "Observation",
+        "id": "obs-1",
+        "status": "final",
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "encounter": {"reference": "Encounter/enc-1"},
+        "issued": "2026-09-01T17:00:00Z",
+    }
+
+    def handler(mode: str):
+        def respond(request: httpx.Request) -> httpx.Response:
+            assert request.url.host == "interop.test"
+            assert request.url.path.startswith("/api/clinical-read/v1/")
+            assert "8080" not in str(request.url)
+            path = request.url.path
+            if mode == "not_found" and path.endswith(f"/patients/{PATIENT_ID}"):
+                return httpx.Response(404, json={"error": "not_found"})
+            if mode == "conflict" and path.endswith("/observations"):
+                return httpx.Response(409, json={"error": "operation_not_supported"})
+            if mode == "invalid" and path.endswith("/observations"):
+                return httpx.Response(422, json={"error": "invalid_source"})
+            if mode == "down" and path.endswith("/encounters"):
+                return httpx.Response(503, json={"error": "unavailable"})
+            if mode == "incomplete" and path.endswith("/observations"):
+                return httpx.Response(200, json=_search("Observation", [observation], "incomplete"))
+            if path.endswith("/patients") and "identifierSystem" in request.url.params:
+                return httpx.Response(200, json=_search("Patient", [patient]))
+            if path.endswith(f"/patients/{PATIENT_ID}"):
+                return httpx.Response(200, json=_read(patient))
+            if path.endswith("/encounters"):
+                return httpx.Response(200, json=_search("Encounter", [encounter]))
+            if path.endswith("/observations"):
+                return httpx.Response(200, json=_search("Observation", [observation]))
+            if path.endswith("/appointments"):
+                return httpx.Response(200, json=_search("Appointment", []))
+            raise AssertionError(str(request.url))
+
+        return respond
+
+    def evaluate(mode: str):
+        client, http = _client(handler(mode))
+        adapter = FollowUpFHIRAdapter(ClientFHIRTransport(client), now=lambda: INSTANT)
+        try:
+            with adapter.bind_read(CASE_ID):
+                try:
+                    snapshot = PostConsultationContextReader(adapter).read(CASE_ID)
+                except ReadClientError:
+                    snapshot = adapter.ledger.protocol_snapshot()
+        finally:
+            http.close()
+        return evaluate_post_consultation_review(snapshot)
+
+    matched = evaluate("complete")
+    missing = evaluate("not_found")
+    conflict = evaluate("conflict")
+    invalid = evaluate("invalid")
+    down = evaluate("down")
+    incomplete = evaluate("incomplete")
+
+    assert matched.evaluation_status is ProtocolEvaluationStatus.MATCHED
+    assert matched.reason_codes == ("post_consultation_result_requires_review",)
+    assert matched.matched_resources == ("Encounter/enc-1", "Observation/obs-1")
+    assert missing.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert missing.reason_codes == ("patient_read_unavailable",)
+    assert conflict.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert conflict.reason_codes == ("observation_acquisition_unavailable",)
+    assert conflict.matched_resources == ()
+    assert invalid.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert invalid.reason_codes == ("observation_acquisition_unavailable",)
+    assert down.evaluation_status is ProtocolEvaluationStatus.UNAVAILABLE
+    assert down.reason_codes == ("encounter_acquisition_unavailable",)
+    assert incomplete.evaluation_status is ProtocolEvaluationStatus.INSUFFICIENT
+    assert incomplete.reason_codes == ("observation_search_incomplete",)
+    assert incomplete.matched_resources == ()
+
+
+def test_read_exact_includes_appointment_and_keeps_not_found_distinct():
+    appointment = _appointment()
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        assert request.headers["X-Service-Token"] == TOKEN
+        assert request.url.host == "interop.test"
+        assert "8080" not in str(request.url)
+        path = request.url.path
+        if path.endswith(f"/appointments/{APPOINTMENT_ID}"):
+            return httpx.Response(200, json=_read(_appointment()))
+        if path.endswith("/appointments/missing"):
+            return httpx.Response(404, json={"error": "not_found"})
+        if path.endswith("/appointments/blocked"):
+            return httpx.Response(409, json={"error": "operation_not_supported"})
+        if path.endswith("/appointments/invalid"):
+            return httpx.Response(422, json={"error": "invalid_source"})
+        if path.endswith("/appointments/down"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        if path.endswith("/appointments/denied"):
+            return httpx.Response(401)
+        raise AssertionError(path)
+
+    client, http = _client(handler)
+    try:
+        found = client.read_exact("Appointment", APPOINTMENT_ID)
+        try:
+            client.read_exact("Appointment", "missing")
+        except ExactResourceNotFound:
+            missing = "not_found"
+        else:
+            missing = "returned"
+        failures = {}
+        for logical_id, label in (
+            ("blocked", "conflict"),
+            ("invalid", "invalid_source"),
+            ("down", "unavailable"),
+            ("denied", "unauthorized"),
+        ):
+            try:
+                client.read_exact("Appointment", logical_id)
+            except ExactResourceNotFound:
+                failures[label] = "not_found"
+            except Exception as exc:
+                failures[label] = type(exc).__name__
+            else:
+                failures[label] = "returned"
+        try:
+            client.read_exact("Patient", PATIENT_ID)
+        except ReadClientError:
+            patient_exact = "rejected"
+        else:
+            patient_exact = "returned"
+        try:
+            client.read_exact("Appointment", ".")
+        except ReadClientError:
+            dotted = "rejected"
+        else:
+            dotted = "returned"
+    finally:
+        http.close()
+
+    assert found == appointment
+    assert found["status"] == "noshow"
+    assert found["participant"][0]["actor"]["reference"] == f"Patient/{PATIENT_ID}"
+    assert missing == "not_found"
+    assert failures == {
+        "conflict": "ReadClientError",
+        "invalid_source": "ReadClientError",
+        "unavailable": "ReadClientError",
+        "unauthorized": "ReadClientError",
+    }
+    assert patient_exact == "rejected"
+    assert dotted == "rejected"
+    assert all(path.startswith("/api/clinical-read/v1/appointments/") for path in seen)
+    from app.clinical_review_context_http import _fhir_client
+
+    factory = inspect.getsource(_fhir_client)
+    assert "ClinicalReadClient.from_settings" in factory
+    assert "HapiReadClient" not in factory
+
+
+def _narrative(handler):
+    client, http = _client(handler)
+    return FollowUpFHIRAdapter(ClientFHIRTransport(client), now=lambda: INSTANT), http
+
+
+def _observation() -> dict:
+    return {
+        "resourceType": "Observation",
+        "id": "syn-demo-obs-102",
+        "status": "final",
+        "subject": {"reference": f"Patient/{PATIENT_ID}"},
+        "valueQuantity": {"value": 13.4, "unit": "g/dL"},
+    }
+
+
+def test_narrative_patient_resolution_uses_the_identifier_search():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["X-Service-Token"] == TOKEN
+        assert request.url.path == "/api/clinical-read/v1/patients"
+        assert request.url.params["identifierSystem"] == CASE_IDENTIFIER_SYSTEM
+        assert request.url.params["identifierValue"] == CASE_ID
+        assert "_count" not in request.url.params
+        return httpx.Response(200, json=_search("Patient", [_patient()]))
+
+    adapter, http = _narrative(handler)
+    try:
+        with adapter.bind_read(CASE_ID):
+            assert adapter.patient_id_for_case(CASE_ID) == PATIENT_ID
+    finally:
+        http.close()
+
+
+def test_narrative_patient_resolution_rejects_zero_and_several_matches():
+    def patients(resources: list[dict]):
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/api/clinical-read/v1/patients"
+            return httpx.Response(200, json=_search("Patient", resources))
+
+        return handler
+
+    other = _patient()
+    other["id"] = "syn-demo-patient-103"
+    empty, empty_http = _narrative(patients([]))
+    try:
+        with empty.bind_read(CASE_ID):
+            with pytest.raises(ReadClientError, match="case has no patient"):
+                empty.patient_id_for_case(CASE_ID)
+    finally:
+        empty_http.close()
+    ambiguous, ambiguous_http = _narrative(patients([_patient(), other]))
+    try:
+        with ambiguous.bind_read(CASE_ID):
+            with pytest.raises(ReadClientError, match="case matched more than one patient"):
+                ambiguous.patient_id_for_case(CASE_ID)
+    finally:
+        ambiguous_http.close()
+
+
+def test_narrative_observations_request_final_status_and_keep_the_value():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/clinical-read/v1/observations"
+        assert request.url.params["patient"] == PATIENT_ID
+        assert request.url.params["status"] == "final"
+        assert "_count" not in request.url.params
+        return httpx.Response(200, json=_search("Observation", [_observation()]))
+
+    adapter, http = _narrative(handler)
+    try:
+        observations = adapter.get_observations(PATIENT_ID)
+    finally:
+        http.close()
+    assert observations[0]["status"] == "final"
+    assert observations[0]["subject"] == {"reference": f"Patient/{PATIENT_ID}"}
+    assert observations[0]["valueQuantity"] == {"value": 13.4, "unit": "g/dL"}
+
+
+def test_narrative_empty_complete_collections_stay_empty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/observations"):
+            return httpx.Response(200, json=_search("Observation", []))
+        assert request.url.path.endswith("/appointments")
+        assert "status" not in request.url.params
+        return httpx.Response(200, json=_search("Appointment", []))
+
+    adapter, http = _narrative(handler)
+    try:
+        assert adapter.get_observations(PATIENT_ID) == []
+        facts = adapter.get_patient_appointments(PATIENT_ID)
+    finally:
+        http.close()
+    assert facts["appointments"] == []
+    assert facts["classifications"] == ["NONE"]
+
+
+def test_narrative_appointments_keep_status_and_start():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/clinical-read/v1/appointments"
+        assert request.url.params["patient"] == PATIENT_ID
+        assert "status" not in request.url.params
+        assert "_count" not in request.url.params
+        return httpx.Response(200, json=_search("Appointment", [_appointment()]))
+
+    adapter, http = _narrative(handler)
+    try:
+        facts = adapter.get_patient_appointments(PATIENT_ID)
+    finally:
+        http.close()
+    appointment = facts["appointments"][0]
+    assert appointment["status"] == "noshow"
+    assert appointment["start"] == "2026-01-01T00:00:00Z"
+    assert appointment["id"] == APPOINTMENT_ID
+
+
+def test_narrative_incomplete_collection_is_not_returned_as_complete():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_search("Observation", [_observation()], "incomplete"))
+
+    adapter, http = _narrative(handler)
+    try:
+        with pytest.raises(ReadClientError, match="search collection is incomplete"):
+            adapter.get_observations(PATIENT_ID)
+    finally:
+        http.close()
+
+
+def test_narrative_search_failures_stay_unavailable():
+    def unauthorized(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401)
+
+    def unavailable(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    def timed_out(_request: httpx.Request) -> None:
+        raise httpx.ConnectTimeout("timed out")
+
+    for handler in (unauthorized, unavailable, timed_out):
+        adapter, http = _narrative(handler)
+        try:
+            with adapter.bind_read(CASE_ID):
+                with pytest.raises(ReadClientError, match="clinical read unavailable"):
+                    adapter.patient_id_for_case(CASE_ID)
+        finally:
+            http.close()
+
+
+def test_scripted_workflow_reuses_a_complete_ledger_without_another_read():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        assert request.headers["X-Service-Token"] == TOKEN
+        assert "/fhir" not in request.url.path
+        path = request.url.path
+        if path == "/api/clinical-read/v1/patients":
+            assert request.url.params["identifierValue"] == CASE_ID
+            return httpx.Response(200, json=_search("Patient", [_patient()]))
+        if path == f"/api/clinical-read/v1/patients/{PATIENT_ID}":
+            return httpx.Response(200, json=_read(_patient()))
+        if path == "/api/clinical-read/v1/encounters":
+            return httpx.Response(200, json=_search("Encounter", []))
+        if path == "/api/clinical-read/v1/observations":
+            assert request.url.params["status"] == "final"
+            return httpx.Response(200, json=_search("Observation", []))
+        if path == "/api/clinical-read/v1/appointments":
+            assert "status" not in request.url.params
+            return httpx.Response(200, json=_search("Appointment", []))
+        raise AssertionError(path)
+
+    tool = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": FOLLOWUP_TOOL,
+                "args": {"case_id": CASE_ID},
+                "id": "call-1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    final = AIMessage(content="Context received from the model.")
+    final.additional_kwargs["follow_up_required"] = "unknown"
+    replies = [tool, final]
+
+    def model(messages):
+        if not replies:
+            raise AssertionError("model called after the script ended")
+        return replies.pop(0)
+
+    client, http = _client(handler)
+    try:
+        result = FollowUpWorkflow(
+            model=model,
+            sink=InMemoryAuditSink(),
+            fhir_client=client,
+            clock=lambda: "2026-09-25T00:00:03Z",
+            run_id="run-narrative-clinical-read",
+        ).run(CASE_ID)
+    finally:
+        http.close()
+    assert result.final_answer == "Context received from the model."
+    assert result.tools_used == [FOLLOWUP_TOOL]
+    assert seen == [
+        "/api/clinical-read/v1/patients",
+        f"/api/clinical-read/v1/patients/{PATIENT_ID}",
+        "/api/clinical-read/v1/encounters",
+        "/api/clinical-read/v1/observations",
+        "/api/clinical-read/v1/appointments",
+    ]

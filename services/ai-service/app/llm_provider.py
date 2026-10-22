@@ -8,7 +8,7 @@ from typing import Literal, Optional
 
 from app.experimental_models import ExperimentalSummaryRequest, PROMPT_VERSION
 
-ProviderErrorKind = Literal["timeout", "http_4xx", "http_5xx", "malformed", "empty"]
+ProviderErrorKind = Literal["timeout", "http_4xx", "http_5xx", "malformed", "empty", "max_tokens"]
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,7 @@ class ProviderGeneration:
     invocation_started: bool
     text: Optional[str] = None
     error: Optional[ProviderErrorKind] = None
+    status_code: Optional[int] = None
 
 
 class LLMProvider(ABC):

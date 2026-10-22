@@ -1,18 +1,57 @@
-"""FastAPI entrypoint for the Task 074 consumer and Task 076 experimental summary."""
+"""FastAPI entrypoint for the Task 074 consumer, Task 076 summary, and Follow-up Agent."""
 
 from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from functools import lru_cache
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings
 from app.consumer import consume
 from app.experimental_service import load_json_body, run_experimental_summary
+from app.followup_models import CASE_IDS
+from app.followup_service import (
+    get_agent_workflow_errors_http,
+    get_agent_workflow_evidence_http,
+    get_agent_workflow_http,
+    get_agent_workflow_steps_http,
+    resume_agent_workflow_http,
+    run_agent_workflow_http,
+    run_followup_http,
+)
+from app.missed_follow_up_service import run_missed_follow_up_http
+from app.clinical_review_context_http import get_clinical_review_context_http
+from app.human_development_auth import (
+    render_development_login,
+    submit_development_login,
+    submit_development_logout,
+)
+from app.human_review_client import (
+    close_review_case,
+    open_case_coordination_request,
+    render_coordination_queue,
+    render_coordination_request,
+    render_review_case,
+    render_review_queue,
+    submit_ai_assistance,
+    submit_controlled_action,
+    submit_coordination_transition,
+)
+from app.followup_review_http import (
+    close_review_case_http,
+    get_review_case_http,
+    list_review_cases_http,
+)
+from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.gemini_provider import GeminiProvider
+from app.institutional_knowledge import attach_institutional_knowledge
+from app.institutional_knowledge_http import retrieve_institutional_knowledge_http
 from app.llm_provider import LLMProvider
 from app.models import AgentContextResult
 from app.service_auth import authenticate
@@ -21,18 +60,162 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 log = logging.getLogger("ai-service")
 
-app = FastAPI(title="ai-service", version="0.1.0")
-
-
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings.from_env()
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    settings = get_settings()
+    repository = SQLiteFollowUpReviewCaseRepository(settings.ai_review_db_path)
+    repository.initialize()
+    application.state.followup_review_repository = repository
+    attach_institutional_knowledge(application, settings)
+    try:
+        yield
+    finally:
+        if hasattr(application.state, "followup_review_repository"):
+            del application.state.followup_review_repository
+        if hasattr(application.state, "institutional_knowledge"):
+            del application.state.institutional_knowledge
+
+
+app = FastAPI(title="ai-service", version="0.1.0", lifespan=lifespan)
+# Public Human Review demo assets only. Do not place other files in this directory.
+app.mount(
+    "/review-static",
+    StaticFiles(directory=Path(__file__).resolve().parent / "static" / "human_review"),
+    name="review-static",
+)
 
 
 def get_llm_provider(settings: Settings = Depends(get_settings)) -> LLMProvider | None:
     if not settings.gemini_api_key or not settings.gemini_model:
         return None
     return GeminiProvider(api_key=settings.gemini_api_key, model=settings.gemini_model)
+
+
+@app.get("/review-login")
+def review_login(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_development_login(request, settings)
+
+
+@app.post("/review-login")
+async def review_login_submit(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_development_login(
+        request,
+        settings,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
+
+
+@app.post("/review-logout")
+async def review_logout(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_development_logout(
+        request,
+        settings,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
+
+
+@app.get("/review-coordination-requests")
+def review_coordination_requests(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> Response:
+    return render_coordination_queue(request, settings)
+
+
+@app.get("/review-coordination-requests/{request_id}")
+def review_coordination_request(
+    request_id: str, request: Request, settings: Settings = Depends(get_settings)
+) -> Response:
+    return render_coordination_request(request, settings, request_id)
+
+
+@app.post("/review-coordination-requests/{request_id}/transition")
+async def review_coordination_transition(
+    request_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_coordination_transition(
+        request,
+        settings,
+        request_id,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
+
+
+@app.get("/review-cases")
+def review_cases(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_review_queue(request, settings)
+
+
+@app.get("/review-cases/{review_case_id}/coordination-request")
+def review_case_coordination_request(
+    review_case_id: str, request: Request, settings: Settings = Depends(get_settings)
+) -> Response:
+    return open_case_coordination_request(request, settings, review_case_id)
+
+
+@app.get("/review-cases/{review_case_id}")
+def review_case(review_case_id: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_review_case(request, settings, review_case_id)
+
+
+@app.post("/review-cases/{review_case_id}/ai-assistance")
+async def review_case_ai_assistance(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_ai_assistance(
+        request,
+        settings,
+        review_case_id,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
+
+
+@app.post("/review-cases/{review_case_id}/controlled-action")
+async def review_case_controlled_action(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_controlled_action(
+        request,
+        settings,
+        review_case_id,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
+
+
+@app.post("/review-cases/{review_case_id}/close")
+async def review_case_close(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return close_review_case(
+        request,
+        settings,
+        review_case_id,
+        await request.body(),
+        request.headers.get("content-type"),
+    )
 
 
 @app.get("/health")
@@ -63,3 +246,158 @@ async def experimental_summary(
 ) -> Response:
     body = load_json_body(await request.body())
     return run_experimental_summary(request, settings, provider, body)
+
+
+@app.get("/internal/longitudinal-context")
+def longitudinal_context(
+    caseId: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if not authenticate(request, settings):
+        return Response(status_code=401)
+    if caseId not in CASE_IDS:
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    from app.clinical_read_client import ClinicalReadClient
+    from app.longitudinal_context import build_longitudinal_context
+
+    context = build_longitudinal_context(ClinicalReadClient.from_settings(settings), caseId)
+    return JSONResponse(content=context.model_dump(by_alias=True, mode="json", exclude_none=True))
+
+
+@app.get("/internal/clinical-context-intelligence")
+def clinical_context_intelligence(
+    caseId: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if not authenticate(request, settings):
+        return Response(status_code=401)
+    if caseId not in CASE_IDS:
+        return JSONResponse(status_code=422, content={"error": "invalid_request"})
+    from datetime import datetime, timezone
+
+    from app.clinical_context_intelligence import analyze_clinical_context
+    from app.clinical_read_client import ClinicalReadClient
+    from app.longitudinal_context import build_longitudinal_context
+
+    context = build_longitudinal_context(ClinicalReadClient.from_settings(settings), caseId)
+    analysis = analyze_clinical_context(context, evaluated_at=datetime.now(timezone.utc))
+    return JSONResponse(content=analysis.model_dump(by_alias=True, mode="json", exclude_none=True))
+
+
+@app.post("/internal/agent/follow-up")
+async def follow_up(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return run_followup_http(request, settings, await request.body())
+
+
+@app.post("/internal/agent/missed-follow-up")
+async def missed_follow_up(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return run_missed_follow_up_http(request, settings, await request.body())
+
+
+@app.post("/internal/workflows")
+async def start_agent_workflow(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return run_agent_workflow_http(request, settings, await request.body())
+
+
+@app.get("/internal/workflows/{workflow_id}/steps")
+def get_agent_workflow_steps(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_agent_workflow_steps_http(request, settings, workflow_id)
+
+
+@app.get("/internal/workflows/{workflow_id}/evidence")
+def get_agent_workflow_evidence(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_agent_workflow_evidence_http(request, settings, workflow_id)
+
+
+@app.get("/internal/workflows/{workflow_id}/errors")
+def get_agent_workflow_errors(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_agent_workflow_errors_http(request, settings, workflow_id)
+
+
+@app.get("/internal/workflows/{workflow_id}")
+def get_agent_workflow(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_agent_workflow_http(request, settings, workflow_id)
+
+
+@app.post("/internal/workflows/{workflow_id}/resume")
+async def resume_agent_workflow(
+    workflow_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return resume_agent_workflow_http(request, settings, workflow_id, await request.body())
+
+
+@app.get("/internal/follow-up-review-cases")
+def list_follow_up_review_cases(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return list_review_cases_http(request, settings)
+
+
+@app.get("/internal/follow-up-review-cases/{review_case_id}/clinical-context")
+def get_follow_up_review_clinical_context(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_clinical_review_context_http(request, settings, review_case_id)
+
+
+@app.get("/internal/follow-up-review-cases/{review_case_id}")
+def get_follow_up_review_case(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return get_review_case_http(request, settings, review_case_id)
+
+
+@app.post("/internal/follow-up-review-cases/{review_case_id}/close")
+async def close_follow_up_review_case(
+    review_case_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return close_review_case_http(
+        request,
+        settings,
+        review_case_id,
+        await request.body(),
+    )
+
+
+@app.post("/internal/knowledge/retrieve")
+async def retrieve_institutional_knowledge(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return retrieve_institutional_knowledge_http(request, settings, await request.body())

@@ -1,8 +1,8 @@
 package lab.healthcare.fhir.modelboundary.web;
 
 import lab.healthcare.fhir.modelboundary.BoundaryCollection;
+import lab.healthcare.fhir.modelboundary.ConfiguredModelBoundarySource;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryContract;
-import lab.healthcare.fhir.modelboundary.ModelBoundaryContractProvider;
 import lab.healthcare.fhir.modelboundary.ModelBoundaryHttpStatuses;
 
 import org.slf4j.Logger;
@@ -21,11 +21,11 @@ public class ModelBoundaryContractController {
 
     private static final Logger log = LoggerFactory.getLogger(ModelBoundaryContractController.class);
 
-    private final ModelBoundaryContractProvider provider;
+    private final ConfiguredModelBoundarySource provider;
 
-    public ModelBoundaryContractController(ModelBoundaryContractProvider provider) {
+    public ModelBoundaryContractController(ConfiguredModelBoundarySource provider) {
         if (provider == null) {
-            throw new IllegalArgumentException("Model boundary contract provider must be provided");
+            throw new IllegalArgumentException("Configured model boundary source must be provided");
         }
         this.provider = provider;
     }

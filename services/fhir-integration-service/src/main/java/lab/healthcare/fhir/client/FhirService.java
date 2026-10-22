@@ -16,8 +16,10 @@ import org.hl7.fhir.r4.model.CodeType;
 import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.CodeSystem;
 import org.hl7.fhir.r4.model.Coding;
+import org.hl7.fhir.r4.model.Appointment;
 import org.hl7.fhir.r4.model.Condition;
 import org.hl7.fhir.r4.model.DiagnosticReport;
+import org.hl7.fhir.r4.model.Encounter;
 import org.hl7.fhir.r4.model.IdType;
 import org.hl7.fhir.r4.model.IntegerType;
 import org.hl7.fhir.r4.model.MedicationRequest;
@@ -89,6 +91,85 @@ public class FhirService {
                         .returnBundle(Bundle.class)
                         .execute(),
                 "searching Patient by identifier");
+    }
+
+    public Bundle searchPatientsByIdentifierAndCount(String system, String value, int pageSize) {
+        requireText(system, "Patient identifier system must be provided");
+        requireText(value, "Patient identifier value must be provided");
+        requirePageSize(pageSize);
+        String identifierSystem = system.trim();
+        String identifierValue = value.trim();
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Patient.class)
+                        .where(Patient.IDENTIFIER.exactly().systemAndIdentifier(identifierSystem, identifierValue))
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Patient by identifier");
+    }
+
+    public Encounter readEncounter(String logicalId) {
+        requireText(logicalId, "Encounter logical ID must be provided");
+        return execute(
+                () -> fhirClient.read()
+                        .resource(Encounter.class)
+                        .withId(logicalId)
+                        .execute(),
+                "reading Encounter");
+    }
+
+    public Bundle searchEncountersByPatientAndStatus(String patientLogicalId, String status, int pageSize) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        requireText(status, "Encounter status must be provided");
+        requirePageSize(pageSize);
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Encounter.class)
+                        .where(Encounter.PATIENT.hasId(patientLogicalId))
+                        .and(Encounter.STATUS.exactly().code(status))
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Encounter by patient and status");
+    }
+
+    public Bundle searchObservationsByPatientAndStatus(String patientLogicalId, String status, int pageSize) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        requireText(status, "Observation status must be provided");
+        requirePageSize(pageSize);
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Observation.class)
+                        .where(Observation.PATIENT.hasId(patientLogicalId))
+                        .and(Observation.STATUS.exactly().code(status))
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Observation by patient and status");
+    }
+
+    public Appointment readAppointment(String logicalId) {
+        requireText(logicalId, "Appointment logical ID must be provided");
+        return execute(
+                () -> fhirClient.read()
+                        .resource(Appointment.class)
+                        .withId(logicalId)
+                        .execute(),
+                "reading Appointment");
+    }
+
+    public Bundle searchAppointmentsByPatient(String patientLogicalId, int pageSize) {
+        requireText(patientLogicalId, "Patient logical ID must be provided");
+        requirePageSize(pageSize);
+        return execute(
+                () -> fhirClient.search()
+                        .forResource(Appointment.class)
+                        .where(Appointment.PATIENT.hasId(patientLogicalId))
+                        .count(pageSize)
+                        .returnBundle(Bundle.class)
+                        .execute(),
+                "searching Appointment by patient");
     }
 
     public List<Patient> extractPatients(Bundle bundle) {
@@ -1079,6 +1160,12 @@ public class FhirService {
     private static void requireText(String value, String message) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(message);
+        }
+    }
+
+    private static void requirePageSize(int pageSize) {
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("Search _count must be at least 1");
         }
     }
 

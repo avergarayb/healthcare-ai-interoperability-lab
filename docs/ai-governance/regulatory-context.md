@@ -2,7 +2,9 @@
 
 **Healthcare AI & Interoperability Platform**
 
-**Snapshot date:** 19 September 2026  
+**Technical baseline updated:** 29 September 2026
+
+**Legal/regulatory snapshot retained from:** 19 September 2026
 **Document type:** engineering / product-governance analysis  
 **Not:** legal advice, legal opinion, compliance certification, privacy certification, or healthcare certification
 
@@ -27,15 +29,15 @@ Historical development notes remain in [`laboratory-state.md`](laboratory-state.
 
 ## 1. Purpose and scope
 
-State, for the evolving **Healthcare AI & Interoperability Platform** (also: **Healthcare AI Platform**, **the product**):
+State, for the evolving **Healthcare AI & Interoperability Platform** (also: **the product**):
 
 - which Peruvian instruments are **relevant to consider** for a future commercial offering;
 - which **technical controls already exist**;
 - which topics remain **open** before production or before sending real clinical data to a model.
 
-**In scope:** documentation of applicability. Interoperability (Java FHIR boundary) and the current experimental Gemini path.
+**In scope:** documentation of applicability for Healthcare Interoperability, Healthcare AI, the synthetic Gemini experiment, and the implemented Clinical Follow-up Review data flow.
 
-**Out of scope:** changing architecture or code; creating Tasks 078+; inventing RAG, agents, MCP, LangGraph, memory, OpenAI, a second provider, fallback/router, frontend, RBAC, IAM, tenancy, operational HITL, CDS, or a FHIR→Gemini path.
+**Out of scope:** changing legal interpretations; declaring compliance; inventing RAG, MCP, memory, OpenAI, a second provider, fallback/router, frontend, RBAC, IAM, tenancy, operational HITL, CDS, or production authorization for real-data model processing.
 
 **Rule:** a technical control is not legal compliance.
 
@@ -43,83 +45,78 @@ State, for the evolving **Healthcare AI & Interoperability Platform** (also: **H
 
 ## 2. Product context
 
-The repository is the foundation of a commercial Healthcare AI & Interoperability Platform. Target deployment models (not implemented as a production estate today):
+The repository is the foundation of a commercial **Healthcare AI & Interoperability Platform** with two independently deployable product units:
 
-1. SaaS operated by the product provider.
-2. Customer-hosted software in infrastructure controlled by the healthcare organization.
-3. Hybrid (some components in the customer environment, some externally managed).
-
-The current implementation is **under development**. Sandbox EHR integrations and a gated experimental model call exist. There is **no** production tenant, **no** accredited SIHCE, and **no** flow of FHIR-derived clinical context into Gemini.
-
-Two technical surfaces remain in the current codebase of this single product:
-
-| Technical surface | Role today |
+| Product unit | Role today |
 |---|---|
-| Java interoperability surface (`fhir-integration-service`, port **8081**) | SMART + FHIR R4 client to Epic/Oracle sandboxes and HAPI; snapshot; allowlist; Model Boundary v1 |
-| Python AI surface (`ai-service`, port **8090**) | Consumes v1 without calling a model; separately, experimental Gemini on a synthetic fixture |
+| Healthcare Interoperability (`fhir-integration-service`, Java, port **8081**) | SMART + FHIR R4 connectivity to Epic/Oracle sandboxes and local HAPI; snapshots, controlled projections and Model Boundary v1. |
+| Healthcare AI (`ai-service`, Python, port **8090**) | Model Boundary v1 consumption without a model; separate synthetic Gemini experiment; Clinical Follow-up Review with bounded FHIR reads, deterministic protocol authority and a narrative LangGraph/Gemini subflow. |
 
-`docs/PROJECT.md` lists strategy items (RAG, Kubernetes, Spring Security, etc.). Those are **not** evidence of current runtime.
+The units may be deployed together or independently. Final commercial packaging is not decided. Target SaaS, customer-hosted and hybrid models remain unimplemented production considerations.
+
+The current implementation is **under development**. There is no production tenant, accredited SIHCE, RENHICE participation, enterprise IAM, durable human-review workflow or approved production flow of real patient data to Gemini.
+
+Clinical Follow-up Review can technically provide FHIR-derived payloads to Gemini through two explicitly authorized narrative tool contracts. That fact invalidates the earlier synthetic-only technical baseline but does not establish legal authorization, production readiness or permission for arbitrary FHIR/model data flow.
 
 ---
 
 ## 3. Current technical baseline
 
-Verified against the repository (19 September 2026).
+Technical baseline verified against the repository on 29 September 2026. Legal interpretations in later sections were not independently changed by this update.
 
-### Interoperability path (does not call Gemini)
+### Healthcare Interoperability and Model Boundary v1
 
 ```text
-EHR sandbox (Epic / Oracle / HAPI)
-        → Java / FHIR R4 client
-        → snapshot
-        → Task 042 allowlist
-        → RetentionCeiling N=5
-        → Model Boundary Contract v1
-        → GET /api/model-boundary/v1  (+ X-Service-Token)
-        → GET /internal/agent-context   (modelCalled=false)
+EHR sandbox / local HAPI
+        -> Java FHIR R4 client
+        -> controlled snapshot and projection
+        -> Model Boundary Contract v1
+        -> GET /internal/agent-context (modelCalled=false)
 ```
 
-### Experimental AI path (does not read v1 or FHIR)
+This path does not call Gemini and does not make v1 automatic model input.
+
+### Synthetic experimental AI
 
 ```text
 SYN-076-001
-        → POST /internal/experimental-summary
-        → LLMProvider → GeminiProvider
-        → Google Gemini API
+        -> POST /internal/experimental-summary
+        -> GeminiProvider
+        -> Google Gemini API
 ```
+
+This path remains synthetic, gated and separate.
+
+### Clinical Follow-up Review
 
 ```text
-FHIR / EHR context
-        → Java / FHIR boundary
-        → Model Boundary v1
-        → X
-        → X ----> Gemini
+POST /internal/agent/follow-up
+        -> authenticated case scope
+        -> configured authorized FHIR endpoint
+        -> mandatory Patient / Encounter / Observation / Appointment reads
+        -> deterministic POST_CONSULTATION_RESULT_REVIEW_V1
+        -> authorized LangGraph/Gemini narrative subflow when allowed
+        -> application-owned protocol / review / action projection
 ```
 
-`SYN-076-001` is **not** equivalent to FHIR-derived clinical context.
+The FHIR reads are application-owned, case-bound, GET-only, resource-constrained, bounded, completeness-aware and fail-closed. Mandatory acquisition occurs before LangGraph. Gemini is not authoritative for protocol evaluation, clinical assessment, human review or action.
+
+FHIR-derived payloads may reach Gemini only through the two explicitly authorized narrative tools. The current repository does not establish production approval for using real clinical data in this flow.
 
 | Capability | Evidence |
 |---|---|
-| Java 21 / Spring Boot, port 8081 | `services/fhir-integration-service/src/main/resources/application.yml` |
-| HAPI FHIR R4 client | `lab.healthcare.fhir.client` (not a FHIR server of the product) |
-| SMART Authorization Code + PKCE | `SmartAuthorizationCoordinator`, `AuthorizationCodeClient`; Epic `PUBLIC_PKCE`; Oracle `PUBLIC_PKCE` |
-| Snapshot + allowlist 042 | `ClinicalProjectionMapper`, `ClinicalProjectionAssembler`; spec `docs/tasks/Task_042_Clinical_Data_Minimization_and_Controlled_Projection_v2.md` |
-| RetentionCeiling N=5 | `RetentionCeiling.DEFAULT_LIMIT`; `OracleEpicContractCompatibilityTest` |
-| Model Boundary v1 | `ModelBoundaryContract`, `ModelBoundaryMapper`; `docs/fhir/model-boundary-contract-v1.md` |
-| X-Service-Token on v1 | `ModelBoundaryServiceAuthFilter`, `ModelBoundaryServiceTokenSettings` |
-| Python consumer (no model) | `app/consumer.py`, `GET /internal/agent-context` |
-| Experimental Gemini | `app/experimental_service.py`, `app/gemini_provider.py`, `POST /internal/experimental-summary` |
-| FakeLLMProvider | `app/fake_llm_provider.py`; default pytest |
-| Fixture SYN-076-001 | `app/experimental_fixture.py` |
-| Feature gate default off | `LLM_EXPERIMENTAL_ENABLED`; `Settings.llm_experimental_enabled` default `false` |
-| Timeout 30s / summary ≤ 2000 | `PROVIDER_TIMEOUT_SECONDS`, `MAX_SUMMARY_CHARS` |
-| `requiresHumanReview=true` | Java `AiBoundaryDecision`; Python `experimental_models.py` |
-| Java `modelCalled` / `modelCallAuthorized` false | `AiBoundaryDecision` constructor rejects `true` |
-| Minimized experimental logs | `emit_audit`; `test_logs_do_not_contain_secrets_or_prompt` |
-| Gemini default after 077 | `gemini-flash-latest` in `config.py`, `experimental_models.DEFAULT_MODEL` |
-| Threat model T1–T9 | `docs/ai-governance/llm-boundary-threats-and-controls.md` |
+| Java FHIR/SMART and sandbox connectivity | `services/fhir-integration-service`; `docs/fhir/` |
+| Controlled Java projection and Model Boundary v1 | `ClinicalProjectionMapper`, `ModelBoundaryContract` |
+| Authenticated Python v1 consumer without model invocation | `app/consumer.py`, `GET /internal/agent-context` |
+| Synthetic Gemini experiment | `app/experimental_service.py`, `POST /internal/experimental-summary` |
+| Bounded Python FHIR read client | `app/langgraph_fhir_hapi.py`, `app/langgraph_fhir_followup.py` |
+| Mandatory pre-LangGraph acquisition | `PostConsultationContextReader`, `FollowUpWorkflow.run` |
+| Deterministic protocol authority | `app/post_consultation_review.py` |
+| Closed follow-up HTTP projection | `app/followup_models.py`, `app/followup_service.py` |
+| Model tool policy and audit | `app/langgraph_gemini_fhir_followup.py` |
+| Authoritative internal contract | `docs/contracts/post-consultation-result-review-v1.md` |
 
-Tasks 057–073 implement **deny-by-default simulation gates** in Java. Their own docs state they do **not** implement a real IdP, real consent, or clinical access (for example `docs/fhir/ai-consumer-authorization-boundary.md`, `docs/fhir/ai-consumer-consent-boundary.md`).
+Tasks 057–073 remain deny-by-default Java simulations, not real IAM, consent or clinical authorization.
 
 ---
 
@@ -139,7 +136,7 @@ Software runs where the healthcare organization controls infrastructure. The org
 
 ### 4.3 Hybrid
 
-Some components inside the customer environment and some externally managed. The material question is **explicit data flow**: what crosses to the product provider and what crosses to Google Gemini. Today the only model path is the synthetic fixture; a future hybrid that sent v1 or FHIR to Gemini would be a **material product change** and would void this snapshot.
+Some components inside the customer environment and some externally managed. The material question is **explicit data flow**: what crosses to the product provider and what crosses to Google Gemini. The repository now includes an explicitly authorized FHIR-derived narrative-tool path, but no production hybrid deployment or real-data approval. Any production use would require revalidation of this snapshot.
 
 ---
 
@@ -168,9 +165,9 @@ HIPAA and GDPR are **not** analyzed here. If the product later serves other juri
 
 Public object: promote AI in digital transformation with an ethical, safe, transparent, and responsible environment; PCM / Secretaría de Gobierno y Transformación Digital as national technical authority.
 
-**Product applicability:** the commercial Healthcare AI Platform **may** fall within the national AI policy space if it offers AI in Peru. Whether a given release is an “AI system” under the law/regulation, and which duties apply to a private vendor versus a public body, is an **open regulatory question**.
+**Product applicability:** the commercial Healthcare AI & Interoperability Platform **may** fall within the national AI policy space if it offers AI in Peru. Whether a given release is an “AI system” under the law/regulation, and which duties apply to a private vendor versus a public body, is an **open regulatory question**.
 
-Current Gemini use is a **gated experimental summary of synthetic input**. That fact does **not** by itself answer applicability for a future clinical AI feature.
+Current Gemini use has two separate paths: the gated experimental summary of synthetic input and the authorized Clinical Follow-up Review narrative subflow, which may receive FHIR-derived tool payloads under explicit contracts. This technical capability does not establish production real-clinical-data authorization or answer legal/regulatory applicability; provider, purpose, transfer, retention and risk questions require revalidation before such use.
 
 ### 5.2 Decreto Supremo N.° 115-2025-PCM
 
@@ -231,12 +228,15 @@ DS 115-2025-PCM classifies **uses**, including (in the official reglamento text)
 
 Reasons this document stays at **open regulatory question** rather than a label:
 
-- The only live model path accepts **SYN-076-001**, not EHR or v1 data.
-- The prompt builder instructs: no diagnose, no treatment, no medication, no clinical decisions (`app/llm_provider.py` `build_experimental_prompt`). That is a **technical instruction**, not a legal classification.
-- `summary` is not wired to write FHIR, execute tools, or drive care.
-- Java keeps `modelCallAuthorized=false` and `modelCalled=false` on the interoperability path.
+- The synthetic experimental-summary path remains limited to `SYN-076-001`.
+- Clinical Follow-up Review may supply FHIR-derived data through explicitly authorized narrative tools, but its protocol is deterministic and does not assess diagnosis, severity, urgency, treatment, medication or clinical normality.
+- `clinicalAssessment.status` remains `not_performed`; model output cannot control protocol, human review or action.
+- The workflow performs no FHIR write or autonomous external action.
+- Java Model Boundary v1 remains a separate non-model path.
 
-A **future** commercial use that influenced clinical decisions, access to care, or processing of HCE data **might** sit near the reglamento’s high-risk *use* descriptions. That requires a **formal production AI risk assessment** and legal determination. Healthcare product ≠ automatically high-risk AI.
+A commercial use that processes real HCE data through an external model, influences clinical decisions or affects access to care **might** sit near the reglamento’s high-risk *use* descriptions. That requires a **formal production AI risk assessment** and legal determination. Healthcare product ≠ automatically high-risk AI.
+
+The earlier synthetic-only rationale is no longer a sufficient basis for a legal conclusion. Existing applicability conclusions must be revalidated before production use of the FHIR-derived narrative path; this document does not silently change that legal conclusion.
 
 ---
 
@@ -248,6 +248,8 @@ A **future** commercial use that influenced clinical decisions, access to care, 
 | EHR sandbox resources | Fetched by Java; then minimized by allowlist 042 | Implemented technical control on projection; legal character of sandbox data: open question |
 | Model Boundary v1 fields | `resourceType` + limited status codes; no Patient id/name/birthDate/values (Task 042 blocklist) | Implemented technical control |
 | SYN-076-001 | Fixed synthetic case in `experimental_fixture.py` | Not equivalent to sandbox or real data |
+| Clinical Follow-up Review FHIR snapshot | Patient, Encounter, Observation and Appointment through a case-bound contract | Implemented development path; production use and legal roles unresolved |
+| Narrative follow-up tool payloads | FHIR-derived payloads available only through authorized tools | Implemented technical boundary; real-data provider processing not approved or assessed here |
 | Health data as sensitive data under 29733 | Theme of the personal-data framework | Requires legal/organizational determination when real data exists |
 
 Purpose limitation, data-subject rights, incident notification, international transfers, and formal controller/processor roles: **not implemented** as product workflows. Minimization of the **projection** is not a completed 29733 assessment.
@@ -258,30 +260,37 @@ RetentionCeiling N=5 is an **application retain-at-most-N** after a Bundle. It i
 
 ## 8. Interoperability and clinical information
 
-The product’s interoperability value is a **controlled FHIR client** plus a vendor-neutral boundary.
+The product’s interoperability value includes the Healthcare Interoperability FHIR client and vendor-neutral boundary. Healthcare AI also has a separate, capability-specific FHIR read contract for Clinical Follow-up Review. That contract is not a general interoperability or legal-purpose registry.
 
 Authorized purpose of any future clinical flow (care, operations, research, AI) is **not** encoded as a legal purpose register. Tasks 066–067 simulate consent/purpose/scope and document that verification is **not implemented**.
 
 Disassociated data for research (Ley 31750 / DS 020-2025-SA) is **not implemented**.
 
-Do not treat sandbox SMART success as authorization for production reuse of clinical information, including reuse as model input.
+Do not treat sandbox SMART success, local HAPI success or a technically authorized tool as authorization for production reuse of clinical information, including reuse as model input.
 
 ---
 
 ## 9. External AI provider
 
-Current provider path: **Google Gemini API** via `google-genai==2.24.0` (`GeminiProvider`). Default model id after Task 077: `gemini-flash-latest`. `GEMINI_MODEL` may override. There is **no** fallback, router, or second provider.
+Current provider: **Google Gemini API** via `google-genai==2.24.0`. Default model id: `gemini-flash-latest`; `GEMINI_MODEL` may override. There is no fallback, router or second provider.
+
+Gemini is used by two separate paths:
+
+- the exact synthetic fixture on `/internal/experimental-summary`;
+- the Clinical Follow-up Review narrative subflow, where FHIR-derived payloads may be returned only through explicitly authorized tools.
+
+The deterministic follow-up protocol and its review/action projection remain outside Gemini.
 
 | Topic | What the repo shows | What the repo does **not** show |
 |---|---|---|
-| Application does not log API key, prompt, or completion | `emit_audit`; architecture/comment in `config.py` | Provider-side logging |
-| No application-level claim of “no training” | Prompt says synthetic / no diagnose | Google account type, paid vs free tier, training/product-improvement terms |
-| Timeout / error normalization | 30s; 502/504; `modelCalled=true` if invocation started | SLA or residency |
-| External processing | HTTPS call from `GeminiProvider._invoke` | Region, subprocessors, DPA, retention at Google |
+| Application excludes API keys, prompts, completions and clinical payloads from ordinary audit fields | `emit_audit`, follow-up HTTP log and policy audit | Provider-side logging or retention |
+| Model input is contract-bounded | Synthetic fixture contract or authorized follow-up tools | Legal purpose, production authorization or provider terms for real clinical data |
+| Timeout/error normalization and bounded retry | Provider implementations and workflow tests | SLA or residency |
+| External processing | HTTPS calls to Gemini | Region, subprocessors, DPA, retention or product-improvement use at Google |
 
 **No model training use in application code ≠ zero data retention at the provider.**
 
-Account, region, contractual terms, and subprocessors are **open regulatory questions**. Do not infer them from a local `.env` (gitignored; not evidence).
+Account, region, contractual terms, subprocessors and the treatment of real clinical prompts/tool payloads are **open regulatory questions**. Do not infer them from a local `.env` or from application-side logging controls.
 
 ---
 
@@ -293,7 +302,7 @@ Account, region, contractual terms, and subprocessors are **open regulatory ques
 | Who holds EHR credentials | Typically provider or customer-by-contract | Typically customer | Split | Operator `.env` (Java SMART) |
 | Who holds `GEMINI_API_KEY` | Provider or customer | Customer or shared | Highest leakage risk if unclear | Local env; not a secret manager |
 | 29733 roles | Requires legal/organizational determination | Does not vanish | Follow the data flow | Not determined |
-| 31814 / DS 115 | Depends on offered AI use | Depends on offered AI use | Same | Experimental synthetic path only |
+| 31814 / DS 115 | Depends on offered AI use | Depends on offered AI use | Same | Synthetic experiment plus deterministic follow-up and a gated narrative model path; legal classification unresolved |
 | SIHCE / RENHICE | Only if the offering becomes that system | Only if the customer uses it as SIHCE | Same | Not established |
 | Gemini crossing a border | Likely if Google processes outside PE | Still possible | Must be drawn | Not documented |
 
@@ -308,14 +317,14 @@ Verified. No extra controls invented.
 | Control | Where | Notes |
 |---|---|---|
 | SMART Authorization Code + PKCE | `SmartAuthorizationCoordinator`, `AuthorizationCodeClient` | Sandbox clients; not enterprise IAM |
-| FHIR R4 boundary (client only) | HAPI client; Python architecture test forbids FHIR clients | Python does not query Epic/Oracle/HAPI |
+| FHIR R4 boundaries | Java interoperability client plus constrained Python follow-up read client | Python access is case-bound, GET-only and limited by ADR-085; not arbitrary Epic/Oracle/HAPI access |
 | Allowlist 042 | `ClinicalProjectionMapper`, `ModelBoundaryMapper` | Patient: `resourceType` only; see Task 042 §4 |
 | RetentionCeiling N=5 | `RetentionCeiling` | Not a legal retention policy |
 | Model Boundary v1 | `GET /api/model-boundary/v1` | Not model input |
 | X-Service-Token (Java) | `ModelBoundaryServiceAuthFilter` | Fail-closed if unconfigured |
 | Constant-time compare (Java only) | `ModelBoundaryServiceTokenSettings.matches` uses `MessageDigest.isEqual` | **Not** claimed for Python |
 | No Java log of the token value | Filter logs `reason=unconfigured\|absent\|empty\|mismatch` only | |
-| X-Service-Token (Python 074 and 076 inbound) | `app/service_auth.authenticate` | Fail-closed if blank. `GET /internal/agent-context` and `POST /internal/experimental-summary` require the header; 074 returns 401 and does not fetch Java when auth fails. Equality compare. **Not** a network boundary |
+| X-Service-Token (Python internal endpoints) | `app/service_auth.authenticate` | Fail-closed if blank on agent-context, experimental-summary and Clinical Follow-up Review. Equality compare. **Not** a network boundary |
 | Feature gate | `LLM_EXPERIMENTAL_ENABLED` default false | 503 `DISABLED`, no provider call |
 | Synthetic fixture only | `is_canonical_fixture`; Bundle → 422 | |
 | Timeout 30s | `GeminiProvider` + `PROVIDER_TIMEOUT_SECONDS` | |
@@ -326,7 +335,12 @@ Verified. No extra controls invented.
 | correlationId | `X-Correlation-ID` or generated UUID on 074/076 | Java v1 surface does not use the same scheme |
 | Minimized experimental logs | Allowlist of fields in `emit_audit` | ≠ provider-side LLM logs |
 | Threat model T1–T9 | `llm-boundary-threats-and-controls.md` | Documented control / residual risks |
-| No OpenAI / LangGraph / FHIR host in Python app | `tests/test_architecture.py` | |
+| Follow-up case isolation | `langgraph_fhir_followup.py`, protocol/pagination/concurrency tests | Applies to Patient association and every page |
+| Bounded completeness-aware FHIR reads | `langgraph_fhir_hapi.py` | Page/resource limits; incomplete ≠ empty |
+| HAPI continuation restrictions | `langgraph_fhir_hapi.py` | Same origin/base, strict query, stable traversal, no redirects |
+| Deterministic protocol outside model authority | `post_consultation_review.py`, `followup_service.py` | Gemini cannot set protocol/review/action fields |
+| Explicit narrative-tool contracts | `langgraph_gemini_fhir_followup.py` | FHIR-derived model input is limited to authorized tools |
+| No follow-up FHIR writes | Read client and workflow architecture | Proposed action is not execution |
 
 `.env` is gitignored (`.gitignore`). That is hygiene, not a secret manager.
 
@@ -347,10 +361,11 @@ Recorded as **governance/product questions**, not as Tasks in this change:
 - Formal production AI risk assessment
 - Production clinical validation
 - SIHCE applicability assessment; RENHICE applicability assessment
-- Production Gemini / provider assessment (account, region, terms, retention, subprocessors)
-- v1 or FHIR → Gemini
+- Production Gemini / provider assessment (account, region, terms, retention, subprocessors and real-data use)
+- Production authorization and governance for real clinical data supplied through the follow-up narrative tools
 - Second LLM provider; fallback; router
-- Effective network boundary for Python `:8090` (ADR-082 layer 2). Inbound `X-Service-Token` on `GET /internal/agent-context` and `POST /internal/experimental-summary` is implemented (see §11). That authentication layer does **not** implement network isolation. Default `AI_SERVICE_HOST` remains `0.0.0.0`.
+- Effective network boundary for Python `:8090` (ADR-082 layer 2). Inbound `X-Service-Token` is implemented on the three internal endpoints (see §11). That authentication layer does **not** implement network isolation. Default `AI_SERVICE_HOST` remains `0.0.0.0`.
+- Durable follow-up audit storage, queue, reviewer assignment, acknowledgement and disposition
 
 ---
 
@@ -360,13 +375,13 @@ No scores. No compliant / non-compliant labels.
 
 | Regulatory / governance area | Requirement / topic | Current product applicability | Existing technical evidence | Current status | Future consideration |
 |---|---|---|---|---|---|
-| AI governance | Risk classification (DS 115) | Depends on **use**, not on “healthcare software” | Synthetic-only Gemini path; no v1→model | Open regulatory question | Classify each commercial use before launch |
+| AI governance | Risk classification (DS 115) | Depends on **use**, not on “healthcare software” | Synthetic path plus deterministic follow-up and contract-bounded narrative model path | Open regulatory question; revalidate before production real-data use | Classify each commercial use before launch |
 | AI governance | Transparency | Relevant if an AI feature is offered to users | `promptVersion`, provider/model in 076 response; no end-user UI | Partially addressed | User-facing disclosure if commercialized |
-| AI governance | Human oversight | Relevant for future high-risk **clinical** AI | `requiresHumanReview` flag (Java + 076) | Partially addressed | Operational HITL if use requires it |
+| AI governance | Human oversight | Relevant for future high-risk **clinical** AI | Follow-up `humanReview.status=required` is application-owned | Response-level projection only | Operational queue, roles and disposition if use requires it |
 | AI governance | Progressive implementation | Possible private-sector timelines in DS 115 | None in product | Open regulatory question | Counsel + official text |
 | Data protection | Minimization / proportionality | Relevant when personal/health data exist | Allowlist 042 + N=5 + v1 | Implemented technical control | Formal processing assessment |
 | Data protection | Purpose limitation | Relevant for real clinical flows | Simulated in 066/067 docs as not verified | Partially addressed (simulation) / not implemented (real purpose) | Legal purpose register |
-| Data protection | Security of processing | Relevant for any personal data | Token 075/076, gate, gitignore, minimized logs | Partially addressed | IAM, rotation, isolation, SIEM |
+| Data protection | Security of processing | Relevant for any personal data | Service token, gates, case isolation, bounded reads, continuation validation, minimized logs | Partially addressed | IAM, rotation, isolation, SIEM and durable audit |
 | Data protection | Controller / processor | Relevant for SaaS / Gemini | Not in repo | Requires legal/organizational determination | Contracts + facts |
 | Data protection | International transfers | Relevant if Gemini or SaaS leaves PE | Not documented | Open regulatory question | Provider + hosting assessment |
 | Data protection | Data-subject rights | Relevant if real data subjects exist | Not implemented | Not implemented | Workflow + roles |
@@ -375,7 +390,7 @@ No scores. No compliant / non-compliant labels.
 | Healthcare | RENHICE | Not established | FHIR client ≠ registry participation | Open question | Only if customer/product joins RENHICE |
 | Healthcare | FHIR Perú / IPS | Not implemented as profile accreditation | HAPI R4 client to vendor sandboxes | Not applicable to current scope as accreditation | Profile work if MINSA exchange is sold |
 | Healthcare | Disassociated research data | Ley 31750 / DS 020-2025-SA theme | Not implemented | Not implemented | Separate product decision |
-| External AI | Provider processing | Relevant to any real-data model call | `GeminiProvider`; fixture only | Controlled current scope | Production provider assessment |
+| External AI | Provider processing | Relevant to any real-data model call | `GeminiProvider`; synthetic input and authorized follow-up tool contracts | Technical boundary implemented; production real-data conclusion unresolved | Production provider and legal assessment |
 | External AI | Provider logging / retention / training | Relevant | App does not log prompt/key | Open regulatory question | Google terms for the chosen SKU |
 | Deployment | SaaS / hosted / hybrid | Future product consideration | Local processes only | Not implemented | Choose model and draw data flows |
 | Identity | Service authentication | Lab shared secret | `X-Service-Token` | Implemented technical control | ≠ enterprise IAM/RBAC |
@@ -386,7 +401,7 @@ No scores. No compliant / non-compliant labels.
 
 ### Operator
 
-- Who is the legal operator of the Healthcare AI Platform?
+- Who is the legal operator of the Healthcare AI & Interoperability Platform?
 - In which country is the operator established?
 - Which jurisdictions will the product serve?
 
@@ -402,7 +417,7 @@ No scores. No compliant / non-compliant labels.
 - What exact AI use cases will be commercialized?
 - Will outputs influence clinical decisions or access to care?
 - Will human review be mandatory **as an operation**, not only as a flag?
-- Will v1 or any FHIR-derived context ever be sent to a model? (Today: no.)
+- Which explicitly authorized FHIR-derived context may be sent to a model? Today the Clinical Follow-up Review narrative tools can supply contract-bounded payloads; production use with real clinical data remains unapproved and requires legal/regulatory/provider revalidation.
 
 ### Provider
 
@@ -431,14 +446,14 @@ No scores. No compliant / non-compliant labels.
 
 Implications for **product design**, not a backlog of coding Tasks:
 
-1. Keep the **two paths** until a new contract explicitly allows a different input to a model.
-2. Treat allowlist 042 and v1 as the maximum clinical projection **under the current governance baseline** — not as a license to expand for AI. A later expansion would require a new decision, contract, and governance assessment. That is not a permanent ban on product evolution.
+1. Keep each model input path explicit: the synthetic experiment, Model Boundary v1 non-model consumer, and authorized Clinical Follow-up Review narrative tools are separate contracts.
+2. Treat allowlist 042, Model Boundary v1 and the follow-up tool contracts as bounded interfaces, not as general permission to expand model access. A new data category requires a new decision, contract and governance assessment.
 3. Do not market FHIR R4 or sandbox SMART as SIHCE/RENHICE authorization or as clinical AI.
-4. Do not market `requiresHumanReview` as operational human oversight.
+4. Do not market `requiresHumanReview` or follow-up `humanReview.status=required` as an operational queue, assignment or completed human oversight.
 5. Do not market `X-Service-Token` as IAM.
 6. Do not market N=5 as a legal retention policy.
 7. Do not market “we do not log prompts” as “the provider retains nothing.”
-8. Before any commercial AI use, complete: use-case description, risk classification against official DS 115 text, data inventory, party roles, and provider assessment.
+8. Before commercial use with real clinical data, complete: use-case description, risk classification against official DS 115 text, data inventory, party roles, lawful purpose/authorization and provider assessment.
 9. SaaS vs customer-hosted changes **who** must answer 29733/31814 questions; it does not delete the questions.
 10. Historical Tasks 057–073 remain useful as **deny-by-default simulations**; they must not be sold as real consent, IAM, or clinical authorization.
 
@@ -448,11 +463,12 @@ Implications for **product design**, not a backlog of coding Tasks:
 
 **Date:** 19 September 2026.
 
-This is a **regulatory snapshot** of applicability and evidence. It must be **revalidated** before:
+The legal/regulatory analysis remains the 19 September 2026 snapshot; its technical baseline was reconciled on 29 September 2026. It must be **revalidated** before:
 
 - production deployment;
 - processing of real patient data;
-- connecting Model Boundary v1 or FHIR to any model;
+- production use of FHIR-derived or other real clinical data with any model;
+- materially expanding the authorized follow-up model-data contract;
 - offering clinical decision support;
 - claiming SIHCE/RENHICE participation;
 - a material change of provider, deployment model, or jurisdiction.
