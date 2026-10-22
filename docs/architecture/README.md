@@ -30,6 +30,14 @@ local HAPI  (clinical-read.source=local-hapi, the default)
 ```
 
 ```text
+Mini LIS (own PostgreSQL, proprietary REST, organization org-mini-lis)
+        -> Java reads it only when clinical-read.source=mini-lis
+        -> Java normalizes Patient, ServiceRequest, Observation, and DiagnosticReport to FHIR R4
+        -> same Clinical Read API v1 envelope, destination mini-lis
+        -> Python is not switched onto this source by this increment
+```
+
+```text
 Mini HIS Simulator (own SQLite, proprietary REST)
         -> Java reads it only when clinical-read.source=mini-his
         -> Java normalizes the payload to FHIR R4
@@ -88,7 +96,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 | | Implemented | Target |
 |---|---|---|
 | Exchange role | FHIR client for configured destinations, plus one laboratory Clinical Read path. No route among organizations | Independent bidirectional platform. Clinics, hospitals, EPS, insurers, pharmacies, laboratories, and other authorized systems. Each hop is limited by agreement, permission, and remote capability |
-| Connectors | FHIR R4 client: Epic sandbox, Oracle Health sandbox, and laboratory HAPI. One proprietary REST reader for the Mini HIS Simulator, used only as a Clinical Read source | FHIR, proprietary REST, SOAP, HL7 v2, and files, inbound and outbound |
+| Connectors | FHIR R4 client: Epic sandbox, Oracle Health sandbox, and laboratory HAPI. Proprietary REST readers for the Mini HIS Simulator and Mini LIS, each used only when selected as the single Clinical Read source. A typed registry can declare another system before its connector exists | FHIR, proprietary REST, SOAP, HL7 v2, and files, inbound and outbound |
 | Transformation | Java projects FHIR it has already read. For `mini-his` it also normalizes proprietary JSON to FHIR R4 without calling a FHIR server. Epic, Oracle, and HAPI reads still require a FHIR server | Protocol transformation in both directions. FHIR R4 normalization when the content is clinical. A FHIR server is not mandatory for that engine |
 | Exchange controls | Destination routing, resilience, and FHIR-call audit inside the Java client. Tasks 057–073 are simulations, not authorization of an exchange | Routing, validation, traceability, audit, and authorization controls for organizational exchange |
 | Python clinical input | Model Boundary v1, plus Clinical Read API v1 for the operational follow-up factories. v1 is not that clinical API. Python does not call Mini HIS | Normalized clinical data only. No dependency on each HIS protocol. Healthcare AI is an optional consumer, not a dependency of the exchange |
@@ -118,6 +126,9 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 - [Clinical review context V1 contract](../contracts/clinical-review-context-v1.md)
 - [Clinical Read API v1 contract](../contracts/clinical-read-v1.md)
 - [Mini HIS terminology and UCUM maps](../contracts/mini-his-terminology-v1.md)
+- [Mini LIS proprietary REST](../contracts/mini-lis-rest-v1.md)
+- [Mini LIS FHIR mapping](../contracts/mini-lis-fhir-v1.md)
+- [Mini LIS design](../design/mini-lis-v1.md)
 - [Institutional knowledge retrieval V1 contract](../contracts/institutional-knowledge-retrieval-v1.md)
 - [AI-assisted review V1 contract](../contracts/ai-assisted-review-v1.md)
 - [Controlled action V1 contract](../contracts/controlled-action-v1.md)
@@ -152,7 +163,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 | [ADR-092](../adr/ADR-092-controlled-action.md) | Accepted current decision for one internal follow-up coordination request after an explicit human POST. Not external execution and not authenticated approval. |
 | [ADR-093](../adr/ADR-093-human-review-session.md) | Accepted current decision for a development-only human session. Not production identity, IAM, SSO or RBAC. |
 | [ADR-094](../adr/ADR-094-human-attribution.md) | Accepted development attribution. The review UI records a synthetic development principal. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. |
-| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted target: Healthcare Interoperability is an independent bidirectional exchange platform. Laboratory increments now include Clinical Read API v1 and Mini HIS normalization to FHIR R4. The organizational broker, SOAP, HL7 v2, and file connectors are not implemented. |
+| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted target: Healthcare Interoperability is an independent bidirectional exchange platform. Laboratory increments now include Clinical Read API v1, Mini HIS normalization, and a Mini LIS read normalized to FHIR R4. The organizational broker, SOAP, HL7 v2 transport, and file connectors are not implemented. |
 
 ## Historical governance artifacts
 

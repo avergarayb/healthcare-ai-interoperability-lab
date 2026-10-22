@@ -1,0 +1,15 @@
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:8096}
+
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5433/minilis}
+    username: ${SPRING_DATASOURCE_USERNAME:minilis}
+    password: ${SPRING_DATASOURCE_PASSWORD:minilis}
+  flyway:
+    enabled: true
+
+mini-lis:
+  service-token: ${MINI_LIS_SERVICE_TOKEN:lab-mini-lis-dev}
+  allow-external-bind: ${MINI_LIS_ALLOW_EXTERNAL_BIND:false}

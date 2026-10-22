@@ -22,11 +22,15 @@ Python's operational follow-up factories call this API through `ClinicalReadClie
 
 | Property | Behavior in source |
 |---|---|
-| `clinical-read.source` | Default `local-hapi`. The other implemented value is `mini-his`. Any other value makes the HAPI path return HTTP 409 `destination_not_supported`. |
+| `clinical-read.source` | Default `local-hapi`. The other implemented values are `mini-his` and `mini-lis`. Any other value makes the HAPI path return HTTP 409 `destination_not_supported`. |
 | Active FHIR server | For `local-hapi`, the active server name must also be `local-hapi`. Otherwise the HAPI path returns HTTP 409 `destination_not_supported`. |
 | `clinical-read.mini-his.base-url` | Default `http://127.0.0.1:8095`. Used only when the source is `mini-his`. |
 | `clinical-read.mini-his.connect-timeout` | Default `2s`. Values outside 1 ms through 30 s fail client construction. |
 | `clinical-read.mini-his.read-timeout` | Default `5s`. Same bound. Redirects are not followed. |
+| `clinical-read.mini-lis.base-url` | Default `http://127.0.0.1:8096`. Used only when the source is `mini-lis`. The connector accepts an HTTP loopback address. |
+| `clinical-read.mini-lis.service-token` | Sent as `X-Service-Token` to Mini LIS. The laboratory default is `lab-mini-lis-dev`. The value is not logged. |
+| `clinical-read.mini-lis.connect-timeout` | Default `2s`. Same bound as Mini HIS. |
+| `clinical-read.mini-lis.read-timeout` | Default `5s`. Same bound. Redirects are not followed. |
 
 If the source is `mini-his` and the Mini HIS source bean is absent, reads return HTTP 503 `unavailable`.
 
@@ -44,8 +48,12 @@ All routes are `GET` and produce `application/json`.
 | `/api/clinical-read/v1/observations` | `patient`, `status` |
 | `/api/clinical-read/v1/appointments/{logicalId}` | None |
 | `/api/clinical-read/v1/appointments` | `patient` |
+| `/api/clinical-read/v1/service-requests/{logicalId}` | None. Served when the source is `mini-lis`. |
+| `/api/clinical-read/v1/service-requests` | `patient`. Optional `status`. Served when the source is `mini-lis`. |
+| `/api/clinical-read/v1/diagnostic-reports/{logicalId}` | None. The logical id is the Mini LIS order id. Served when the source is `mini-lis`. |
+| `/api/clinical-read/v1/diagnostic-reports` | `patient`. Optional `status`. Served when the source is `mini-lis`. |
 
-Supported resource types are only those four. There is no Condition, DiagnosticReport, MedicationRequest, or CapabilityStatement route on this API.
+Supported resource types for `local-hapi` and `mini-his` remain Patient, Encounter, Observation, and Appointment. `mini-lis` adds ServiceRequest and DiagnosticReport. Encounter and Appointment reads return HTTP 409 `operation_not_supported` when the source is `mini-lis`. ServiceRequest and DiagnosticReport return the same code when the source is not `mini-lis`. There is no Condition, MedicationRequest, or CapabilityStatement route on this API.
 
 `logicalId` and a search `patient` value must match `[A-Za-z0-9\-.]{1,64}`. A search `status` must match `[A-Za-z0-9\-]{1,64}`. An identifier token is required, must be non-blank after trim, at most 200 characters, and must not contain `|`. Anything else is HTTP 400 `invalid_request`.
 
@@ -73,7 +81,7 @@ A search:
 }
 ```
 
-`destination` is `local-hapi` or `mini-his`, matching the source that served the call. `collectionStatus` is `complete` or `incomplete`. `resource` and each entry of `resources` are JSON FHIR R4 resources. HAPI responses are the encoded server resources. Mini HIS responses are the normalizer output, including `meta.source` `https://lab.local/mini-his`.
+`destination` is `local-hapi`, `mini-his`, or `mini-lis`, matching the source that served the call. `collectionStatus` is `complete` or `incomplete`. `resource` and each entry of `resources` are JSON FHIR R4 resources. HAPI responses are the encoded server resources. Mini HIS responses are the normalizer output, including `meta.source` `https://lab.local/mini-his`. Mini LIS responses use `meta.source` `https://lab.local/mini-lis`.
 
 ## Limits
 
@@ -93,14 +101,17 @@ On `mini-his`, list calls append `limit=100`. `X-More-Results: true` marks the c
 | 401 | none | Authentication filter. Empty body. This row is not the exception renderer. |
 | 404 | `not_found` | Exact HAPI read classified as not found, or Mini HIS 404 on a route that maps absence to not found. |
 | 409 | `destination_not_supported` | Source is not `local-hapi` while the call is on the HAPI path, or the active FHIR server is not `local-hapi`. |
+| 409 | `operation_not_supported` | ServiceRequest or DiagnosticReport when the source is not `mini-lis`. Encounter or Appointment when the source is `mini-lis`. |
 | 422 | `invalid_source` | Mini HIS payload fails normalization, the returned id does not match, or a patient identifier search is ambiguous or truncated. |
 | 503 | `unavailable` | Transport, unexpected status, missing Mini HIS bean, or a HAPI failure that is not a classified not-found exact read. |
 
-`ClinicalReadException.operationNotSupported()` defines HTTP 409 `operation_not_supported`. The current read methods do not throw it.
+`ClinicalReadException.operationNotSupported()` defines HTTP 409 `operation_not_supported`. ServiceRequest and DiagnosticReport throw it when the source is not `mini-lis`. Encounter and Appointment throw it when the source is `mini-lis`.
 
 ## Limitations
 
-- The default source is local HAPI, not Mini HIS.
+- The default source is local HAPI, not Mini HIS and not Mini LIS. Selecting `mini-lis` replaces the single active source for that process. It does not federate Mini HIS and Mini LIS.
+- Mini LIS normalization is a read of one laboratory. It does not send orders back to Mini HIS and it does not write FHIR. Test codes stay in `https://lab.local/mini-lis/test`. The mapper does not invent LOINC or UCUM.
+- Python follow-up factories are unchanged. They keep calling the active source. LangGraph is unchanged.
 - Epic and Oracle are not Clinical Read destinations. Sandbox HTML and Model Boundary v1 stay on their own routes.
 - There is no write, no transaction, and no `$everything` on this API.
 - Collection `incomplete` must not be treated as an empty or complete clinical set.
