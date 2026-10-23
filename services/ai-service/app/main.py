@@ -32,6 +32,7 @@ from app.human_development_auth import (
     submit_development_login,
     submit_development_logout,
 )
+from app.demo_experience import render_demo_execution, render_demo_index
 from app.human_review_client import (
     close_review_case,
     open_case_coordination_request,
@@ -94,6 +95,20 @@ def get_llm_provider(settings: Settings = Depends(get_settings)) -> LLMProvider 
     if not settings.gemini_api_key or not settings.gemini_model:
         return None
     return GeminiProvider(api_key=settings.gemini_api_key, model=settings.gemini_model)
+
+
+@app.get("/demo-experience")
+def demo_experience(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_demo_index(request, settings)
+
+
+@app.get("/demo-experience/{execution_id}")
+def demo_experience_execution(
+    execution_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return render_demo_execution(request, settings, execution_id)
 
 
 @app.get("/review-login")
