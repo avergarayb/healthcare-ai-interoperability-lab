@@ -88,6 +88,10 @@ class ClinicalContextClosed(Exception):
     """An open review case is required before current clinical context is read."""
 
 
+class FederatedOpenCaseContextRefused(Exception):
+    """Single-source Clinical Read is not evidence for a federated evaluation."""
+
+
 class ClinicalContextUnavailable(Exception):
     """Current clinical context cannot be trusted for this request."""
 
@@ -448,7 +452,7 @@ class ClinicalReviewContextService:
                 _require_associated_observation(observation, observation_id, encounter_id, patient_id)
             appointments = _read_appointments(fhir, patient_id, self._clock())
             return _response(case, encounter, observation, appointments, _retrieved_at(self._clock()))
-        except ClinicalContextUnavailable:
+        except (ClinicalContextUnavailable, FederatedOpenCaseContextRefused):
             raise
         except Exception as exc:
             raise ClinicalContextUnavailable from exc
@@ -475,7 +479,7 @@ class ClinicalReviewContextService:
                 appointments,
                 _retrieved_at(self._clock()),
             )
-        except ClinicalContextUnavailable:
+        except (ClinicalContextUnavailable, FederatedOpenCaseContextRefused):
             raise
         except Exception as exc:
             raise ClinicalContextUnavailable from exc
@@ -489,6 +493,8 @@ class ClinicalReviewContextService:
             raise RuntimeError("clinical review context FHIR factory is missing")
         try:
             client = factory()
+        except FederatedOpenCaseContextRefused:
+            raise
         except ReadClientError as exc:
             raise ClinicalContextUnavailable from exc
         if client is None:

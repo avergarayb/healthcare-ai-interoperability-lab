@@ -215,9 +215,13 @@ def compile_workflow(ports: Any, saver: SqliteCheckpointSaver):
 
     def context_intelligence(state: WorkflowState) -> dict:
         if state.get("error_code"):
+            failure = {}
+            reader = getattr(ports, "federation_failure_context", None)
+            if callable(reader):
+                failure = reader() or {}
             return _step(
                 "context_intelligence",
-                clinical_context=_empty_context(),
+                clinical_context=failure or _empty_context(),
                 clinical_context_intelligence=_empty_intelligence(),
             )
         built = ports.build_context(state["case_id"])
@@ -515,15 +519,27 @@ def execution_snapshot(saver: SqliteCheckpointSaver, workflow_id: str) -> dict:
 class LivePorts:
     """Production adapters. Tests inject their own ports and do not use this object."""
 
-    def __init__(self, settings: Any, service: Any, client: Any) -> None:
+    def __init__(self, settings: Any, service: Any, client: Any, federation: Any = None) -> None:
         self.settings = settings
         self.service = service
         self.client = client
+        self.federation = federation
         self.fail_after_ensure = False
         self._protocols: dict[tuple[str, str], Any] = {}
         self._pending: dict[str, str] = {}
+        self._federation_envelope: dict | None = None
+        self._federation_projection: dict | None = None
+        self._federation_failure: dict | None = None
+
+    def federation_failure_context(self) -> dict:
+        return dict(self._federation_failure or {})
 
     def read_patient(self, case_id: str, workflow_type: str) -> str:
+        if self.federation is None:
+            return self._read_patient_single(case_id, workflow_type)
+        return self._read_patient_federated(case_id)
+
+    def _read_patient_single(self, case_id: str, workflow_type: str) -> str:
         del workflow_type
         from app.langgraph_fhir_client import BoundedSearchStatus
         from app.langgraph_fhir_followup import case_resolution_search_path
@@ -541,7 +557,36 @@ class LivePorts:
             raise WorkflowReadError("acquisition_unavailable")
         return f"Patient/{patient_id}"
 
+    def _read_patient_federated(self, case_id: str) -> str:
+        from app.clinical_federation_client import FederationClientError
+        from app.federated_clinical_context import adapt_federation_envelope, failure_projection
+
+        self._federation_envelope = None
+        self._federation_projection = None
+        self._federation_failure = None
+        try:
+            envelope = self.federation.query(case_id)
+        except FederationClientError as exc:
+            self._federation_failure = failure_projection(exc.code)
+            raise WorkflowReadError(exc.code) from exc
+        except Exception as exc:
+            self._federation_failure = failure_projection("federation_unavailable")
+            raise WorkflowReadError("federation_unavailable") from exc
+        if envelope.get("status") == "failed":
+            context, projection = adapt_federation_envelope(envelope, case_id)
+            self._federation_failure = _federation_state(context, projection)
+            raise WorkflowReadError("federation_failed")
+        context, projection = adapt_federation_envelope(envelope, case_id)
+        self._federation_envelope = envelope
+        self._federation_projection = projection
+        if not context.patient_id:
+            self._federation_failure = _federation_state(context, projection)
+            raise WorkflowReadError("federation_patient_missing")
+        return f"Patient/{context.patient_id}"
+
     def build_context(self, case_id: str) -> dict:
+        if self.federation is not None:
+            return self._build_federated_context(case_id)
         from datetime import datetime as clock
         from datetime import timezone as tz
 
@@ -555,11 +600,51 @@ class LivePorts:
             return {"context": _empty_context(), "intelligence": _empty_intelligence()}
         return {"context": _reduce_context(context), "intelligence": _reduce_intelligence(analysis)}
 
+    def _build_federated_context(self, case_id: str) -> dict:
+        from datetime import datetime as clock
+        from datetime import timezone as tz
+
+        from app.clinical_context_intelligence import analyze_clinical_context
+        from app.federated_clinical_context import adapt_federation_envelope, project_context
+
+        if self._federation_envelope is None:
+            return {"context": self._federation_failure or _empty_context(), "intelligence": _empty_intelligence()}
+        context, projection = adapt_federation_envelope(self._federation_envelope, case_id)
+        try:
+            analysis = analyze_clinical_context(context, evaluated_at=clock.now(tz.utc))
+            intelligence = _reduce_intelligence(analysis)
+        except Exception:
+            intelligence = _empty_intelligence()
+        return {"context": project_context(context, projection), "intelligence": intelligence}
+
     def evaluate(self, case_id: str, workflow_type: str) -> dict:
+        if self.federation is not None:
+            return self._evaluate_federated(case_id, workflow_type)
         try:
             return self._evaluate(case_id, workflow_type)
         except Exception:
             return _unavailable_protocol(workflow_type, "evaluation_unavailable")
+
+    def _evaluate_federated(self, case_id: str, workflow_type: str) -> dict:
+        """Keep the protocol node, and do not query Clinical Read as a second source."""
+        del case_id
+        envelope = self._federation_envelope or {}
+        projection = self._federation_projection or {}
+        if envelope.get("status") not in {"complete", "partial"}:
+            return _unavailable_protocol(workflow_type, "federation_failed")
+        evidence = [
+            item.get("reference")
+            for item in (projection.get("resources") or [])
+            if isinstance(item, dict) and isinstance(item.get("reference"), str)
+        ][:8]
+        reasons = ["federated_context_partial"] if envelope.get("status") == "partial" else []
+        reasons.append("federated_protocol_not_resolved")
+        return {
+            "protocolId": PROTOCOL_IDS[workflow_type],
+            "evaluationStatus": "insufficient",
+            "reasonCodes": reasons,
+            "evidence": evidence,
+        }
 
     def prepare_narrative(self, state: dict) -> str:
         if self._narrative_exists(state):
@@ -675,12 +760,16 @@ class LivePorts:
 
 
 def build_live_ports(settings: Any, repository: Any) -> LivePorts:
-    """Operational reads go through Clinical Read. The caller supplies the review repository."""
+    """Single mode reads Clinical Read. Federated mode reads the Java federation envelope."""
+    from app.clinical_federation_client import ClinicalFederationClient
     from app.clinical_read_client import ClinicalReadClient
     from app.followup_review import FollowUpReviewCaseService
 
     client = ClinicalReadClient.from_settings(settings)
-    return LivePorts(settings, FollowUpReviewCaseService(repository), client)
+    federation = None
+    if getattr(settings, "clinical_context_mode", "single") == "federated":
+        federation = ClinicalFederationClient.from_settings(settings)
+    return LivePorts(settings, FollowUpReviewCaseService(repository), client, federation)
 
 
 class _IdlePorts:
@@ -718,6 +807,8 @@ def _post_consultation_narrative(provider: Any, matched_resource: str, brief: di
             "Use only the matched resource and the brief in the input.",
             "Keep FHIR resource identifiers unchanged.",
             "Describe the evidence that was read and any listed missing information.",
+            "A partial source list is not a complete chart.",
+            "Do not invent clinical facts, codes, units, or normal results for a gap.",
             "State that the responsible professional reviews the case.",
             "Do not diagnose.",
             "Do not recommend treatment.",
@@ -820,6 +911,12 @@ def _unavailable_protocol(workflow_type: str, reason: str) -> dict:
         "reasonCodes": [reason],
         "evidence": [],
     }
+
+
+def _federation_state(context: Any, projection: dict) -> dict:
+    from app.federated_clinical_context import project_context
+
+    return project_context(context, projection)
 
 
 def _reduce_context(context: Any) -> dict:

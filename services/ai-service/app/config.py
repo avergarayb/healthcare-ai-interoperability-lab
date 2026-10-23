@@ -29,6 +29,13 @@ class Settings:
     human_review_development_auth_secret: str = field(default="", repr=False)
     human_review_development_principal_id: str = ""
     human_review_development_principal_display_name: str = ""
+    clinical_context_mode: str = "single"
+    federation_participant_token: str = field(default="", repr=False)
+    federation_requesting_organization_id: str = ""
+    federation_patient_system_key: str = ""
+    federation_patient_identifier_system: str = ""
+    federation_sources: tuple[str, ...] = ("mini-his", "mini-lis")
+    federation_timeout_seconds: float = 20.0
 
     @property
     def model_boundary_url(self) -> str:
@@ -88,6 +95,20 @@ class Settings:
         development_auth_enabled = (
             os.getenv("HUMAN_REVIEW_DEVELOPMENT_AUTH_ENABLED", "false").strip() == "true"
         )
+        context_mode = os.getenv("AI_CLINICAL_CONTEXT_MODE", "single").strip().lower()
+        if context_mode not in {"single", "federated"}:
+            raise ValueError("AI_CLINICAL_CONTEXT_MODE must be single or federated")
+        federation_timeout_raw = os.getenv("AI_FEDERATION_TIMEOUT_SECONDS", "20").strip()
+        try:
+            federation_timeout = float(federation_timeout_raw)
+        except ValueError as exc:
+            raise ValueError("AI_FEDERATION_TIMEOUT_SECONDS must be a number") from exc
+        if federation_timeout <= 0:
+            raise ValueError("AI_FEDERATION_TIMEOUT_SECONDS must be greater than zero")
+        source_raw = os.getenv("AI_FEDERATION_SOURCES", "mini-his,mini-lis")
+        federation_sources = tuple(part.strip() for part in source_raw.split(",") if part.strip())
+        if context_mode == "federated" and not federation_sources:
+            raise ValueError("AI_FEDERATION_SOURCES must name at least one source")
         return cls(
             model_boundary_base_url=os.getenv("MODEL_BOUNDARY_BASE_URL", "http://localhost:8081").strip(),
             model_boundary_path=os.getenv("MODEL_BOUNDARY_PATH", "/api/model-boundary/v1").strip(),
@@ -115,4 +136,15 @@ class Settings:
             human_review_development_principal_display_name=os.getenv(
                 "HUMAN_REVIEW_DEVELOPMENT_PRINCIPAL_DISPLAY_NAME", ""
             ).strip(),
+            clinical_context_mode=context_mode,
+            federation_participant_token=os.getenv("AI_FEDERATION_PARTICIPANT_TOKEN", "").strip(),
+            federation_requesting_organization_id=os.getenv(
+                "AI_FEDERATION_REQUESTING_ORGANIZATION_ID", ""
+            ).strip(),
+            federation_patient_system_key=os.getenv("AI_FEDERATION_PATIENT_SYSTEM_KEY", "").strip(),
+            federation_patient_identifier_system=os.getenv(
+                "AI_FEDERATION_PATIENT_IDENTIFIER_SYSTEM", ""
+            ).strip(),
+            federation_sources=federation_sources,
+            federation_timeout_seconds=federation_timeout,
         )
