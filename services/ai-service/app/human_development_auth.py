@@ -32,6 +32,12 @@ from app.human_session import (
     validate_human_principal,
 )
 from app.human_session_sqlite import SQLiteHumanSessionRepository
+from app.security_audit import SecurityAuditRejected, SecurityAuditUnavailable, authentication_event
+from app.security_audit_sqlite import (
+    SQLiteSecurityAuditRepository,
+    SecurityAuditStoreInitializationError,
+    audit_database_path,
+)
 
 
 log = logging.getLogger("ai-service.human_login")
@@ -177,8 +183,30 @@ def submit_development_login(
         try:
             principal = authenticator.authenticate(fields["developmentSecret"])
         except DevelopmentAuthenticationFailed:
+            if not _audit_authentication(
+                request,
+                settings,
+                outcome="denied",
+                actor_type="anonymous",
+                actor_id="anonymous",
+                reason_code="credential_rejected",
+            ):
+                status = 503
+                result = "audit_unavailable"
+                return _html(_page("Sign in", _p(MSG_UNAVAILABLE)), status)
             status = 401
             return _html(_page("Sign in", _p(MSG_SIGN_IN_FAILED)), status)
+        if not _audit_authentication(
+            request,
+            settings,
+            outcome="allowed",
+            actor_type="development_principal",
+            actor_id=principal.principal_id,
+            reason_code="credential_accepted",
+        ):
+            status = 503
+            result = "audit_unavailable"
+            return _html(_page("Sign in", _p(MSG_UNAVAILABLE)), status)
         service = HumanSessionService(repository, clock=_clock(request))
         try:
             issued = service.issue(principal)
@@ -322,6 +350,55 @@ def _login_fields(raw_body: bytes, content_type: str | None) -> dict[str, str] |
     if set(fields) != {"developmentSecret"}:
         return None
     return fields
+
+
+def _audit_authentication(
+    request: Request,
+    settings: Settings,
+    *,
+    outcome: str,
+    actor_type: str,
+    actor_id: str,
+    reason_code: str,
+) -> bool:
+    """Record the credential decision before a session can be issued.
+
+    A sensitive authentication result is not returned as a normal success or
+    rejection when the audit row cannot be stored.
+    """
+    repository = _audit_repository(request, settings)
+    if repository is None:
+        return False
+    try:
+        repository.append(
+            authentication_event(
+                outcome=outcome,
+                actor_id=actor_id,
+                actor_type=actor_type,
+                reason_code=reason_code,
+                clock=_clock(request),
+            )
+        )
+    except (SecurityAuditUnavailable, SecurityAuditStoreInitializationError, SecurityAuditRejected):
+        return False
+    return True
+
+
+def _audit_repository(request: Request, settings: Settings):
+    injected = getattr(request.app.state, "security_audit_repository", None)
+    if injected is not None:
+        return injected
+    try:
+        repository = SQLiteSecurityAuditRepository(
+            audit_database_path(
+                settings,
+                session_repository=getattr(request.app.state, "human_session_repository", None),
+            )
+        )
+        repository.initialize()
+    except (SecurityAuditStoreInitializationError, OSError):
+        return None
+    return repository
 
 
 def _session_repository(request: Request, settings: Settings):

@@ -36,6 +36,7 @@ class Settings:
     federation_patient_identifier_system: str = ""
     federation_sources: tuple[str, ...] = ("mini-his", "mini-lis")
     federation_timeout_seconds: float = 20.0
+    security_audit_db_path: str = ""
 
     @property
     def model_boundary_url(self) -> str:
@@ -147,4 +148,5 @@ class Settings:
             ).strip(),
             federation_sources=federation_sources,
             federation_timeout_seconds=federation_timeout,
+            security_audit_db_path=os.getenv("SECURITY_AUDIT_DB_PATH", "").strip(),
         )
