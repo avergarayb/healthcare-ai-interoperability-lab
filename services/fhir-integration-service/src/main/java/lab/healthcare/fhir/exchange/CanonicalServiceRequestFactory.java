@@ -99,7 +99,8 @@ final class CanonicalServiceRequestFactory {
                 code,
                 text,
                 requestedAt,
-                performer);
+                performer,
+                system);
     }
 
     private static String identifier(ObjectNode resource, String system) {

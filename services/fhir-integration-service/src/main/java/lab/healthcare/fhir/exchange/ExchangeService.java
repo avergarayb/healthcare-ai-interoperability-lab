@@ -71,12 +71,36 @@ public class ExchangeService {
         }
 
         try {
-            String destinationPatientId = resolvePatient(source, destination, connector, submission.patient());
+            String knownDestinationPatientId;
+            String commandPatientId;
+            if (connector.embedsPatientInOrder()) {
+                connector.resolvePatient(source.organizationId(), submission.patient());
+                knownDestinationPatientId = store.findPatientLink(
+                        source.key(),
+                        submission.patient().identifierSystem(),
+                        submission.patient().identifierValue(),
+                        destination.key()).orElse(null);
+                commandPatientId = knownDestinationPatientId == null
+                        ? submission.patient().identifierValue()
+                        : knownDestinationPatientId;
+            } else {
+                knownDestinationPatientId = resolvePatient(source, destination, connector, submission.patient());
+                commandPatientId = knownDestinationPatientId;
+            }
             OrderCorrelation linked = correlation(
-                    correlationId, source, destination, submission, null, destinationPatientId, "pending", null);
+                    correlationId, source, destination, submission, null, knownDestinationPatientId, "pending", null);
             ObjectNode serviceRequest = fhir.create(linked, source, destination);
-            DestinationCommand command = fhir.command(serviceRequest, destinationPatientId);
+            DestinationCommand command = fhir.command(serviceRequest, commandPatientId);
             AcceptedOrder accepted = connector.accept(command);
+            String destinationPatientId = accepted.patientId() != null ? accepted.patientId() : knownDestinationPatientId;
+            if (accepted.patientId() != null) {
+                store.savePatientLink(
+                        source.key(),
+                        submission.patient().identifierSystem(),
+                        submission.patient().identifierValue(),
+                        destination.key(),
+                        accepted.patientId());
+            }
             String state = accepted.alreadyPresent() ? "duplicate" : "accepted";
             store.updateDelivery(correlationId, state, null, accepted.orderId(), destinationPatientId);
             OrderCorrelation stored = reload(source, destination, submission.externalRequestId());

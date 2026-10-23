@@ -13,3 +13,17 @@ spring:
 mini-lis:
   service-token: ${MINI_LIS_SERVICE_TOKEN:lab-mini-lis-dev}
   allow-external-bind: ${MINI_LIS_ALLOW_EXTERNAL_BIND:false}
+  hl7:
+    enabled: ${MINI_LIS_HL7_ENABLED:false}
+    bind-address: ${MINI_LIS_HL7_BIND:127.0.0.1}
+    port: ${MINI_LIS_HL7_PORT:2575}
+    shared-secret: ${MINI_LIS_HL7_SHARED_SECRET:}
+    sending-application: FHIR-EXCHANGE
+    sending-facility: fhir-integration-service
+    receiving-application: MINI-LIS
+    receiving-facility: org-mini-lis
+    allowed-organizations: ${MINI_LIS_HL7_ALLOWED_ORGANIZATIONS:org-mini-his}
+    outbound-host: ${MINI_LIS_HL7_OUTBOUND_HOST:127.0.0.1}
+    outbound-port: ${MINI_LIS_HL7_OUTBOUND_PORT:0}
+    connect-timeout: 2s
+    read-timeout: 5s

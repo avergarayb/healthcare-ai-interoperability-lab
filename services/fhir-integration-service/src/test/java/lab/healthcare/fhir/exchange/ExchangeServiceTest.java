@@ -289,5 +289,32 @@ class ExchangeServiceTest {
             return correlation.sourceSystem() + "|" + correlation.sourceOrganizationId() + "|"
                     + correlation.sourceOrderId() + "|" + correlation.destinationSystem();
         }
+
+        @Override
+        public Optional<OrderCorrelation> findByDestinationOrder(String destinationSystem, String destinationOrderId) {
+            List<OrderCorrelation> found = orders.values().stream()
+                    .filter(order -> destinationSystem.equals(order.destinationSystem())
+                            && destinationOrderId.equals(order.destinationOrderId()))
+                    .toList();
+            if (found.size() > 1) {
+                throw ExchangeException.invalidRequest();
+            }
+            return found.stream().findFirst();
+        }
+
+        @Override
+        public boolean saveHl7Observation(
+                String messageControlId,
+                String destinationOrderId,
+                String sourceOrderId,
+                String externalResultId,
+                String observationJson) {
+            return false;
+        }
+
+        @Override
+        public List<String> hl7Observations(String destinationOrderId) {
+            return List.of();
+        }
     }
 }

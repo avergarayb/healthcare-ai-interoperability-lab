@@ -13,5 +13,6 @@ public record DestinationCommand(
         String testCode,
         String testDescription,
         OffsetDateTime requestedAt,
-        String performerOrganizationId) {
+        String performerOrganizationId,
+        String testSystem) {
 }

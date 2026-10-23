@@ -33,4 +33,15 @@ public interface ExchangeStore {
             String errorCode,
             String destinationOrderId,
             String destinationPatientId);
+
+    Optional<OrderCorrelation> findByDestinationOrder(String destinationSystem, String destinationOrderId);
+
+    boolean saveHl7Observation(
+            String messageControlId,
+            String destinationOrderId,
+            String sourceOrderId,
+            String externalResultId,
+            String observationJson);
+
+    java.util.List<String> hl7Observations(String destinationOrderId);
 }

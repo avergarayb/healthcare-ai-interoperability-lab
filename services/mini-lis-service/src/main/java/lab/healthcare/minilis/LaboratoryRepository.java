@@ -207,6 +207,36 @@ public class LaboratoryRepository {
                 patientId);
     }
 
+    public Optional<Hl7Ack> findHl7Ack(String messageControlId) {
+        List<Hl7Ack> rows = jdbc.query(
+                "SELECT ack_code, ack_detail FROM hl7_inbound_message WHERE message_control_id = ?",
+                (rs, row) -> Hl7Ack.fromStored(rs.getString("ack_code"), rs.getString("ack_detail")),
+                messageControlId);
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        if (rows.size() != 1) {
+            throw MiniLisException.unavailable();
+        }
+        return Optional.of(rows.get(0));
+    }
+
+    public void insertHl7Ack(String messageControlId, String messageType, Hl7Ack ack, String placerOrderId, OffsetDateTime receivedAt) {
+        write(() -> jdbc.update(
+                """
+                INSERT INTO hl7_inbound_message (
+                    message_control_id, message_type, ack_code, ack_detail, placer_order_id, filler_order_id, received_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                messageControlId,
+                messageType,
+                ack.code(),
+                ack.detail(),
+                placerOrderId,
+                ack.fillerOrderId(),
+                Timestamp.from(receivedAt.toInstant())));
+    }
+
     public boolean hasFinalResult(String orderId) {
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM lab_results WHERE order_id = ? AND status = 'FINAL'",

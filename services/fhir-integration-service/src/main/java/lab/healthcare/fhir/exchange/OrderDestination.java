@@ -14,4 +14,13 @@ public interface OrderDestination {
     String resolvePatient(String requestingOrganizationId, PatientIdentity identity);
 
     AcceptedOrder accept(DestinationCommand command);
+
+    /**
+     * The destination creates the patient inside the order message. The caller
+     * still supplies {@link PatientIdentity} through {@link #resolvePatient}
+     * so the connector can stage it for that message.
+     */
+    default boolean embedsPatientInOrder() {
+        return false;
+    }
 }
