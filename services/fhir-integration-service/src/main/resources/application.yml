@@ -157,3 +157,19 @@ exchange:
         sending-facility: fhir-integration-service
         receiving-application: MINI-LIS
         receiving-facility: org-mini-lis
+
+federation:
+  max-sources: 4
+  max-entries: 100
+  query-budget-seconds: 20
+  participants:
+    mini-his:
+      service-token: ${FEDERATION_MINI_HIS_TOKEN:}
+    mini-lis:
+      service-token: ${FEDERATION_MINI_LIS_TOKEN:}
+  grants:
+    mini-his:
+      - mini-his
+      - mini-lis
+    mini-lis:
+      - mini-lis

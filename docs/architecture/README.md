@@ -6,7 +6,7 @@ This is the concise architecture authority and index for the **Healthcare AI & I
 
 | Unit | Runtime | Current responsibility |
 |---|---|---|
-| **Healthcare Interoperability** | Java 21 / Spring Boot | Implemented: FHIR/SMART client, vendor profiles, routing, resilience, transformations, controlled projections, Model Boundary v1, and Clinical Read API v1. The default Clinical Read source is local HAPI. `mini-his` is an optional laboratory source. A laboratory REST path sends one Mini HIS order to Mini LIS and reads the result back through Java. An optional HL7 v2.5.1 connector uses the same path over loopback MLLP. REST stays the default. Target, not implemented: independent bidirectional exchange and multi-system federation among authorized organizations. |
+| **Healthcare Interoperability** | Java 21 / Spring Boot | Implemented: FHIR/SMART client, vendor profiles, routing, resilience, transformations, controlled projections, Model Boundary v1, and Clinical Read API v1. The default Clinical Read source is local HAPI. `mini-his` and `mini-lis` are optional single-source laboratory readers. A laboratory REST path sends one Mini HIS order to Mini LIS and reads the result back through Java. An optional HL7 v2.5.1 connector uses the same path over loopback MLLP. REST stays the default. Clinical Federation v1 reads Mini HIS and Mini LIS together when an explicit patient link and a source grant exist. It does not replace Clinical Read. Independent bidirectional exchange among arbitrary organizations remains a target. |
 | **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, deterministic protocol authority, narrative model subflows, and a laboratory `StateGraph` that pauses a matched follow-up case for Human Review. Operational follow-up factories acquire Patient, Encounter, Observation, and Appointment through Clinical Read API v1. |
 
 The units are independently deployable and may be sold separately or composed. Pricing and SKU names are not decided. The commercial connectivity target is [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
@@ -43,6 +43,16 @@ Mini HIS Simulator (own SQLite, proprietary REST)
         -> Java normalizes the payload to FHIR R4
         -> same Clinical Read API v1 envelope
         -> Python ClinicalReadClient and the same follow-up protocols
+```
+
+```text
+POST /api/clinical-federation/v1/context
+        -> participant token identifies the caller
+        -> grant selects authorized sources
+        -> explicit patient link, or exact identifier on the caller source
+        -> existing Mini HIS and Mini LIS connectors
+        -> one federation envelope of FHIR R4 resources, with per-source outcomes
+        -> Python and LangGraph do not call this endpoint yet
 ```
 
 ```text
@@ -163,7 +173,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 | [ADR-092](../adr/ADR-092-controlled-action.md) | Accepted current decision for one internal follow-up coordination request after an explicit human POST. Not external execution and not authenticated approval. |
 | [ADR-093](../adr/ADR-093-human-review-session.md) | Accepted current decision for a development-only human session. Not production identity, IAM, SSO or RBAC. |
 | [ADR-094](../adr/ADR-094-human-attribution.md) | Accepted development attribution. The review UI records a synthetic development principal. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. |
-| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted target: Healthcare Interoperability is an independent bidirectional exchange platform. Laboratory increments now include Clinical Read API v1, Mini HIS normalization, a Mini LIS read normalized to FHIR R4, and one REST order and result path through Java. That path is not multi-system federation. The organizational broker, SOAP, HL7 v2 transport, and file connectors are not implemented. |
+| [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted target: Healthcare Interoperability is an independent bidirectional exchange platform. Laboratory increments now include Clinical Read API v1, Mini HIS normalization, a Mini LIS read normalized to FHIR R4, one REST order and result path through Java, and an optional loopback HL7 v2.5.1 connector. Clinical Federation v1 is a separate read endpoint. It does not replace single-source Clinical Read. The order path itself is not federation. SOAP, file connectors, and a general organizational broker are not implemented. |
 
 ## Historical governance artifacts
 

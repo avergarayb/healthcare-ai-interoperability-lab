@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 /**
  * Typed catalogue of external systems. Adding a system is a configuration entry
  * plus, when it must be read, its own connector. This registry does not open
- * connections and does not federate clinical reads.
+ * connections. A row is not evidence that a connector is running.
  */
 @Component
 public class SourceRegistry {
