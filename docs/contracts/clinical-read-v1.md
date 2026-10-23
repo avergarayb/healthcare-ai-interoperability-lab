@@ -4,7 +4,7 @@
 
 Laboratory contract for the read-only HTTP surface in `services/fhir-integration-service`. It records the behavior of the current source. It does not record a test execution, a production deployment, or an organizational exchange.
 
-The contract version string is `clinical-read-v1`.
+The contract version string is `clinical-read-v1`. Clinical Federation v1 is a different endpoint and a different contract. This API remains one source, and the default source remains `local-hapi`.
 
 ## Responsibility
 
