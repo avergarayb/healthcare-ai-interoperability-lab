@@ -92,6 +92,7 @@ def project_context(context: LongitudinalContext, projection: dict) -> dict:
             "warnings": list(projection.get("warnings") or []),
             "resources": list(projection.get("resources") or []),
             "reports": list(projection.get("reports") or []),
+            "callerSystem": projection.get("callerSystem"),
         },
     }
 
@@ -195,6 +196,10 @@ def _row(
         "fullUrl": full_url,
         "identifiers": [{"system": system, "value": value} for system, value in _identifiers(resource)],
         "related": [] if fact is None else list(fact.related),
+        "code": _code(resource),
+        "value": _quantity(resource)[0],
+        "unit": _quantity(resource)[1],
+        "protocolReference": f"{resource_type}/{resource.get('id')}",
     }
 
 
@@ -214,6 +219,7 @@ def _projection(
         "resources": rows,
         "reports": reports,
         "contextStatus": context.status,
+        "callerSystem": envelope.get("callerSystem") if isinstance(envelope.get("callerSystem"), str) else None,
     }
 
 
@@ -270,6 +276,31 @@ def _meta_source(resource: dict) -> str | None:
     meta = resource.get("meta")
     source = meta.get("source") if isinstance(meta, dict) else None
     return source if isinstance(source, str) and source.strip() else None
+
+
+def _code(resource: dict) -> dict | None:
+    code = resource.get("code")
+    if not isinstance(code, dict):
+        return None
+    coding = code.get("coding")
+    if not isinstance(coding, list) or not coding or not isinstance(coding[0], dict):
+        return None
+    system = coding[0].get("system")
+    value = coding[0].get("code")
+    if isinstance(system, str) and system and isinstance(value, str) and value:
+        return {"system": system, "code": value}
+    return None
+
+
+def _quantity(resource: dict) -> tuple[str | None, str | None]:
+    quantity = resource.get("valueQuantity")
+    if isinstance(quantity, dict) and quantity.get("value") is not None and not isinstance(quantity.get("value"), bool):
+        unit = quantity.get("unit")
+        return str(quantity.get("value")), unit if isinstance(unit, str) and unit else None
+    text = resource.get("valueString")
+    if isinstance(text, str) and text.strip():
+        return text.strip()[:80], None
+    return None, None
 
 
 def _identifiers(resource: dict) -> list[tuple[str, str]]:

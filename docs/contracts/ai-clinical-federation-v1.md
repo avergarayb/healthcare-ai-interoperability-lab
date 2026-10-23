@@ -49,8 +49,14 @@ The client always asks for Patient, Encounter, Observation, Appointment, Service
 
 ## Provenance
 
-The adapted state keeps `sourceKey`, `meta.source`, `fullUrl`, identifier system and value, clinical status, and instant. Two resources with the same code and value remain two resources. The persisted workflow view does not copy patient names or observation quantities. Those values stay in the in-memory timeline used to build the context and are not written into the technical view.
+The adapted state keeps `sourceKey`, `meta.source`, `fullUrl`, identifier system and value, clinical status, instant, and the original value and unit when the resource already has them. Code system and code are copied only when present. Two resources with the same code and value remain two resources. The persisted workflow view does not copy patient names. `fullUrl` is a locator in the envelope, not a server to call.
+
+## Protocol evaluation
+
+A `complete` envelope is evaluated by the existing structural rules. The contract is [federated protocol evaluation v1](federated-protocol-evaluation-v1.md). A `partial` or truncated envelope stays `insufficient` with `federated_context_partial` and does not become a match. `failed`, HTTP 401, HTTP 403, and timeout stay graph failures and do not fall back to Clinical Read.
+
+In federated mode the narrative quotes that evidence and does not call Gemini. A match still opens Human Review and pauses at `await_human`. The open-case JSON projection does not call Clinical Read.
 
 ## What this consumer does not do
 
-It does not connect to Mini HIS or Mini LIS. It does not emit a FHIR Provenance resource. It does not run the deterministic follow-up protocol against the envelope. A federated patient without `https://lab.local/followup-case|{caseId}` is `insufficient` with `federated_protocol_not_resolved`. That result is insufficient information. It is not a clinical match and it is not a production protocol evaluation. The Human Review node remains in the graph for a real single-mode protocol match. In federated mode the open-case JSON projection does not call Clinical Read and does not return a chart from another source.
+It does not connect to Mini HIS or Mini LIS. It does not emit a FHIR Provenance resource. It does not invent a protocol from laboratory values. It does not turn a partial context into a complete clinical review.

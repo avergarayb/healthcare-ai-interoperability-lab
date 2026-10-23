@@ -82,7 +82,8 @@ def test_complete_context_keeps_both_sources_and_does_not_merge_values():
     assert {item.recorded_value for item in context.observations} == {"13.4 g/dL"}
     rendered = json.dumps(projection)
     assert "Quispe" not in rendered
-    assert "13.4" not in rendered
+    assert "13.4" in rendered
+    assert "g/dL" in rendered
     assert {item["sourceKey"] for item in projection["resources"] if item["resourceType"] == "Observation"} == {
         "mini-his",
         "mini-lis",

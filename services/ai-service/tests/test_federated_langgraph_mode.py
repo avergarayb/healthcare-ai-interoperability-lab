@@ -166,7 +166,7 @@ def test_complete_federated_context_does_not_invent_a_protocol_match(tmp_path):
     assert federation.calls == 1
     assert view["status"] == "completed"
     assert view["protocol"]["evaluationStatus"] == "insufficient"
-    assert view["protocol"]["reasonCodes"] == ["federated_protocol_not_resolved"]
+    assert "finished_encounter_missing" in view["protocol"]["reasonCodes"]
     assert "human_review" not in view["steps"]
     assert "human_review" in GRAPH_NODES
     federation_view = view["clinicalContext"]["federation"]
@@ -176,8 +176,8 @@ def test_complete_federated_context_does_not_invent_a_protocol_match(tmp_path):
     assert {item["source"] for item in observations} == {"https://lab.local/mini-his", "https://lab.local/mini-lis"}
     rendered = json.dumps(view)
     assert "Quispe" not in rendered
-    assert "13.4" not in rendered
-    assert "141" not in rendered
+    assert "13.4" in rendered
+    assert "141" in rendered
 
 
 def test_partial_context_stays_visible_and_is_not_a_complete_review(tmp_path):
@@ -279,6 +279,182 @@ class MatchedPorts:
 
     def store_prepared_narrative(self, review_case_id: str, state: dict) -> None:
         del review_case_id, state
+
+
+def test_structural_pair_reaches_human_review_without_clinical_read(tmp_path):
+    from app.followup_review import FollowUpReviewCaseService
+    from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
+    from app.human_review_client import _one_workflow
+
+    repository = SQLiteFollowUpReviewCaseRepository(tmp_path / "review.sqlite3")
+    repository.initialize()
+    encounter = {
+        "resourceType": "Encounter",
+        "id": "MHS-CON-001",
+        "status": "finished",
+        "subject": {"reference": "http://127.0.0.1/mini-his/Patient/MHS-PAT-001"},
+        "period": {"start": "2026-09-01T15:00:00Z", "end": "2026-09-01T15:00:00Z"},
+        "meta": {"source": "https://lab.local/mini-his"},
+    }
+    observation = _observation("mini-his", "MHS-RES-001", 13.4)
+    observation["issued"] = "2026-09-01T15:10:00Z"
+    observation["subject"] = {"reference": "http://127.0.0.1/mini-his/Patient/MHS-PAT-001"}
+    observation["encounter"] = {"reference": "http://127.0.0.1/mini-his/Encounter/MHS-CON-001"}
+    lis = _observation("mini-lis", "MLS-OBS-001", 141)
+    lis["subject"] = {"reference": "http://127.0.0.1:18196/Patient/MLS-PAT-001"}
+    federation = FederationDouble(
+        _envelope(
+            "complete",
+            [
+                {"sourceKey": "mini-his", "organizationId": "org-mini-his", "outcome": "complete", "resourceCount": 3},
+                {"sourceKey": "mini-lis", "organizationId": "org-mini-lis", "outcome": "complete", "resourceCount": 1},
+            ],
+            [
+                _entry("mini-his", _patient()),
+                _entry("mini-his", encounter),
+                _entry("mini-his", observation),
+                _entry("mini-lis", lis),
+            ],
+        )
+    )
+    client = GuardClient()
+    ports = LivePorts(
+        _settings(clinical_context_mode="federated"),
+        FollowUpReviewCaseService(repository),
+        client,
+        federation,
+    )
+    view = start_workflow(SqliteCheckpointSaver(tmp_path / "agent-workflow.sqlite3"), ports, "MHS-PAT-001", POST)
+    assert client.calls == 0
+    assert view["status"] == "waiting_human"
+    assert view["evidence"] == ["Encounter/MHS-CON-001", "Observation/MHS-RES-001"]
+    case = repository.get(view["reviewCaseId"])
+    assert "mini-his" in case.narrative_text
+    assert "mini-lis" in case.narrative_text
+    assert "13.4" in case.narrative_text
+    assert "141" in case.narrative_text
+    assert "diagnostico" not in case.narrative_text.lower()
+    html = _one_workflow(case, view)
+    assert "origen mini-his" in html
+    assert "Esta lectura no es una revisión clínica completa." not in html
+    assert set(case.matched_resources) == set(view["evidence"])
+
+
+def test_same_local_identifier_does_not_pair_another_source(tmp_path):
+    from datetime import datetime, timezone
+
+    from app.federated_protocol_evaluation import evaluate_federated_protocol
+
+    encounter = {
+        "resourceType": "Encounter",
+        "id": "ENC-1",
+        "status": "finished",
+        "subject": {"reference": "http://127.0.0.1/mini-his/Patient/PAT-1"},
+        "period": {"start": "2026-09-01T15:00:00Z", "end": "2026-09-01T15:00:00Z"},
+        "meta": {"source": "https://lab.local/mini-his"},
+    }
+    lis_observation = _observation("mini-lis", "OBS-1", 13.4)
+    lis_observation["issued"] = "2026-09-01T15:10:00Z"
+    lis_observation["code"] = {"coding": [{"system": "https://lab.local/tests", "code": "GLU"}]}
+    lis_observation["subject"] = {"reference": "http://127.0.0.1/mini-lis/Patient/PAT-1"}
+    lis_observation["encounter"] = {"reference": "http://127.0.0.1/mini-lis/Encounter/ENC-1"}
+    foreign = _observation("mini-his", "OBS-FOREIGN", 13.4)
+    foreign["issued"] = "2026-09-01T15:10:00Z"
+    foreign["subject"] = {"reference": "http://127.0.0.1/mini-lis/Patient/PAT-1"}
+    foreign["encounter"] = {"reference": "http://127.0.0.1/mini-lis/Encounter/ENC-1"}
+    patient = _patient()
+    patient["id"] = "PAT-1"
+    envelope = _envelope(
+        "complete",
+        [
+            {"sourceKey": "mini-his", "organizationId": "org-mini-his", "outcome": "complete", "resourceCount": 3},
+            {"sourceKey": "mini-lis", "organizationId": "org-mini-lis", "outcome": "complete", "resourceCount": 1},
+        ],
+        [
+            _entry("mini-his", patient),
+            _entry("mini-his", encounter),
+            _entry("mini-his", foreign),
+            _entry("mini-lis", lis_observation),
+        ],
+    )
+    result, review = evaluate_federated_protocol(envelope, POST, datetime(2026, 10, 1, tzinfo=timezone.utc))
+    assert review is None
+    assert result["evaluationStatus"] == "insufficient"
+    assert "final_observation_missing" in result["reasonCodes"]
+    assert result["evidence"] == []
+
+
+def test_colliding_observation_keeps_caller_source_in_review(tmp_path):
+    from app.followup_review import FollowUpReviewCaseService
+    from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
+    from app.human_review_client import _one_workflow
+
+    repository = SQLiteFollowUpReviewCaseRepository(tmp_path / "review.sqlite3")
+    repository.initialize()
+    encounter = {
+        "resourceType": "Encounter",
+        "id": "ENC-1",
+        "status": "finished",
+        "subject": {"reference": "http://127.0.0.1/mini-his/Patient/MHS-PAT-001"},
+        "period": {"start": "2026-09-01T15:00:00Z", "end": "2026-09-01T15:00:00Z"},
+        "meta": {"source": "https://lab.local/mini-his"},
+    }
+    his = _observation("mini-his", "OBS-1", 13.4)
+    his["issued"] = "2026-09-01T15:10:00Z"
+    his["code"] = {"coding": [{"system": "https://lab.local/tests", "code": "HB"}]}
+    his["subject"] = {"reference": "http://127.0.0.1/mini-his/Patient/MHS-PAT-001"}
+    his["encounter"] = {"reference": "http://127.0.0.1/mini-his/Encounter/ENC-1"}
+    lis = _observation("mini-lis", "OBS-1", 13.4)
+    lis["issued"] = "2026-09-01T15:10:00Z"
+    lis["code"] = {"coding": [{"system": "https://lab.local/tests", "code": "HB"}]}
+    lis["subject"] = {"reference": "http://127.0.0.1/mini-lis/Patient/MHS-PAT-001"}
+    lis["encounter"] = {"reference": "http://127.0.0.1/mini-lis/Encounter/ENC-1"}
+    federation = FederationDouble(
+        _envelope(
+            "complete",
+            [
+                {"sourceKey": "mini-his", "organizationId": "org-mini-his", "outcome": "complete", "resourceCount": 3},
+                {"sourceKey": "mini-lis", "organizationId": "org-mini-lis", "outcome": "complete", "resourceCount": 2},
+            ],
+            [
+                _entry("mini-lis", lis),
+                _entry("mini-his", _patient()),
+                _entry("mini-his", encounter),
+                _entry("mini-his", his),
+            ],
+        )
+    )
+    ports = LivePorts(
+        _settings(clinical_context_mode="federated"),
+        FollowUpReviewCaseService(repository),
+        GuardClient(),
+        federation,
+    )
+    view = start_workflow(SqliteCheckpointSaver(tmp_path / "agent-workflow.sqlite3"), ports, "MHS-PAT-001", POST)
+    assert view["status"] == "waiting_human"
+    assert view["evidence"] == ["Encounter/ENC-1", "Observation/OBS-1"]
+    case = repository.get(view["reviewCaseId"])
+    assert set(case.matched_resources) == {"Encounter/ENC-1", "Observation/OBS-1"}
+    assert "origen=mini-his" in case.narrative_text
+    assert "origen=mini-lis" in case.narrative_text
+    assert case.narrative_text.index("origen=mini-his") < case.narrative_text.index("Otra evidencia")
+    observations = [
+        item
+        for item in view["clinicalContext"]["federation"]["resources"]
+        if item["resourceType"] == "Observation"
+    ]
+    assert {item["sourceKey"] for item in observations} == {"mini-his", "mini-lis"}
+    assert {item["fullUrl"] for item in observations} == {
+        "http://127.0.0.1/mini-his/Observation/OBS-1",
+        "http://127.0.0.1/mini-lis/Observation/OBS-1",
+    }
+    assert {item["source"] for item in observations} == {
+        "https://lab.local/mini-his",
+        "https://lab.local/mini-lis",
+    }
+    html = _one_workflow(case, view)
+    assert "Observation/OBS-1 origen mini-his" in html
+    assert "Observation/OBS-1 origen mini-lis" not in html
 
 
 def test_matched_protocol_still_reaches_human_review(tmp_path):

@@ -27,6 +27,7 @@ FHIR_REUSE_MODULES = {
     "clinical_read_client.py",
     "clinical_review_context.py",
     "clinical_review_context_http.py",
+    "federated_protocol_evaluation.py",
     "missed_follow_up_service.py",
     "longitudinal_context.py",
 }

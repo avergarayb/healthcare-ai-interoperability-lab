@@ -21,6 +21,8 @@ import pytest
 from app.clinical_federation_client import ClinicalFederationClient
 from app.config import Settings
 from app.federated_clinical_context import adapt_federation_envelope
+from app.followup_review import FollowUpReviewCaseService
+from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.langgraph_workflow_orchestration import GRAPH_NODES, LivePorts, SqliteCheckpointSaver, start_workflow
 
 
@@ -304,16 +306,31 @@ def test_live_java_sources_reach_langgraph(tmp_path):
                 raise AssertionError(path)
 
         guard = Guard()
-        ports = LivePorts(settings, object(), guard, federation)
+        repository = SQLiteFollowUpReviewCaseRepository(tmp_path / "review.sqlite3")
+        repository.initialize()
+        ports = LivePorts(settings, FollowUpReviewCaseService(repository), guard, federation)
         view = start_workflow(SqliteCheckpointSaver(tmp_path / "workflow.sqlite3"), ports, "MHS-PAT-001", "post_consultation")
         assert guard.calls == 0
-        assert view["status"] == "completed"
-        assert view["protocol"]["evaluationStatus"] == "insufficient"
-        assert "federated_protocol_not_resolved" in view["protocol"]["reasonCodes"]
-        assert "human_review" not in view["steps"]
+        assert view["status"] == "waiting_human"
+        assert view["currentStep"] == "await_human"
+        assert view["protocol"]["evaluationStatus"] == "matched"
+        assert view["protocol"]["protocolId"] == "POST_CONSULTATION_RESULT_REVIEW_V1"
+        assert "post_consultation_result_requires_review" in view["protocol"]["reasonCodes"]
+        assert "Encounter/MHS-CON-001" in view["evidence"]
+        assert any(item.startswith("Observation/MHS-RES-") for item in view["evidence"])
+        assert "human_review" in view["steps"]
         assert "human_review" in GRAPH_NODES
+        assert view["reviewCaseId"]
+        case = repository.get(view["reviewCaseId"])
+        assert case.narrative_text
+        assert "Encounter/MHS-CON-001" in case.narrative_text
+        assert "mini-lis" in case.narrative_text
+        assert "decisión clínica" in case.narrative_text
+        assert "Quispe" not in case.narrative_text
         rendered = json.dumps(view)
         assert "Quispe" not in rendered
+        assert "13.4" in rendered
+        assert "141" in rendered
         assert view["clinicalContext"]["federation"]["status"] == "complete"
         assert {item["source"] for item in view["clinicalContext"]["federation"]["resources"] if item["resourceType"] == "Observation"} == {
             "https://lab.local/mini-his",
