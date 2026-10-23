@@ -1324,7 +1324,10 @@ def _one_workflow(case: FollowUpReviewCase, view: dict) -> str:
 
 def _evidence_item(item: object, context: dict) -> str:
     federation = context.get("federation") if isinstance(context.get("federation"), dict) else {}
-    resources = federation.get("resources") if isinstance(federation.get("resources"), list) else []
+    resources = [
+        *(federation.get("resources") if isinstance(federation.get("resources"), list) else []),
+        *(federation.get("reports") if isinstance(federation.get("reports"), list) else []),
+    ]
     caller = federation.get("callerSystem") if isinstance(federation.get("callerSystem"), str) else ""
     matches = [
         resource

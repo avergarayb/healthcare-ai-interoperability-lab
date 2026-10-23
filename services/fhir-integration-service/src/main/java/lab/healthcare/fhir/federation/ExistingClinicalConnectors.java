@@ -39,6 +39,7 @@ final class ExistingClinicalConnectors {
                     case "Encounter" -> mergeStatuses(patientId, List.of("finished", "in-progress", "planned", "cancelled"),
                             source::searchEncounters);
                     case "Appointment" -> collectionOrEmpty(source.searchAppointments(patientId));
+                    case "ServiceRequest" -> collectionOrEmpty(source.searchServiceRequests(patientId));
                     default -> new ClinicalConnector.Collected(List.of(), false);
                 };
             }

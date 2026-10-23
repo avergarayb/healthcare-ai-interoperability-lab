@@ -124,6 +124,7 @@ interop:
         - encounter
         - observation
         - appointment
+        - service-request
     mini-lis:
       organization-id: org-mini-lis
       display-name: Mini LIS

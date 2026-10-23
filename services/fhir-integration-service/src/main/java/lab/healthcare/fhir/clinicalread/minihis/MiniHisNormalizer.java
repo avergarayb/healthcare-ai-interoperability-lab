@@ -37,6 +37,10 @@ final class MiniHisNormalizer {
     static final String CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category";
     static final String ENCOUNTER_CLASS_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-ActCode";
     static final String APPOINTMENT_SYSTEM = "https://lab.local/mini-his/appointment";
+    static final String ORDER_SYSTEM = "https://lab.local/mini-his/order";
+    static final String TEST_SYSTEM = "https://lab.local/mini-his/test";
+    static final String DESTINATION_ORDER_SYSTEM = "https://lab.local/mini-his/destination-order";
+    static final String EXCHANGE_CORRELATION_SYSTEM = "https://lab.local/exchange/correlation";
     /**
      * FHIR requires participant.status. Mini HIS does not record an individual
      * response, so the participant stays needs-action. Appointment status is
@@ -191,6 +195,51 @@ final class MiniHisNormalizer {
             identifier.put("system", system);
             identifier.put("value", value);
         }
+    }
+
+    ObjectNode serviceRequest(JsonNode source) {
+        String id = required(source, "orderId");
+        String patientId = required(source, "patientId");
+        String testCode = required(source, "testCode");
+        String description = required(source, "testDescription");
+        ObjectNode resource = resource("ServiceRequest", id, ORDER_SYSTEM);
+        resource.put("status", serviceRequestStatus(required(source, "localStatus")));
+        resource.put("intent", "order");
+        resource.putObject("subject").put("reference", "Patient/" + patientId);
+        ObjectNode code = resource.putObject("code");
+        ObjectNode coding = code.putArray("coding").addObject();
+        coding.put("system", TEST_SYSTEM);
+        coding.put("code", testCode);
+        code.put("text", description);
+        try {
+            resource.put("authoredOn", OffsetDateTime.parse(required(source, "requestedAt")).toInstant().toString());
+        } catch (DateTimeParseException ex) {
+            throw ClinicalReadException.invalidSource();
+        }
+        addIdentifier(resource, DESTINATION_ORDER_SYSTEM, optional(source, "destinationOrderId"));
+        addIdentifier(resource, EXCHANGE_CORRELATION_SYSTEM, optional(source, "correlationId"));
+        return resource;
+    }
+
+    private static void addIdentifier(ObjectNode resource, String system, String value) {
+        if (value == null) {
+            return;
+        }
+        if (!LOGICAL_ID.matcher(value).matches()) {
+            throw ClinicalReadException.invalidSource();
+        }
+        ObjectNode identifier = resource.withArray("identifier").addObject();
+        identifier.put("system", system);
+        identifier.put("value", value);
+    }
+
+    private static String serviceRequestStatus(String status) {
+        return switch (status) {
+            case "recorded" -> "draft";
+            case "submitted" -> "active";
+            case "failed" -> "entered-in-error";
+            default -> throw ClinicalReadException.invalidSource();
+        };
     }
 
     private ObjectNode resource(String resourceType, String id, String system) {

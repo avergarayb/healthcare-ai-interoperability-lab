@@ -19,4 +19,6 @@ public interface MiniHisClinicalSource {
     JsonNode readAppointment(String logicalId);
 
     JsonNode searchAppointments(String patientId);
+
+    JsonNode searchServiceRequests(String patientId);
 }

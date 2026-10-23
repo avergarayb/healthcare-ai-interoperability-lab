@@ -17,6 +17,11 @@ from app.missed_follow_up_review import (
     MissedFollowUpSnapshot,
     evaluate_missed_follow_up,
 )
+from app.cross_org_lab_result_review import (
+    CROSS_ORG_LAB_RESULT,
+    CROSS_ORG_LAB_RESULT_REVIEW_V1,
+    evaluate_cross_org_lab_result,
+)
 from app.post_consultation_review import (
     POST_CONSULTATION_RESULT_REVIEW_V1,
     AppointmentFact,
@@ -56,6 +61,8 @@ def evaluate_federated_protocol(
         reasons = ["federated_context_partial"]
         reasons.extend(_failure_reasons(envelope))
         return _view(workflow_type, "insufficient", tuple(reasons), ()), None
+    if workflow_type == CROSS_ORG_LAB_RESULT:
+        return evaluate_cross_org_lab_result(envelope)
     if workflow_type == MISSED_FOLLOW_UP:
         return _missed(envelope, evaluated_at)
     if workflow_type == POST_CONSULTATION:
@@ -68,11 +75,19 @@ def federated_narrative(state: dict) -> str:
     protocol = state.get("protocol_result") if isinstance(state.get("protocol_result"), dict) else {}
     context = state.get("clinical_context") if isinstance(state.get("clinical_context"), dict) else {}
     federation = context.get("federation") if isinstance(context.get("federation"), dict) else {}
-    resources = federation.get("resources") if isinstance(federation.get("resources"), list) else []
+    resources = [
+        *(federation.get("resources") if isinstance(federation.get("resources"), list) else []),
+        *(federation.get("reports") if isinstance(federation.get("reports"), list) else []),
+    ]
     evidence = [item for item in state.get("evidence") or [] if isinstance(item, str)]
     lines = [
         "Propuesta sintética de laboratorio.",
         "La regla determinista produjo este resultado. Un modelo no lo cambió.",
+        *(
+            ["La coordinación exige consulta HIS, orden HIS, orden LIS y resultado final. Los valores no se interpretan."]
+            if protocol.get("protocolId") == "CROSS_ORG_LAB_RESULT_REVIEW_V1"
+            else []
+        ),
         f"Protocolo: {protocol.get('protocolId') or 'sin protocolo'}.",
         f"Resultado: {protocol.get('evaluationStatus') or 'sin estado'}.",
         "Motivos: " + ", ".join(str(item) for item in protocol.get("reasonCodes") or []) + ".",
@@ -249,6 +264,7 @@ def _view(workflow_type: str, status: str, reasons: tuple[str, ...], evidence: t
     protocol_id = {
         POST_CONSULTATION: POST_CONSULTATION_RESULT_REVIEW_V1,
         MISSED_FOLLOW_UP: MISSED_FOLLOW_UP_REVIEW_V1,
+        CROSS_ORG_LAB_RESULT: CROSS_ORG_LAB_RESULT_REVIEW_V1,
     }.get(workflow_type, workflow_type)
     return _from_result(protocol_id, status, reasons, evidence)
 

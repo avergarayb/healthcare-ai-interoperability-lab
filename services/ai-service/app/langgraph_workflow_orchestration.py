@@ -25,6 +25,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from app.followup_review import ReviewCaseStatus, ReviewOutcome
+from app.cross_org_lab_result_review import CROSS_ORG_LAB_RESULT, CROSS_ORG_LAB_RESULT_REVIEW_V1
 from app.missed_follow_up_review import MISSED_FOLLOW_UP_REVIEW_V1
 from app.post_consultation_review import POST_CONSULTATION_RESULT_REVIEW_V1
 
@@ -35,6 +36,7 @@ MISSED_FOLLOW_UP = "missed_follow_up"
 PROTOCOL_IDS = {
     POST_CONSULTATION: POST_CONSULTATION_RESULT_REVIEW_V1,
     MISSED_FOLLOW_UP: MISSED_FOLLOW_UP_REVIEW_V1,
+    CROSS_ORG_LAB_RESULT: CROSS_ORG_LAB_RESULT_REVIEW_V1,
 }
 ALLOWED_DECISIONS = frozenset(item.value for item in ReviewOutcome)
 TERMINAL_STATUSES = frozenset({"waiting_human", "completed"})
@@ -530,11 +532,15 @@ class LivePorts:
         self._federation_envelope: dict | None = None
         self._federation_projection: dict | None = None
         self._federation_failure: dict | None = None
+        self._skip_single_read = False
 
     def federation_failure_context(self) -> dict:
         return dict(self._federation_failure or {})
 
     def read_patient(self, case_id: str, workflow_type: str) -> str:
+        if self.federation is None and workflow_type == CROSS_ORG_LAB_RESULT:
+            self._skip_single_read = True
+            return f"Patient/{case_id}"
         if self.federation is None:
             return self._read_patient_single(case_id, workflow_type)
         return self._read_patient_federated(case_id)
@@ -585,6 +591,8 @@ class LivePorts:
         return f"Patient/{context.patient_id}"
 
     def build_context(self, case_id: str) -> dict:
+        if self._skip_single_read:
+            return {"context": _empty_context(), "intelligence": _empty_intelligence()}
         if self.federation is not None:
             return self._build_federated_context(case_id)
         from datetime import datetime as clock
@@ -664,6 +672,13 @@ class LivePorts:
         self.service.record_narrative(review_case_id, text)
 
     def _evaluate(self, case_id: str, workflow_type: str) -> dict:
+        if workflow_type == CROSS_ORG_LAB_RESULT:
+            return {
+                "protocolId": CROSS_ORG_LAB_RESULT_REVIEW_V1,
+                "evaluationStatus": "insufficient",
+                "reasonCodes": ["cross_org_requires_federated_context"],
+                "evidence": [],
+            }
         from datetime import datetime as clock
         from datetime import timezone as tz
 

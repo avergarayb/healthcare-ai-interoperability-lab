@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -76,6 +77,14 @@ public class LabOrderController {
                 request.requestedAt());
         log.info("mini_his_lab_order_recorded id={} patient={}", created.orderId(), created.patientId());
         return ResponseEntity.status(201).body(created);
+    }
+
+    @GetMapping(path = "/patients/{patientId}/lab-orders", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<LabOrderView>> ordersForPatient(@PathVariable String patientId) {
+        if (!ID.matcher(patientId).matches() || patients.findPatient(patientId).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(orders.listByPatient(patientId));
     }
 
     @GetMapping(path = "/lab-orders/{orderId}", produces = MediaType.APPLICATION_JSON_VALUE)
