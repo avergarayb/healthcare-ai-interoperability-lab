@@ -20,6 +20,7 @@ _SAFE_ID = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$")
 _TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$")
 _METADATA_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _METADATA_VALUE = re.compile(r"^[A-Za-z0-9_./:-]{1,80}$")
+_WORKFLOW_ID = re.compile(r"^wf-[0-9a-f]{32}$")
 _SENSITIVE_KEY = (
     "token",
     "secret",
@@ -34,13 +35,35 @@ _SENSITIVE_VALUE = re.compile(
     r"(x-service-token|bearer\s|api[_-]?key|password|cookie|sk-[a-z0-9]|private key)",
     re.IGNORECASE,
 )
-EVENT_TYPES = frozenset({"authentication"})
-ACTOR_TYPES = frozenset({"anonymous", "development_principal"})
-ACTIONS = frozenset({"authenticate"})
+EVENT_TYPES = frozenset({"authentication", "workflow_start", "workflow_resume"})
+ACTOR_TYPES = frozenset({"anonymous", "development_principal", "service_client"})
+ACTIONS = frozenset({"authenticate", "start_workflow", "resume_workflow"})
 OUTCOMES = frozenset({"allowed", "denied"})
-RESOURCE_TYPES = frozenset({"authentication"})
-REASON_CODES = frozenset({"credential_accepted", "credential_rejected"})
-METADATA_KEYS = frozenset({"route"})
+RESOURCE_TYPES = frozenset({"authentication", "workflow"})
+REASON_CODES = frozenset(
+    {
+        "credential_accepted",
+        "credential_rejected",
+        "access_granted",
+        "service_token_missing",
+        "service_token_invalid",
+        "workflow_disabled",
+        "workflow_type_not_allowed",
+        "human_review_decision_rejected",
+    }
+)
+METADATA_KEYS = frozenset({"route", "workflow_type"})
+
+_WORKFLOW_EVENT = {
+    "workflow_start": ("start_workflow", "/internal/workflows"),
+    "workflow_resume": ("resume_workflow", "/internal/workflows/:workflowId/resume"),
+}
+_WORKFLOW_TYPES = frozenset({"post_consultation", "missed_follow_up", "cross_org_lab_result"})
+_UNAUTHENTICATED_REASONS = frozenset({"service_token_missing", "service_token_invalid"})
+_AUTHENTICATED_DENIAL_REASONS = {
+    "workflow_start": frozenset({"workflow_disabled", "workflow_type_not_allowed"}),
+    "workflow_resume": frozenset({"workflow_disabled", "human_review_decision_rejected"}),
+}
 
 
 class SecurityAuditRejected(ValueError):
@@ -106,6 +129,73 @@ def authentication_event(
             reason_code=reason_code,
             correlation_id=str(uuid.uuid4()),
             metadata=(("route", "/review-login"),),
+        )
+    )
+
+
+def audit_correlation_id(candidate: object) -> str:
+    """Keep only a canonical UUIDv4 supplied by the caller; otherwise create one."""
+    if isinstance(candidate, str):
+        try:
+            parsed = uuid.UUID(candidate)
+        except (ValueError, AttributeError):
+            pass
+        else:
+            if parsed.version == 4 and str(parsed) == candidate:
+                return candidate
+    return str(uuid.uuid4())
+
+
+def workflow_security_event(
+    *,
+    event_type: str,
+    outcome: str,
+    reason_code: str,
+    correlation_id: str,
+    authenticated: bool,
+    workflow_id: str | None = None,
+    workflow_type: str | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> SecurityAuditEvent:
+    """Build a minimized access-decision event for a workflow boundary."""
+    try:
+        action, route = _WORKFLOW_EVENT[event_type]
+    except (KeyError, TypeError) as exc:
+        raise SecurityAuditRejected("workflow event_type is invalid") from exc
+    if outcome == "allowed":
+        if not authenticated or reason_code != "access_granted":
+            raise SecurityAuditRejected("allowed workflow decision is invalid")
+    elif outcome == "denied":
+        expected = _AUTHENTICATED_DENIAL_REASONS[event_type] if authenticated else _UNAUTHENTICATED_REASONS
+        if reason_code not in expected:
+            raise SecurityAuditRejected("denied workflow decision is invalid")
+    else:
+        raise SecurityAuditRejected("workflow outcome is invalid")
+    if workflow_type is not None and workflow_type not in _WORKFLOW_TYPES:
+        raise SecurityAuditRejected("workflow_type is invalid")
+    if workflow_id is not None and (
+        not isinstance(workflow_id, str) or _WORKFLOW_ID.fullmatch(workflow_id) is None
+    ):
+        raise SecurityAuditRejected("workflow_id is invalid")
+    metadata = (("route", route),)
+    if workflow_type is not None:
+        metadata += (("workflow_type", workflow_type),)
+    return validate_security_audit_event(
+        SecurityAuditEvent(
+            event_id=str(uuid.uuid4()),
+            timestamp_utc=utc_now(clock),
+            event_type=event_type,
+            actor_type="service_client" if authenticated else "anonymous",
+            actor_id="internal-service" if authenticated else "anonymous",
+            organization_id=None,
+            source_service=SOURCE_SERVICE,
+            resource_type="workflow",
+            resource_reference=None if workflow_id is None else f"workflow/{workflow_id}",
+            action=action,
+            outcome=outcome,
+            reason_code=reason_code,
+            correlation_id=correlation_id,
+            metadata=metadata,
         )
     )
 
