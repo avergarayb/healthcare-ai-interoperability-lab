@@ -626,25 +626,17 @@ class LivePorts:
             return _unavailable_protocol(workflow_type, "evaluation_unavailable")
 
     def _evaluate_federated(self, case_id: str, workflow_type: str) -> dict:
-        """Keep the protocol node, and do not query Clinical Read as a second source."""
-        del case_id
+        """Apply the existing rule to the envelope. Do not query Clinical Read."""
+        from datetime import datetime as clock
+        from datetime import timezone as tz
+
+        from app.federated_protocol_evaluation import evaluate_federated_protocol
+
         envelope = self._federation_envelope or {}
-        projection = self._federation_projection or {}
-        if envelope.get("status") not in {"complete", "partial"}:
-            return _unavailable_protocol(workflow_type, "federation_failed")
-        evidence = [
-            item.get("reference")
-            for item in (projection.get("resources") or [])
-            if isinstance(item, dict) and isinstance(item.get("reference"), str)
-        ][:8]
-        reasons = ["federated_context_partial"] if envelope.get("status") == "partial" else []
-        reasons.append("federated_protocol_not_resolved")
-        return {
-            "protocolId": PROTOCOL_IDS[workflow_type],
-            "evaluationStatus": "insufficient",
-            "reasonCodes": reasons,
-            "evidence": evidence,
-        }
+        result, review = evaluate_federated_protocol(envelope, workflow_type, clock.now(tz.utc))
+        if review is not None:
+            self._protocols[(case_id, workflow_type)] = review
+        return result
 
     def prepare_narrative(self, state: dict) -> str:
         if self._narrative_exists(state):
@@ -730,6 +722,10 @@ class LivePorts:
         return False
 
     def _generate(self, state: dict) -> str | None:
+        if self.federation is not None:
+            from app.federated_protocol_evaluation import federated_narrative
+
+            return federated_narrative(state)
         from app.missed_follow_up_narrative import configured_provider, generate_operational_narrative
 
         provider = configured_provider(self.settings)

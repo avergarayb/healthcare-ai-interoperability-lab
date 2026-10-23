@@ -1277,7 +1277,8 @@ def _workflow_section(case: FollowUpReviewCase, settings: Settings) -> str:
 def _one_workflow(case: FollowUpReviewCase, view: dict) -> str:
     protocol = view.get("protocol") if isinstance(view.get("protocol"), dict) else {}
     evidence = view.get("evidence") if isinstance(view.get("evidence"), list) else []
-    evidence_items = "".join(f"<li>{esc(str(item))}</li>" for item in evidence)
+    context = view.get("clinicalContext") if isinstance(view.get("clinicalContext"), dict) else {}
+    evidence_items = "".join(_evidence_item(item, context) for item in evidence)
     reasons = protocol.get("reasonCodes") if isinstance(protocol.get("reasonCodes"), list) else []
     reason_text = ", ".join(str(item) for item in reasons) or "sin códigos"
     if view.get("narrativeStatus") in {"prepared", "stored"} and case.narrative_text:
@@ -1318,6 +1319,34 @@ def _one_workflow(case: FollowUpReviewCase, view: dict) -> str:
         + "</ol><h3>Evidencia principal</h3><ul>"
         + evidence_items
         + "</ul></section>"
+    )
+
+
+def _evidence_item(item: object, context: dict) -> str:
+    federation = context.get("federation") if isinstance(context.get("federation"), dict) else {}
+    resources = federation.get("resources") if isinstance(federation.get("resources"), list) else []
+    caller = federation.get("callerSystem") if isinstance(federation.get("callerSystem"), str) else ""
+    matches = [
+        resource
+        for resource in resources
+        if isinstance(resource, dict)
+        and (resource.get("protocolReference") == item or resource.get("reference") == item)
+    ]
+    owned = [resource for resource in matches if not caller or resource.get("sourceKey") == caller]
+    found = owned[0] if owned else (matches[0] if matches else None)
+    if found is None:
+        return f"<li>{esc(str(item))}</li>"
+    value = found.get("value") or ""
+    unit = found.get("unit") or ""
+    shown = f"{value} {unit}".strip()
+    return (
+        "<li>"
+        f"{esc(str(found.get('protocolReference') or item))} "
+        f"origen {esc(str(found.get('sourceKey') or 'sin origen'))} "
+        f"sistema {esc(str(found.get('source') or 'sin sistema'))} "
+        f"estado {esc(str(found.get('status') or 'sin estado'))} "
+        f"valor {esc(shown or 'sin valor')}"
+        "</li>"
     )
 
 
