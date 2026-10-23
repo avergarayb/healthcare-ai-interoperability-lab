@@ -7,7 +7,7 @@ This is the concise architecture authority and index for the **Healthcare AI & I
 | Unit | Runtime | Current responsibility |
 |---|---|---|
 | **Healthcare Interoperability** | Java 21 / Spring Boot | Implemented: FHIR/SMART client, vendor profiles, routing, resilience, transformations, controlled projections, Model Boundary v1, and Clinical Read API v1. The default Clinical Read source is local HAPI. `mini-his` and `mini-lis` are optional single-source laboratory readers. A laboratory REST path sends one Mini HIS order to Mini LIS and reads the result back through Java. An optional HL7 v2.5.1 connector uses the same path over loopback MLLP. REST stays the default. Clinical Federation v1 reads Mini HIS and Mini LIS together when an explicit patient link and a source grant exist. It does not replace Clinical Read. Independent bidirectional exchange among arbitrary organizations remains a target. |
-| **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, deterministic protocol authority, narrative model subflows, and a laboratory `StateGraph` that pauses a matched follow-up case for Human Review. Operational follow-up factories acquire Patient, Encounter, Observation, and Appointment through Clinical Read API v1. |
+| **Healthcare AI** | Python / FastAPI / LangGraph | Controlled AI workflows, deterministic protocol authority, narrative model subflows, and a laboratory `StateGraph` that pauses a matched follow-up case for Human Review. The default operational follow-up factories acquire Patient, Encounter, Observation, and Appointment through Clinical Read API v1. `AI_CLINICAL_CONTEXT_MODE=federated` is an opt-in that reads the Clinical Federation envelope instead. |
 
 The units are independently deployable and may be sold separately or composed. Pricing and SKU names are not decided. The commercial connectivity target is [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
 
@@ -52,7 +52,8 @@ POST /api/clinical-federation/v1/context
         -> explicit patient link, or exact identifier on the caller source
         -> existing Mini HIS and Mini LIS connectors
         -> one federation envelope of FHIR R4 resources, with per-source outcomes
-        -> Python and LangGraph do not call this endpoint yet
+        -> optional Python client when AI_CLINICAL_CONTEXT_MODE=federated
+        -> same LangGraph nodes; default mode remains single-source Clinical Read
 ```
 
 ```text
@@ -73,7 +74,7 @@ Java Clinical Read API v1
 
 Java owns the clinical read. The deterministic protocol owns eligibility. The narrative step may call Gemini and does not choose the protocol result. LangGraph orders those steps, suspends the matched case, and stores the checkpoint. Human Review owns the human decision. A resume continues only after that decision is already stored. The same SQLite checkpoint is what a restarted Python process reads. One process writes that file. This laboratory graph is not a production workflow engine.
 
-Python does not call Mini HIS and does not choose the protocol outcome. `HapiReadClient` remains in the Python tree; the factories named above do not construct it. Clinical review context for an open case uses the same Java read. See [Clinical Read API v1](../contracts/clinical-read-v1.md) and [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
+Python does not call Mini HIS or Mini LIS directly and does not choose the protocol outcome. `HapiReadClient` remains in the Python tree; the factories named above do not construct it. In federated mode the graph reads the Java envelope and does not use Clinical Read as a fallback. The open-case JSON projection also skips Clinical Read in that mode, so a single-source chart is not shown as the federated evidence. Single mode still reads Clinical Read for that projection. See [Clinical Read API v1](../contracts/clinical-read-v1.md), [AI clinical federation v1](../contracts/ai-clinical-federation-v1.md), and [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
 
 ```text
 Repository institutional Markdown
@@ -135,6 +136,8 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 - [Missed follow-up review V1 contract](../contracts/missed-follow-up-review-v1.md)
 - [Clinical review context V1 contract](../contracts/clinical-review-context-v1.md)
 - [Clinical Read API v1 contract](../contracts/clinical-read-v1.md)
+- [Clinical Federation v1 contract](../contracts/clinical-federation-v1.md)
+- [AI clinical federation consumer](../contracts/ai-clinical-federation-v1.md)
 - [Mini HIS terminology and UCUM maps](../contracts/mini-his-terminology-v1.md)
 - [Mini LIS proprietary REST](../contracts/mini-lis-rest-v1.md)
 - [Mini LIS FHIR mapping](../contracts/mini-lis-fhir-v1.md)

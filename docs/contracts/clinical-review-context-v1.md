@@ -117,6 +117,8 @@ If a value is unsupported, conflicting, malformed, empty, or over a projection b
 
 HTTP 503 uses `Clinical review context unavailable` for acquisition and integrity failures. A review row that the store cannot load uses the existing persistence detail. Neither detail includes exception text, FHIR ids, or response bodies.
 
+When `AI_CLINICAL_CONTEXT_MODE=federated`, an open case returns HTTP 409 `federated_context_not_read_from_clinical_read`. The response has no FHIR facts. Clinical Read is not called. A missing case stays HTTP 404 and a closed case stays HTTP 409 `clinical_context_not_available_for_closed_case`. The success schema of this contract is unchanged. Single mode still reads Clinical Read.
+
 ## 10. Privacy and persistence
 
 Logs for this endpoint do not include Patient identifiers, names, observation values, encounter clinical fields, appointment ids, raw FHIR, bundle bodies, paging tokens, or the clinical-context response.

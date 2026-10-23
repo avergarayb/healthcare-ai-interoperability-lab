@@ -689,6 +689,45 @@ def test_invalid_fhir_base_url_is_generic_503(tmp_path, monkeypatch, base_url):
         assert leaked not in rendered
 
 
+def test_federated_open_case_does_not_project_clinical_read(tmp_path):
+    from dataclasses import replace
+
+    repository = _repository(tmp_path)
+    case = _create(repository)
+    fhir = ScriptedFhir()
+    constructed = {"count": 0}
+
+    def factory():
+        constructed["count"] += 1
+        return fhir
+
+    app.state.followup_review_repository = repository
+    app.state.clinical_context_fhir_client = factory
+    app.dependency_overrides[get_settings] = lambda: replace(
+        _settings(),
+        clinical_context_mode="federated",
+    )
+    response = TestClient(app).get(
+        f"/internal/follow-up-review-cases/{case.id}/clinical-context",
+        headers=AUTH,
+    )
+    assert response.status_code == 409
+    assert response.json() == {"detail": "federated_context_not_read_from_clinical_read"}
+    assert "synthetic-result" not in response.text
+    assert constructed["count"] == 0
+
+    from app.human_review_client import MSG_FEDERATED_OPEN_CASE, _load_context
+
+    context, message = _load_context(
+        app,
+        case,
+        replace(_settings(), clinical_context_mode="federated"),
+    )
+    assert context is None
+    assert message == MSG_FEDERATED_OPEN_CASE
+    assert constructed["count"] == 0
+
+
 def test_unauthenticated_request_does_not_construct_the_fhir_client(tmp_path, monkeypatch):
     monkeypatch.setenv("FHIR_BASE_URL", "")
     repository = _repository(tmp_path)

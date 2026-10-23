@@ -34,6 +34,7 @@ from app.clinical_review_context import (
     ClinicalContextClosed,
     ClinicalContextUnavailable,
     ClinicalReviewContextResponse,
+    FederatedOpenCaseContextRefused,
     CodedContent,
     ComponentsContent,
     IntegerContent,
@@ -146,6 +147,10 @@ MSG_NOT_FOUND = "This review case was not found."
 MSG_INVALID_LINK = "This review link is not valid."
 MSG_CONTEXT_UNAVAILABLE = "El contexto clínico actual no está disponible en este momento."
 MSG_CONTEXT_CLOSED = "El contexto clínico actual no se muestra cuando el caso está cerrado."
+MSG_FEDERATED_OPEN_CASE = (
+    "El modo federado no usa Clinical Read de una sola fuente como evidencia de esta evaluación. "
+    "La procedencia y los avisos están en la orquestación del workflow."
+)
 MSG_ENCOUNTER_MISSING = "The recorded encounter was not found."
 MSG_OBSERVATION_MISSING = "The recorded observation was not found."
 MSG_APPOINTMENT_MISSING = "The recorded appointment was not found."
@@ -405,7 +410,7 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
             status = attribution_failure
             return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
         notice = MSG_CHANGED if request.query_params.get("notice") == "changed" else ""
-        context, context_message = _load_context(request, detail.case)
+        context, context_message = _load_context(request, detail.case, settings)
         timeline_html = ""
         if request.query_params.get("timeline") == "1":
             timeline_html = _timeline_section(detail.case, settings)
@@ -570,6 +575,8 @@ def submit_ai_assistance(
             return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
 
         def read_context() -> ClinicalReviewContextResponse:
+            if settings.clinical_context_mode == "federated":
+                raise FederatedOpenCaseContextRefused()
             return clinical_context_service(request, repository).read(review_case_id)
 
         outcome = generate_ai_assistance(
@@ -1034,9 +1041,12 @@ def _load_detail(request: Request, review_case_id: str) -> tuple[ReviewCaseDetai
 def _load_context(
     request: Request,
     case: FollowUpReviewCase,
+    settings: Settings,
 ) -> tuple[ClinicalReviewContextResponse | None, str]:
     if case.status is not ReviewCaseStatus.OPEN:
         return None, MSG_CONTEXT_CLOSED
+    if settings.clinical_context_mode == "federated":
+        return None, MSG_FEDERATED_OPEN_CASE
     repository = _repository(request)
     if repository is None:
         return None, MSG_CONTEXT_UNAVAILABLE
@@ -1288,7 +1298,8 @@ def _one_workflow(case: FollowUpReviewCase, view: dict) -> str:
         "<h3>Referencia leída del HIS</h3>"
         f"<p>{esc(str(view.get('patientReference') or 'sin referencia'))}. "
         f"Contexto {esc(str(context.get('contextStatus') or 'sin estado'))}.</p>"
-        "<h3>Evaluación determinista del protocolo</h3>"
+        + _federation_warning(context)
+        + "<h3>Evaluación determinista del protocolo</h3>"
         f"<p>{esc(str(protocol.get('protocolId') or 'sin protocolo'))}. "
         f"Resultado {esc(str(protocol.get('evaluationStatus') or 'sin estado'))}. "
         f"Motivos {esc(reason_text)}.</p>"
@@ -1310,7 +1321,48 @@ def _one_workflow(case: FollowUpReviewCase, view: dict) -> str:
     )
 
 
+def _federation_warning(context: dict) -> str:
+    federation = context.get("federation") if isinstance(context.get("federation"), dict) else None
+    if not federation:
+        return ""
+    sources = federation.get("sources") if isinstance(federation.get("sources"), list) else []
+    items = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        items.append(
+            "<li>"
+            f"{esc(str(source.get('sourceKey') or ''))}: "
+            f"{esc(str(source.get('outcome') or 'sin estado'))}"
+            "</li>"
+        )
+    warnings = federation.get("warnings") if isinstance(federation.get("warnings"), list) else []
+    warning_items = "".join(f"<li>{esc(str(item))}</li>" for item in warnings)
+    incomplete = federation.get("status") != "complete"
+    notice = (
+        "<p>Esta lectura no es una revisión clínica completa.</p>"
+        if incomplete
+        else "<p>Todas las fuentes autorizadas respondieron. La decisión sigue siendo humana.</p>"
+    )
+    return (
+        "<h3>Fuentes federadas</h3>"
+        + notice
+        + "<ul>"
+        + "".join(items)
+        + "</ul><h3>Avisos</h3><ul>"
+        + warning_items
+        + "</ul>"
+    )
+
+
 def _timeline_section(case: FollowUpReviewCase, settings: Settings) -> str:
+    if getattr(settings, "clinical_context_mode", "single") == "federated":
+        return (
+            "<section><h2>Historial longitudinal</h2>"
+            "<p>El modo federado no consulta Clinical Read de una sola fuente.</p>"
+            "<p>La procedencia y los avisos están en la orquestación del workflow.</p>"
+            "</section>"
+        )
     try:
         from datetime import datetime, timezone
 

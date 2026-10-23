@@ -103,3 +103,11 @@ Un workflow representa el primer recurso que coincide en el seguimiento no reali
 10. **Diferencia entre LangGraph y Gemini.** LangGraph decide qué función corre ahora. Gemini, cuando se llama, solo redacta la propuesta a partir de referencias ya verificadas. No marca `matched`, no diagnostica, no prescribe, no contacta al paciente y no cierra la revisión.
 
 Para leer el código en este orden: `compile_workflow`, `start_workflow`, `SqliteCheckpointSaver`, `await_human`, `resume_workflow`, luego `run_agent_workflow_http` y `_workflow_section`.
+
+## Modo de contexto clínico
+
+`AI_CLINICAL_CONTEXT_MODE` vale `single` si no se define. Ese modo sigue leyendo Clinical Read y no llama a federación.
+
+`federated` hace un `POST /api/clinical-federation/v1/context`. El paciente, la organización, el sistema y las fuentes salen de la configuración, no del texto del usuario. Si Java responde `failed`, 401 o 403, el grafo termina en `failure` y no consulta Clinical Read. Una respuesta `partial` queda en el estado con `contextStatus=partial`. El protocolo queda `insufficient` con `federated_protocol_not_resolved` porque este modo no evalúa los protocolos de seguimiento sobre el sobre. Eso no es un `matched` y no abre una revisión clínica completa. El nodo `human_review` sigue en el grafo: un resultado `matched`, como en el modo `single`, entra a `narrative`, `human_review` y `await_human`.
+
+La página de revisión muestra el resultado de cada fuente cuando el workflow trae el sobre y, si ese sobre no está `complete`, la frase «Esta lectura no es una revisión clínica completa.» El historial y el detalle JSON del caso abierto no consultan Clinical Read en modo federado. El modo `single` conserva esa lectura.

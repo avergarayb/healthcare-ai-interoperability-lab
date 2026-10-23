@@ -22,6 +22,7 @@ from app.clinical_review_context import (
     ClinicalContextClosed,
     ClinicalContextUnavailable,
     ClinicalReviewContextResponse,
+    FederatedOpenCaseContextRefused,
 )
 from app.followup_review import FollowUpReviewCase, ReviewCaseStatus, ReviewPersistenceUnavailable
 from app.institutional_knowledge import (
@@ -406,6 +407,8 @@ def _generate(case, context_reader, knowledge, provider, state) -> AssistanceOut
         context = context_reader()
     except ClinicalContextClosed:
         return _done(state, "case_not_open", case.protocol_id, model_called=False)
+    except FederatedOpenCaseContextRefused:
+        return _done(state, "context_unavailable", case.protocol_id, model_called=False)
     except (ClinicalContextUnavailable, ReviewPersistenceUnavailable):
         return _done(state, "context_unavailable", case.protocol_id, model_called=False)
     try:

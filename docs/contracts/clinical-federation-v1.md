@@ -4,7 +4,7 @@
 
 Laboratory contract for `POST /api/clinical-federation/v1/context` in `services/fhir-integration-service`. The contract version string is `clinical-federation-v1`.
 
-This endpoint does not replace [Clinical Read v1](clinical-read-v1.md). `clinical-read.source` stays `local-hapi` unless an operator changes it for a single-source read. Python `ClinicalReadClient` and LangGraph are unchanged.
+This endpoint does not replace [Clinical Read v1](clinical-read-v1.md). `clinical-read.source` stays `local-hapi` unless an operator changes it for a single-source read. The Java request and response in this document are unchanged. An optional Python consumer is specified separately in [AI clinical federation v1](ai-clinical-federation-v1.md). The default Python mode remains single-source Clinical Read.
 
 This is a laboratory read across two implemented connectors. It is not a master patient index and it is not a production federation platform.
 

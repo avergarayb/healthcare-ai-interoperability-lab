@@ -10,12 +10,14 @@ from app.clinical_review_context import (
     ClinicalContextClosed,
     ClinicalContextUnavailable,
     ClinicalReviewContextService,
+    FederatedOpenCaseContextRefused,
     dump_clinical_review_context,
 )
 from app.config import Settings
 from app.followup_review import (
     FollowUpReviewCaseRepository,
     ReviewCaseNotFound,
+    ReviewCaseStatus,
     ReviewPersistenceUnavailable,
     validate_review_case_id,
 )
@@ -29,6 +31,7 @@ from app.service_auth import authenticate
 
 CLINICAL_CONTEXT_UNAVAILABLE_DETAIL = "Clinical review context unavailable"
 CLOSED_CONTEXT_DETAIL = "clinical_context_not_available_for_closed_case"
+FEDERATED_CONTEXT_DETAIL = "federated_context_not_read_from_clinical_read"
 
 
 def get_clinical_review_context_http(
@@ -45,12 +48,16 @@ def get_clinical_review_context_http(
     repository = getattr(request.app.state, "followup_review_repository", None)
     if repository is None:
         return JSONResponse(status_code=503, content={"detail": PERSISTENCE_UNAVAILABLE_DETAIL})
+    if settings.clinical_context_mode == "federated":
+        return _refuse_federated_open_case(repository, review_case_id)
     try:
         service = ClinicalReviewContextService(
             repository,
             fhir_client_factory=lambda: _fhir_client(request),
         )
         payload = service.read(review_case_id)
+    except FederatedOpenCaseContextRefused:
+        return JSONResponse(status_code=409, content={"detail": FEDERATED_CONTEXT_DETAIL})
     except ReviewCaseNotFound:
         return JSONResponse(status_code=404, content={"detail": NOT_FOUND_DETAIL})
     except ClinicalContextClosed:
@@ -73,7 +80,22 @@ def clinical_context_service(
     )
 
 
+def _refuse_federated_open_case(repository: FollowUpReviewCaseRepository, review_case_id: str) -> Response:
+    """Keep a single-source chart from standing in for federated evidence."""
+    try:
+        case = repository.get(review_case_id)
+    except ReviewPersistenceUnavailable:
+        return JSONResponse(status_code=503, content={"detail": PERSISTENCE_UNAVAILABLE_DETAIL})
+    if case is None:
+        return JSONResponse(status_code=404, content={"detail": NOT_FOUND_DETAIL})
+    if case.status is not ReviewCaseStatus.OPEN:
+        return JSONResponse(status_code=409, content={"detail": CLOSED_CONTEXT_DETAIL})
+    return JSONResponse(status_code=409, content={"detail": FEDERATED_CONTEXT_DETAIL})
+
+
 def _fhir_client(request: Request):
+    if Settings.from_env().clinical_context_mode == "federated":
+        raise FederatedOpenCaseContextRefused()
     factory = getattr(request.app.state, "clinical_context_fhir_client", None)
     if factory is not None:
         return factory()
