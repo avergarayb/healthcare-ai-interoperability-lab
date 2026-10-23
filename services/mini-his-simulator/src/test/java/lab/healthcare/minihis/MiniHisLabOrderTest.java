@@ -80,11 +80,20 @@ class MiniHisLabOrderTest {
                 .getResponse()
                 .getContentAsString();
         String orderId = created.replaceAll(".*\"orderId\":\"([^\"]+)\".*", "$1");
+        mockMvc.perform(get("/patients/MHS-PAT-001/lab-orders"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].orderId").value(orderId))
+                .andExpect(jsonPath("$[0].localStatus").value("recorded"));
         mockMvc.perform(post("/lab-orders/" + orderId + "/submission"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.correlationId").value("EXC-TEST"));
         assertThat(submittedBody.get()).contains("org-mini-his").contains("MHS-PAT-001");
         assertThat(submittedBody.get()).doesNotContain("8096").doesNotContain("/orders");
+        mockMvc.perform(get("/patients/MHS-PAT-002/lab-orders"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/patients/UNKNOWN/lab-orders"))
+                .andExpect(status().isNotFound());
         mockMvc.perform(get("/lab-orders/" + orderId + "/results"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.observations[0].valueQuantity.value").value(141));

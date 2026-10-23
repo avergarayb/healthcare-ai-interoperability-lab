@@ -40,6 +40,29 @@ public class LabOrderStore {
         return find(orderId).orElseThrow();
     }
 
+    public List<LabOrderView> listByPatient(String patientId) {
+        return jdbc.query(
+                """
+                SELECT order_id, patient_id, destination_system_key, test_code, test_description,
+                       requested_at, local_status, correlation_id, destination_order_id, destination_organization_id
+                FROM lab_order
+                WHERE patient_id = ?
+                ORDER BY order_id
+                """,
+                (rs, row) -> new LabOrderView(
+                        rs.getString("order_id"),
+                        rs.getString("patient_id"),
+                        rs.getString("destination_system_key"),
+                        rs.getString("test_code"),
+                        rs.getString("test_description"),
+                        rs.getString("requested_at"),
+                        rs.getString("local_status"),
+                        rs.getString("correlation_id"),
+                        rs.getString("destination_order_id"),
+                        rs.getString("destination_organization_id")),
+                patientId);
+    }
+
     public Optional<LabOrderView> find(String orderId) {
         List<LabOrderView> rows = jdbc.query(
                 """

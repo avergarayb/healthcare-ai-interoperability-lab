@@ -74,7 +74,7 @@ Java Clinical Read API v1
 
 Java owns the clinical read. The deterministic protocol owns eligibility. The narrative step may call Gemini and does not choose the protocol result. LangGraph orders those steps, suspends the matched case, and stores the checkpoint. Human Review owns the human decision. A resume continues only after that decision is already stored. The same SQLite checkpoint is what a restarted Python process reads. One process writes that file. This laboratory graph is not a production workflow engine.
 
-Python does not call Mini HIS or Mini LIS directly and does not choose the protocol outcome. `HapiReadClient` remains in the Python tree; the factories named above do not construct it. In federated mode the graph reads the Java envelope and does not use Clinical Read as a fallback. A complete envelope runs the same structural follow-up rules as single mode. A partial envelope stays insufficient. The open-case JSON projection also skips Clinical Read in that mode, so a single-source chart is not shown as the federated evidence. Single mode still reads Clinical Read for that projection. See [Clinical Read API v1](../contracts/clinical-read-v1.md), [AI clinical federation v1](../contracts/ai-clinical-federation-v1.md), [federated protocol evaluation v1](../contracts/federated-protocol-evaluation-v1.md), and [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
+Python does not call Mini HIS or Mini LIS directly and does not choose the protocol outcome. `HapiReadClient` remains in the Python tree; the factories named above do not construct it. In federated mode the graph reads the Java envelope and does not use Clinical Read as a fallback. A complete envelope runs the same structural follow-up rules as single mode. A partial envelope stays insufficient. The open-case JSON projection also skips Clinical Read in that mode, so a single-source chart is not shown as the federated evidence. Single mode still reads Clinical Read for that projection. `cross_org_lab_result` is an additional federated protocol. It matches only when Mini HIS and Mini LIS evidence are explicitly correlated. See [Clinical Read API v1](../contracts/clinical-read-v1.md), [AI clinical federation v1](../contracts/ai-clinical-federation-v1.md), [federated protocol evaluation v1](../contracts/federated-protocol-evaluation-v1.md), [cross-organization laboratory result review v1](../contracts/cross-org-lab-result-review-v1.md), and [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md).
 
 ```text
 Repository institutional Markdown
@@ -139,6 +139,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 - [Clinical Federation v1 contract](../contracts/clinical-federation-v1.md)
 - [AI clinical federation consumer](../contracts/ai-clinical-federation-v1.md)
 - [Federated protocol evaluation v1](../contracts/federated-protocol-evaluation-v1.md)
+- [Cross-organization laboratory result review v1](../contracts/cross-org-lab-result-review-v1.md)
 - [Mini HIS terminology and UCUM maps](../contracts/mini-his-terminology-v1.md)
 - [Mini LIS proprietary REST](../contracts/mini-lis-rest-v1.md)
 - [Mini LIS FHIR mapping](../contracts/mini-lis-fhir-v1.md)

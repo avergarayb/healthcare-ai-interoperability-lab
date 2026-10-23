@@ -28,7 +28,7 @@ _REASON_CODE = re.compile(r"^[a-z0-9_]{1,128}$")
 _CANONICAL_UTC_TIMESTAMP = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$"
 )
-_RESOURCE_TYPES = frozenset({"Patient", "Encounter", "Observation", "Appointment"})
+_RESOURCE_TYPES = frozenset({"Patient", "Encounter", "Observation", "Appointment", "ServiceRequest"})
 
 
 class ReviewCaseStatus(str, Enum):

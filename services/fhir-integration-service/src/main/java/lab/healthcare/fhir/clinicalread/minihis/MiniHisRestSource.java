@@ -154,6 +154,26 @@ final class MiniHisRestSource implements MiniHisClinicalSource {
     }
 
     @Override
+    public JsonNode searchServiceRequests(String patientId) {
+        MiniHisResponse response = client.getList(
+                "/patients/" + MiniHisClient.encode(patientId) + "/lab-orders");
+        if (response.status() == 404) {
+            return collection("ServiceRequest", json.createArrayNode(), false);
+        }
+        if (!response.body().isArray()) {
+            throw ClinicalReadException.invalidSource();
+        }
+        ArrayNode resources = json.createArrayNode();
+        for (JsonNode item : response.body()) {
+            if (!patientId.equals(MiniHisNormalizer.required(item, "patientId"))) {
+                throw ClinicalReadException.invalidSource();
+            }
+            resources.add(normalizer.serviceRequest(item));
+        }
+        return collection("ServiceRequest", resources, response.truncated());
+    }
+
+    @Override
     public JsonNode searchAppointments(String patientId) {
         MiniHisResponse response = client.getList("/appointments?patientId=" + MiniHisClient.encode(patientId));
         if (response.status() == 404) {

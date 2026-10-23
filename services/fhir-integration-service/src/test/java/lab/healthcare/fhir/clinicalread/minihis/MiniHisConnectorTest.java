@@ -619,6 +619,11 @@ class MiniHisConnectorTest {
             public JsonNode searchAppointments(String patientId) {
                 throw new UnsupportedOperationException();
             }
+
+            @Override
+            public JsonNode searchServiceRequests(String patientId) {
+                throw new UnsupportedOperationException();
+            }
         };
         ClinicalReadService service = new ClinicalReadService(
                 routing,

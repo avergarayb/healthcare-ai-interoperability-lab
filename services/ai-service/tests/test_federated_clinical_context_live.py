@@ -194,6 +194,8 @@ def test_live_java_sources_reach_langgraph(tmp_path):
                 "--server.address=127.0.0.1",
                 f"--mini-his.sqlite-path={his_db}",
                 "--mini-his.organization-id=org-mini-his",
+                f"--mini-his.exchange.base-url=http://127.0.0.1:{FHIR_PORT}",
+                f"--mini-his.exchange.service-token={HIS_EXCHANGE_TOKEN}",
             ],
             tmp_path / "mini-his.log",
             env,
@@ -336,6 +338,71 @@ def test_live_java_sources_reach_langgraph(tmp_path):
             "https://lab.local/mini-his",
             "https://lab.local/mini-lis",
         }
+
+        created_status, created = _request(
+            f"http://127.0.0.1:{HIS_PORT}/lab-orders",
+            "",
+            {
+                "patientId": "MHS-PAT-001",
+                "destinationSystemKey": "mini-lis",
+                "testCode": "GLU",
+                "testDescription": "Glucose",
+                "requestedAt": "2026-03-01T10:00:00Z",
+            },
+        )
+        assert created_status == 201
+        his_order = created["orderId"]
+        submitted_status, submitted = _request(
+            f"http://127.0.0.1:{HIS_PORT}/lab-orders/{his_order}/submission",
+            "",
+            {},
+        )
+        assert 200 <= submitted_status < 300
+        linked_lis_order = submitted["destination"]["orderId"]
+        negative = start_workflow(
+            SqliteCheckpointSaver(tmp_path / "cross-negative.sqlite3"),
+            ports,
+            "MHS-PAT-001",
+            "cross_org_lab_result",
+        )
+        assert negative["status"] == "completed"
+        assert negative["protocol"]["evaluationStatus"] == "not_matched"
+        assert "result_order_mismatch" in negative["protocol"]["reasonCodes"]
+        assert negative["protocol"]["protocolId"] == "CROSS_ORG_LAB_RESULT_REVIEW_V1"
+        assert "await_human" not in negative["steps"]
+        assert not negative.get("reviewCaseId")
+        final_status, _final = _request(
+            f"http://127.0.0.1:{LIS_PORT}/orders/{linked_lis_order}/results",
+            LIS_TOKEN,
+            {
+                "externalResultId": "EXT-RES-CROSS-ORG",
+                "testCode": "GLU",
+                "value": "141",
+                "unit": "mmol/L",
+                "referenceRange": "70-110",
+                "resultedAt": "2026-03-01T12:00:00Z",
+                "status": "FINAL",
+            },
+        )
+        assert final_status in {200, 201}
+        positive = start_workflow(
+            SqliteCheckpointSaver(tmp_path / "cross-positive.sqlite3"),
+            ports,
+            "MHS-PAT-001",
+            "cross_org_lab_result",
+        )
+        assert guard.calls == 0
+        assert positive["status"] == "waiting_human"
+        assert positive["currentStep"] == "await_human"
+        assert positive["protocol"]["evaluationStatus"] == "matched"
+        assert "Encounter/MHS-CON-001" in positive["evidence"]
+        assert f"ServiceRequest/{his_order}" in positive["evidence"]
+        assert f"ServiceRequest/{linked_lis_order}" in positive["evidence"]
+        assert any(item.startswith("Observation/") for item in positive["evidence"])
+        stored = repository.get(positive["reviewCaseId"])
+        assert set(stored.matched_resources) == set(positive["evidence"])
+        assert "no se interpretan" in stored.narrative_text
+        assert "Quispe" not in stored.narrative_text
     except Exception:
         for name in ("mini-lis.log", "mini-his.log", "fhir.log"):
             path = tmp_path / name
