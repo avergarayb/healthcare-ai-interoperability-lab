@@ -90,6 +90,8 @@ Paciente sintético `MHS-PAT-003`, consulta `MHS-CON-003`. Hay una orden HIS env
 
 El reporte `report.json` muestra el identificador de ejecución, la correlación del exchange, el paciente, la organización `org-mini-his`, las órdenes, el estado del resultado, la federación, el protocolo, la evaluación, LangGraph, el caso y la procedencia. No incluye tokens ni nombres.
 
+Con `run --keep`, el mismo AI Service publica `http://127.0.0.1:18290/demo-experience` después del inicio de sesión. La guía es [experiencia visual v2](demo-experience-v2.md).
+
 ## Human Review
 
 Con `run --keep`, abrir `http://127.0.0.1:18290/review-login`. La clave es el contenido de `review-login.secret` de esa ejecución. El caso positivo debe mostrar:

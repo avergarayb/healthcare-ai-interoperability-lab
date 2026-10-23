@@ -315,9 +315,59 @@ def _scenario(
         "langGraphStatus": view.get("status"),
         "currentStep": view.get("currentStep"),
         "reviewCaseId": view.get("reviewCaseId"),
+        "hisEncounterId": his_encounter(patient_id),
+        "evidenceProjection": _evidence_projection(view, evidence),
         "evidence": evidence,
         "provenance": _provenance(view, evidence),
     }
+
+
+def his_encounter(patient_id: str) -> str | None:
+    return {
+        POSITIVE_PATIENT: POSITIVE_ENCOUNTER,
+        NEGATIVE_PATIENT: NEGATIVE_ENCOUNTER,
+    }.get(patient_id)
+
+
+_PROJECTION_FIELDS = (
+    "reference",
+    "protocolReference",
+    "resourceType",
+    "status",
+    "sourceKey",
+    "source",
+    "fullUrl",
+    "identifiers",
+    "related",
+    "code",
+    "value",
+    "unit",
+)
+
+
+def _evidence_projection(view: dict, evidence: list[str]) -> list[dict]:
+    """Safe rows already projected by federation. Names and secrets are not fields of those rows."""
+    context = view.get("clinicalContext") if isinstance(view.get("clinicalContext"), dict) else {}
+    federation = context.get("federation") if isinstance(context.get("federation"), dict) else {}
+    rows = [
+        *(federation.get("resources") if isinstance(federation.get("resources"), list) else []),
+        *(federation.get("reports") if isinstance(federation.get("reports"), list) else []),
+    ]
+    projected = []
+    for reference in evidence:
+        match = next(
+            (
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and (row.get("protocolReference") == reference or row.get("reference") == reference)
+            ),
+            None,
+        )
+        if match is None:
+            continue
+        projected.append({key: match.get(key) for key in _PROJECTION_FIELDS})
+    return projected
 
 
 def _provenance(view: dict, evidence: list[str]) -> list[dict]:
@@ -357,6 +407,7 @@ def _public_scenario(item: dict) -> dict:
         "requestingOrganizationId",
         "hisOrderId",
         "lisOrderId",
+        "hisEncounterId",
         "resultState",
         "federationStatus",
         "protocolId",
@@ -366,6 +417,7 @@ def _public_scenario(item: dict) -> dict:
         "currentStep",
         "reviewCaseId",
         "evidence",
+        "evidenceProjection",
         "provenance",
     )
     return {key: item.get(key) for key in kept}
