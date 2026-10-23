@@ -82,7 +82,8 @@ class MiniLisExchangeConnectorTest {
                 "GLU",
                 "Glucose",
                 OffsetDateTime.parse("2026-03-01T10:00:00Z"),
-                "org-mini-lis"));
+                "org-mini-lis",
+                "https://lab.local/mini-his/test"));
 
         assertThat(patientId).isEqualTo("MLS-PAT-NEW");
         assertThat(patientQuery.get()).contains("organizationId=org-mini-his").contains("externalId=MHS-PAT-001");

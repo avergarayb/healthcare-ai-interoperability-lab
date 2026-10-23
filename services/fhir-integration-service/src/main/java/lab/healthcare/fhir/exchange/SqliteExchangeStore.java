@@ -140,6 +140,69 @@ public final class SqliteExchangeStore implements ExchangeStore {
                 correlationId);
     }
 
+    @Override
+    public synchronized Optional<OrderCorrelation> findByDestinationOrder(String destinationSystem, String destinationOrderId) {
+        return queryOrder(
+                """
+                SELECT * FROM exchange_order
+                WHERE destination_system = ? AND destination_order_id = ?
+                """,
+                destinationSystem,
+                destinationOrderId);
+    }
+
+    @Override
+    public synchronized boolean saveHl7Observation(
+            String messageControlId,
+            String destinationOrderId,
+            String sourceOrderId,
+            String externalResultId,
+            String observationJson) {
+        try (Connection connection = open();
+                PreparedStatement statement = connection.prepareStatement(
+                        """
+                        INSERT INTO exchange_hl7_result (
+                            message_control_id, destination_order_id, source_order_id, external_result_id, observation_json)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(message_control_id) DO NOTHING
+                        """)) {
+            statement.setString(1, messageControlId);
+            statement.setString(2, destinationOrderId);
+            statement.setString(3, sourceOrderId);
+            statement.setString(4, externalResultId);
+            statement.setString(5, observationJson);
+            return statement.executeUpdate() == 1;
+        } catch (SQLException ex) {
+            String state = ex.getSQLState();
+            if ("23000".equals(state) || ex.getMessage() != null && ex.getMessage().contains("UNIQUE")) {
+                return false;
+            }
+            throw ExchangeException.unavailable();
+        }
+    }
+
+    @Override
+    public synchronized java.util.List<String> hl7Observations(String destinationOrderId) {
+        try (Connection connection = open();
+                PreparedStatement statement = connection.prepareStatement(
+                        """
+                        SELECT observation_json FROM exchange_hl7_result
+                        WHERE destination_order_id = ?
+                        ORDER BY rowid
+                        """)) {
+            statement.setString(1, destinationOrderId);
+            try (ResultSet rows = statement.executeQuery()) {
+                java.util.ArrayList<String> found = new java.util.ArrayList<>();
+                while (rows.next()) {
+                    found.add(rows.getString(1));
+                }
+                return found;
+            }
+        } catch (SQLException ex) {
+            throw ExchangeException.unavailable();
+        }
+    }
+
     private void migrate() {
         execute("""
                 CREATE TABLE IF NOT EXISTS exchange_patient_link (
@@ -169,6 +232,16 @@ public final class SqliteExchangeStore implements ExchangeStore {
                     delivery_state TEXT NOT NULL,
                     error_code TEXT,
                     UNIQUE (source_system, source_organization_id, source_order_id, destination_system)
+                )
+                """);
+        execute("""
+                CREATE TABLE IF NOT EXISTS exchange_hl7_result (
+                    message_control_id TEXT PRIMARY KEY,
+                    destination_order_id TEXT NOT NULL,
+                    source_order_id TEXT NOT NULL,
+                    external_result_id TEXT NOT NULL,
+                    observation_json TEXT NOT NULL,
+                    UNIQUE (destination_order_id, external_result_id)
                 )
                 """);
     }

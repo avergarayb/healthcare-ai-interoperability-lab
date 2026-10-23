@@ -6,11 +6,11 @@ FHIR Integration Service is the only hop between Mini HIS and Mini LIS. Mini HIS
 
 Routing is a registry lookup plus a connector list. A destination is eligible when it is a different registered system, declares `service-request`, and has an installed connector. Declaring `clinic-b` does not deliver an order there. Adding a later system means a registry entry, a participant token, and a class that implements `OrderDestination` and `ResultSource`. It does not require a new router.
 
-`LaboratoryRecordService` remains the only writer inside Mini LIS. The connector calls the existing REST API. A future HL7 v2 adapter must produce the same `OrderSubmission` or call `LaboratoryRecordService` through the same command shape. It must not write the exchange tables or the Mini LIS tables itself.
+`LaboratoryRecordService` remains the only writer inside Mini LIS. The REST connector calls the existing REST API. The optional HL7 v2 connector calls the same service. Neither connector writes the Mini LIS tables itself. See [HL7 v2 laboratory integration](hl7v2-laboratory-integration-v1.md).
 
 ## What this increment does not do
 
-- It does not implement MLLP, ORM, OML, ORU^R01, or ACK.
+- This exchange increment does not speak HL7. The optional v2.5.1 laboratory connector is a later increment and is not the default.
 - It does not open a direct socket from Mini HIS to Mini LIS.
 - It does not match patients by name.
 - It does not invent LOINC or UCUM.

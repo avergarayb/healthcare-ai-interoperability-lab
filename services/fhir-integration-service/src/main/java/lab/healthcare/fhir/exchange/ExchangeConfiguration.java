@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -23,10 +24,24 @@ public class ExchangeConfiguration {
     }
 
     @Bean
-    MiniLisExchangeConnector miniLisExchangeConnector(ExchangeProperties properties, ObjectMapper json) {
+    @Primary
+    OrderDestination miniLisOrderDestination(ExchangeProperties properties, ObjectMapper json, ExchangeStore store) {
         ExchangeProperties.Connector connector = properties.getConnectors().get("mini-lis");
-        if (connector == null || connector.getBaseUrl() == null || connector.getBaseUrl().isBlank()) {
+        if (connector == null) {
             connector = new ExchangeProperties.Connector();
+        }
+        if ("hl7v2".equalsIgnoreCase(connector.getProtocol())) {
+            return new MiniLisHl7ExchangeConnector(
+                    connector.getHl7(),
+                    connector.getHl7().getHost(),
+                    connector.getHl7().getPort(),
+                    connector.getHl7().getSharedSecret(),
+                    connector.getConnectTimeout(),
+                    connector.getReadTimeout(),
+                    store,
+                    json);
+        }
+        if (connector.getBaseUrl() == null || connector.getBaseUrl().isBlank()) {
             connector.setBaseUrl("http://127.0.0.1:8096");
         }
         return new MiniLisExchangeConnector(
@@ -35,6 +50,24 @@ public class ExchangeConfiguration {
                 connector.getConnectTimeout(),
                 connector.getReadTimeout(),
                 json);
+    }
+
+    @Bean
+    ResultSource miniLisResultSource(OrderDestination miniLisOrderDestination) {
+        if (!(miniLisOrderDestination instanceof ResultSource source)) {
+            throw new IllegalStateException("Mini LIS connector does not provide results");
+        }
+        return new ResultSource() {
+            @Override
+            public String systemKey() {
+                return source.systemKey();
+            }
+
+            @Override
+            public DestinationReport read(String destinationOrderId) {
+                return source.read(destinationOrderId);
+            }
+        };
     }
 
     @Bean

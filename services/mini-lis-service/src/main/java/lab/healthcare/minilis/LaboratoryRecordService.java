@@ -1,20 +1,25 @@
 package lab.healthcare.minilis;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
  * The only writer for laboratory patients, orders, and results.
- * The proprietary REST API calls it now. A future HL7 v2 adapter must call it
- * too, and must not write SQL of its own.
+ * The proprietary REST API and the HL7 v2 listener both call this service.
+ * The listener does not write SQL of its own.
  */
 @Service
 public class LaboratoryRecordService {
@@ -23,10 +28,19 @@ public class LaboratoryRecordService {
 
     private final LaboratoryRepository repository;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
+    private final TransactionTemplate nestedWork;
 
-    public LaboratoryRecordService(LaboratoryRepository repository, Clock clock) {
+    public LaboratoryRecordService(
+            LaboratoryRepository repository,
+            Clock clock,
+            ApplicationEventPublisher events,
+            PlatformTransactionManager transactions) {
         this.repository = repository;
         this.clock = clock;
+        this.events = events;
+        this.nestedWork = new TransactionTemplate(transactions);
+        this.nestedWork.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
     }
 
     @Transactional
@@ -165,7 +179,69 @@ public class LaboratoryRecordService {
         if (next != order.status()) {
             repository.updateOrderStatus(order.orderId(), next);
         }
+        events.publishEvent(new LabResultRecorded(result.orderId(), result.resultId()));
         return result;
+    }
+
+    @Transactional
+    public Hl7Ack acceptOml(OmlOrder order) {
+        Optional<Hl7Ack> stored = repository.findHl7Ack(order.messageControlId());
+        if (stored.isPresent()) {
+            return stored.get();
+        }
+        ExternalPatient patient = nested(this::resolvePatient, order);
+        boolean duplicate = false;
+        LabOrder created;
+        try {
+            created = nested(() -> createOrder(new NewOrder(
+                    patient.patientId(),
+                    order.organizationId(),
+                    order.placerOrderId(),
+                    order.testCode(),
+                    order.testDescription(),
+                    order.requestedAt())));
+        } catch (MiniLisException ex) {
+            if (!"duplicate".equals(ex.code())) {
+                throw ex;
+            }
+            created = orderByExternalRequest(order.organizationId(), order.placerOrderId());
+            duplicate = true;
+        }
+        Hl7Ack ack = Hl7Ack.accepted(created.orderId(), patient.patientId(), duplicate);
+        repository.insertHl7Ack(order.messageControlId(), "OML_O21", ack, order.placerOrderId(), now());
+        return ack;
+    }
+
+    @Transactional
+    public Hl7Ack rememberRejection(String messageControlId, String placerOrderId, String code, String detail) {
+        Optional<Hl7Ack> stored = repository.findHl7Ack(messageControlId);
+        if (stored.isPresent()) {
+            return stored.get();
+        }
+        Hl7Ack ack = Hl7Ack.error(code, detail);
+        repository.insertHl7Ack(messageControlId, "OML_O21", ack, placerOrderId, now());
+        return ack;
+    }
+
+    private ExternalPatient resolvePatient(OmlOrder order) {
+        List<ExternalPatient> found = searchPatients(order.organizationId(), order.externalPatientId());
+        if (!found.isEmpty()) {
+            return found.get(0);
+        }
+        try {
+            return nested(() -> registerPatient(new NewPatient(
+                    order.organizationId(),
+                    order.externalPatientId(),
+                    order.familyName(),
+                    order.givenName(),
+                    order.birthDate(),
+                    order.administrativeSex())));
+        } catch (MiniLisException ex) {
+            if (!"duplicate".equals(ex.code())) {
+                throw ex;
+            }
+            return searchPatients(order.organizationId(), order.externalPatientId()).get(0);
+        }
     }
 
     public LabResult result(String resultId) {
@@ -207,6 +283,14 @@ public class LaboratoryRecordService {
 
     public int storedPatients() {
         return repository.countPatients();
+    }
+
+    private <T> T nested(java.util.function.Supplier<T> action) {
+        return nestedWork.execute(status -> action.get());
+    }
+
+    private ExternalPatient nested(java.util.function.Function<OmlOrder, ExternalPatient> action, OmlOrder order) {
+        return nestedWork.execute(status -> action.apply(order));
     }
 
     private OffsetDateTime now() {
