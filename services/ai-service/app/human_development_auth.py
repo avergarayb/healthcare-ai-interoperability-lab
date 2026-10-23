@@ -34,9 +34,8 @@ from app.human_session import (
 from app.human_session_sqlite import SQLiteHumanSessionRepository
 from app.security_audit import SecurityAuditRejected, SecurityAuditUnavailable, authentication_event
 from app.security_audit_sqlite import (
-    SQLiteSecurityAuditRepository,
     SecurityAuditStoreInitializationError,
-    audit_database_path,
+    resolve_security_audit_repository,
 )
 
 
@@ -385,20 +384,11 @@ def _audit_authentication(
 
 
 def _audit_repository(request: Request, settings: Settings):
-    injected = getattr(request.app.state, "security_audit_repository", None)
-    if injected is not None:
-        return injected
-    try:
-        repository = SQLiteSecurityAuditRepository(
-            audit_database_path(
-                settings,
-                session_repository=getattr(request.app.state, "human_session_repository", None),
-            )
-        )
-        repository.initialize()
-    except (SecurityAuditStoreInitializationError, OSError):
-        return None
-    return repository
+    return resolve_security_audit_repository(
+        settings,
+        injected=getattr(request.app.state, "security_audit_repository", None),
+        session_repository=getattr(request.app.state, "human_session_repository", None),
+    )
 
 
 def _session_repository(request: Request, settings: Settings):

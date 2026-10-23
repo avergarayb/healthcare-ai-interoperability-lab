@@ -48,6 +48,14 @@ from app.langgraph_followup_workflow import (
     FollowUpWorkflowResult,
     build_live_followup_workflow,
 )
+from app.security_audit import (
+    SecurityAuditRejected,
+    SecurityAuditStoreInitializationError,
+    SecurityAuditUnavailable,
+    audit_correlation_id,
+    workflow_security_event,
+)
+from app.security_audit_sqlite import resolve_security_audit_repository
 from app.service_auth import authenticate
 
 log = logging.getLogger("ai-service")
@@ -55,6 +63,11 @@ log = logging.getLogger("ai-service")
 DISABLED_DETAIL = "Follow-up agent is disabled"
 WORKFLOW_FAILED_DETAIL = "Follow-up workflow failed"
 REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL = "Follow-up review persistence unavailable"
+SECURITY_AUDIT_UNAVAILABLE_DETAIL = "Security audit persistence unavailable"
+
+
+class WorkflowAuditUnavailable(RuntimeError):
+    """The access decision could not be durably recorded."""
 
 _HTTP_STATUS = {
     "finish": FollowUpEndpointStatus.COMPLETED,
@@ -276,19 +289,48 @@ def _log(correlation_id: str, status: str) -> None:
 
 def run_agent_workflow_http(request: Request, settings: Settings, raw_body: bytes) -> Response:
     """Start one orchestrated workflow. Existing follow-up routes stay unchanged."""
-    denied = _workflow_guard(request, settings)
+    denied, correlation_id = _workflow_operation_guard(request, settings, "workflow_start")
     if denied is not None:
         return denied
     body = _load_body(raw_body)
     case_id = body.get("caseId") if isinstance(body, dict) else None
     workflow_type = body.get("workflowType") if isinstance(body, dict) else None
-    if case_id not in CASE_IDS or workflow_type not in {"post_consultation", "missed_follow_up"}:
+    allowed_types = {"post_consultation", "missed_follow_up"}
+    if isinstance(workflow_type, str) and workflow_type not in allowed_types:
+        return _workflow_denied_response(
+            request,
+            settings,
+            event_type="workflow_start",
+            reason_code="workflow_type_not_allowed",
+            correlation_id=correlation_id,
+            response=JSONResponse(status_code=422, content={"error": "invalid_request"}),
+        )
+    if case_id not in CASE_IDS or workflow_type not in allowed_types:
         return JSONResponse(status_code=422, content={"error": "invalid_request"})
     repository = getattr(request.app.state, "followup_review_repository", None)
     if repository is None:
         return JSONResponse(status_code=503, content={"detail": REVIEW_PERSISTENCE_UNAVAILABLE_DETAIL})
-    from app.langgraph_workflow_orchestration import build_live_ports, saver_for, start_workflow, workflow_db_path
+    from app.langgraph_workflow_orchestration import (
+        build_live_ports,
+        saver_for,
+        start_workflow,
+        workflow_db_path,
+        workflow_id_for,
+    )
 
+    workflow_id = workflow_id_for(case_id, workflow_type)
+    if not _append_workflow_audit(
+        request,
+        settings,
+        event_type="workflow_start",
+        outcome="allowed",
+        reason_code="access_granted",
+        correlation_id=correlation_id,
+        authenticated=True,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
+    ):
+        return _audit_unavailable_response()
     ports = getattr(request.app.state, "agent_workflow_ports", None) or build_live_ports(settings, repository)
     saver = getattr(request.app.state, "agent_workflow_saver", None) or saver_for(workflow_db_path(settings))
     view = start_workflow(saver, ports, case_id, workflow_type)
@@ -333,7 +375,7 @@ def resume_agent_workflow_http(
     raw_body: bytes,
 ) -> Response:
     """Resume only after Human Review has stored the same decision for the same case."""
-    denied = _workflow_guard(request, settings)
+    denied, correlation_id = _workflow_operation_guard(request, settings, "workflow_resume")
     if denied is not None:
         return denied
     canonical_id = _canonical_workflow_id(workflow_id)
@@ -369,11 +411,30 @@ def resume_agent_workflow_http(
     saver = getattr(request.app.state, "agent_workflow_saver", None)
     if saver is None and path.exists():
         saver = saver_for(path)
-    if saver is None or saver.index_get(canonical_id) is None:
+    indexed = None if saver is None else saver.index_get(canonical_id)
+    if indexed is None:
         return JSONResponse(status_code=404, content={"error": "workflow_not_found"})
     ports = getattr(request.app.state, "agent_workflow_ports", None) or build_live_ports(settings, repository)
     closed = case is not None and case.status is ReviewCaseStatus.CLOSED and case.outcome is not None
     stored = None if case is None or case.outcome is None else case.outcome.value
+    indexed_type = indexed.get("workflowType")
+    known_workflow_types = {"post_consultation", "missed_follow_up", "cross_org_lab_result"}
+    workflow_type = indexed_type if indexed_type in known_workflow_types else None
+
+    def audit_allowed_resume() -> None:
+        if not _append_workflow_audit(
+            request,
+            settings,
+            event_type="workflow_resume",
+            outcome="allowed",
+            reason_code="access_granted",
+            correlation_id=correlation_id,
+            authenticated=True,
+            workflow_id=canonical_id,
+            workflow_type=workflow_type,
+        ):
+            raise WorkflowAuditUnavailable
+
     try:
         view = resume_workflow(
             saver,
@@ -383,13 +444,25 @@ def resume_agent_workflow_http(
             review_case_id=review_case_id,
             stored_outcome=stored,
             case_is_closed=closed,
+            before_resume=audit_allowed_resume,
         )
+    except WorkflowAuditUnavailable:
+        return _audit_unavailable_response()
     except WorkflowNotFound:
         return JSONResponse(status_code=404, content={"error": "workflow_not_found"})
     except WorkflowNotSuspended:
         return JSONResponse(status_code=409, content={"error": "workflow_not_suspended"})
     except WorkflowDecisionRejected:
-        return JSONResponse(status_code=403, content={"error": "decision_rejected"})
+        return _workflow_denied_response(
+            request,
+            settings,
+            event_type="workflow_resume",
+            reason_code="human_review_decision_rejected",
+            correlation_id=correlation_id,
+            workflow_id=canonical_id,
+            workflow_type=workflow_type,
+            response=JSONResponse(status_code=403, content={"error": "decision_rejected"}),
+        )
     return JSONResponse(status_code=200, content=view)
 
 
@@ -413,6 +486,109 @@ def _workflow_guard(request: Request, settings: Settings) -> Response | None:
     if not settings.followup_agent_enabled:
         return JSONResponse(status_code=503, content={"detail": DISABLED_DETAIL})
     return None
+
+
+def _workflow_operation_guard(
+    request: Request,
+    settings: Settings,
+    event_type: str,
+) -> tuple[Response | None, str]:
+    correlation_id = audit_correlation_id(request.headers.get("X-Correlation-ID"))
+    if not authenticate(request, settings):
+        presented = request.headers.get("X-Service-Token")
+        reason = "service_token_missing" if presented is None or presented == "" else "service_token_invalid"
+        return (
+            _workflow_denied_response(
+                request,
+                settings,
+                event_type=event_type,
+                reason_code=reason,
+                correlation_id=correlation_id,
+                authenticated=False,
+                response=Response(status_code=401),
+            ),
+            correlation_id,
+        )
+    if not settings.followup_agent_enabled:
+        return (
+            _workflow_denied_response(
+                request,
+                settings,
+                event_type=event_type,
+                reason_code="workflow_disabled",
+                correlation_id=correlation_id,
+                response=JSONResponse(status_code=503, content={"detail": DISABLED_DETAIL}),
+            ),
+            correlation_id,
+        )
+    return None, correlation_id
+
+
+def _workflow_denied_response(
+    request: Request,
+    settings: Settings,
+    *,
+    event_type: str,
+    reason_code: str,
+    correlation_id: str,
+    response: Response,
+    authenticated: bool = True,
+    workflow_id: str | None = None,
+    workflow_type: str | None = None,
+) -> Response:
+    stored = _append_workflow_audit(
+        request,
+        settings,
+        event_type=event_type,
+        outcome="denied",
+        reason_code=reason_code,
+        correlation_id=correlation_id,
+        authenticated=authenticated,
+        workflow_id=workflow_id,
+        workflow_type=workflow_type,
+    )
+    return response if stored else _audit_unavailable_response()
+
+
+def _append_workflow_audit(
+    request: Request,
+    settings: Settings,
+    *,
+    event_type: str,
+    outcome: str,
+    reason_code: str,
+    correlation_id: str,
+    authenticated: bool,
+    workflow_id: str | None = None,
+    workflow_type: str | None = None,
+) -> bool:
+    repository = resolve_security_audit_repository(
+        settings,
+        injected=getattr(request.app.state, "security_audit_repository", None),
+        session_repository=getattr(request.app.state, "human_session_repository", None),
+    )
+    if repository is None:
+        return False
+    try:
+        repository.append(
+            workflow_security_event(
+                event_type=event_type,
+                outcome=outcome,
+                reason_code=reason_code,
+                correlation_id=correlation_id,
+                authenticated=authenticated,
+                workflow_id=workflow_id,
+                workflow_type=workflow_type,
+                clock=getattr(request.app.state, "security_audit_clock", None),
+            )
+        )
+    except (SecurityAuditUnavailable, SecurityAuditStoreInitializationError, SecurityAuditRejected):
+        return False
+    return True
+
+
+def _audit_unavailable_response() -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": SECURITY_AUDIT_UNAVAILABLE_DETAIL})
 
 
 def _workflow_read(

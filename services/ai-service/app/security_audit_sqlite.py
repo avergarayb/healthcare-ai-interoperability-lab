@@ -58,6 +58,25 @@ def _open_session_file(session_repository: object | None) -> Path | None:
     return None
 
 
+def resolve_security_audit_repository(
+    settings: object,
+    *,
+    injected: object | None = None,
+    session_repository: object | None = None,
+) -> object | None:
+    """Return an injected store or initialize the configured file-backed store."""
+    if injected is not None:
+        return injected
+    try:
+        repository = SQLiteSecurityAuditRepository(
+            audit_database_path(settings, session_repository=session_repository)
+        )
+        repository.initialize()
+    except (SecurityAuditStoreInitializationError, OSError):
+        return None
+    return repository
+
+
 SCHEMA_VERSION = 1
 BUSY_TIMEOUT_MS = 5_000
 _MIGRATION = Path(__file__).with_name("migrations") / "002_security_audit.sql"

@@ -17,7 +17,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Callable, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
@@ -402,6 +402,7 @@ def resume_workflow(
     review_case_id: str,
     stored_outcome: str | None,
     case_is_closed: bool,
+    before_resume: Callable[[], None] | None = None,
 ) -> dict:
     """Continue only a suspended workflow whose decision is already stored."""
     with saver.gate:
@@ -417,6 +418,8 @@ def resume_workflow(
             or current.get("reviewCaseId") != review_case_id
         ):
             raise WorkflowDecisionRejected
+        if before_resume is not None:
+            before_resume()
         graph = compile_workflow(ports, saver)
         config = _config(workflow_id)
         graph.invoke(Command(resume=decision), config)

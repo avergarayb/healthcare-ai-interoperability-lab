@@ -35,6 +35,7 @@ from app.langgraph_workflow_orchestration import (
     workflow_id_for,
 )
 from app.main import app, get_settings
+from app.security_audit_sqlite import SQLiteSecurityAuditRepository
 from app.missed_follow_up_review import (
     REASON_MISSED,
     REASON_NO_NOSHOW,
@@ -276,12 +277,22 @@ def _start(tmp_path, case_id: str, workflow_type: str, ports: ScriptedPorts) -> 
 @pytest.fixture(autouse=True)
 def _clean_app_state():
     app.dependency_overrides.clear()
-    for name in ("followup_review_repository", "agent_workflow_ports", "agent_workflow_saver"):
+    for name in (
+        "followup_review_repository",
+        "agent_workflow_ports",
+        "agent_workflow_saver",
+        "security_audit_repository",
+    ):
         if hasattr(app.state, name):
             delattr(app.state, name)
     yield
     app.dependency_overrides.clear()
-    for name in ("followup_review_repository", "agent_workflow_ports", "agent_workflow_saver"):
+    for name in (
+        "followup_review_repository",
+        "agent_workflow_ports",
+        "agent_workflow_saver",
+        "security_audit_repository",
+    ):
         if hasattr(app.state, name):
             delattr(app.state, name)
 
@@ -482,6 +493,49 @@ def test_lg10_repeated_resume_does_not_repeat_effects(tmp_path):
     assert service.get(view["reviewCaseId"]).version == 2
 
 
+def test_resume_hook_fails_before_checkpoint_transition_and_can_be_retried(tmp_path):
+    service = FollowUpReviewCaseService(_repository(tmp_path))
+    ports = ScriptedPorts(_post_evaluation())
+    ports.external_ensure = _real_ensure(service)
+    saver, view = _start(tmp_path, RESUME_CASE, POST_CONSULTATION, ports)
+    outcome = ReviewOutcome.REVIEW_COMPLETED_NO_OPERATIONAL_ACTION
+    service.close(view["reviewCaseId"], expected_version=1, outcome=outcome)
+    hook_calls = []
+
+    def unavailable_audit() -> None:
+        hook_calls.append("failed")
+        raise RuntimeError("audit unavailable")
+
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        resume_workflow(
+            saver,
+            ports,
+            view["workflowId"],
+            outcome.value,
+            review_case_id=view["reviewCaseId"],
+            stored_outcome=outcome.value,
+            case_is_closed=True,
+            before_resume=unavailable_audit,
+        )
+    assert read_workflow_record(saver.path, view["workflowId"])["status"] == "waiting_human"
+    assert service.get(view["reviewCaseId"]).version == 2
+
+    resumed = resume_workflow(
+        saver,
+        ports,
+        view["workflowId"],
+        outcome.value,
+        review_case_id=view["reviewCaseId"],
+        stored_outcome=outcome.value,
+        case_is_closed=True,
+        before_resume=lambda: hook_calls.append("stored"),
+    )
+    assert resumed["status"] == "completed"
+    assert hook_calls == ["failed", "stored"]
+    assert ports.ensure_calls == 1
+    assert ports.provider_calls == 1
+
+
 def test_lg11_unauthorized_resume_is_rejected(tmp_path):
     service = FollowUpReviewCaseService(_repository(tmp_path))
     ports = ScriptedPorts(_post_evaluation())
@@ -611,6 +665,9 @@ def test_internal_workflow_api_auth_read_and_resume(tmp_path):
     app.state.followup_review_repository = repository
     app.state.agent_workflow_ports = ports
     app.state.agent_workflow_saver = saver
+    audit = SQLiteSecurityAuditRepository(tmp_path / "security-audit.sqlite3")
+    audit.initialize()
+    app.state.security_audit_repository = audit
     app.dependency_overrides[get_settings] = lambda: _settings(ai_review_db_path=str(tmp_path / "review.sqlite3"))
     client = TestClient(app)
     denied = client.post("/internal/workflows", json={"caseId": MATCHED_CASE, "workflowType": POST_CONSULTATION})
