@@ -18,7 +18,7 @@ The review database was at schema version 2 when this decision was proposed. Mig
 
 ## Decision
 
-`HUMAN_ATTRIBUTION_V1` is the accepted increment. `HUMAN_SECURITY_AUDIT_V1` stays deferred. The contract is [HUMAN_ATTRIBUTION_V1](../contracts/human-attribution-v1.md).
+`HUMAN_ATTRIBUTION_V1` is the accepted increment. Human security audit was deferred by this decision and was later added as a separate scope under [SECURITY_AUDIT_V1](../contracts/security-audit-v1.md). The attribution contract is [HUMAN_ATTRIBUTION_V1](../contracts/human-attribution-v1.md).
 
 The review database gains `follow_up_human_attributions` through a new migration `003`. `user_version` becomes 3. Migrations `001` and `002` stay byte-for-byte unchanged. Existing operational tables are not altered. Rows already stored are not backfilled.
 
@@ -45,4 +45,4 @@ Local review databases at version 2 will apply `003` on the next approved startu
 
 The close and coordination operations gain an optional snapshot. Omitting it preserves today's unattributed write. The Human Review UI is the caller that must pass the server snapshot. A later product caller that forgets the snapshot creates a new unattributed operation. The page reports that gap as attribution not recorded.
 
-Migration `003`, the optional snapshot, and the Human Review detail are implemented. Manual validation passed. The internal close still omits the snapshot. Security audit remains a separate later decision.
+Migration `003`, the optional snapshot, and the Human Review detail are implemented. Manual validation passed. The internal close still omits the snapshot. Security audit remains separate from attribution; `SECURITY_AUDIT_V1` subsequently covered security decisions for the Human Review UI close without changing migration `003`.

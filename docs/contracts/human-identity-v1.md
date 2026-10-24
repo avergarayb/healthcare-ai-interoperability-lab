@@ -34,9 +34,9 @@ Authentication, authorization, attribution and security audit stay distinct:
 - Authentication is a live application session.
 - Authorization, meaning what a principal may do, is deferred. V1 does not add roles, assignment or per-case grants.
 - Attribution, meaning which principal initiated a close or a coordination request, is deferred. V1 does not add a principal to review events or coordination rows.
-- Security audit, meaning a durable record of security-relevant activity, is deferred. V1 does not add an audit table.
+- Security audit, meaning a durable record of security-relevant activity, is separate. This identity contract does not add an audit table. [SECURITY_AUDIT_V1](security-audit-v1.md) later added development-login decisions and security decisions for a new Human Review close.
 
-This version does not store attribution. Laboratory attribution for specific human operations was later accepted by [HUMAN_ATTRIBUTION_V1](human-attribution-v1.md) and [ADR-094](../adr/ADR-094-human-attribution.md). A development session is still not verified clinical identity, a valid session is still not clinician authorization, and that laboratory attribution is not a security audit. Security audit remains deferred.
+This version does not store attribution. Laboratory attribution for specific human operations was later accepted by [HUMAN_ATTRIBUTION_V1](human-attribution-v1.md) and [ADR-094](../adr/ADR-094-human-attribution.md). A development session is still not verified clinical identity, a valid session is still not clinician authorization, and that laboratory attribution is not a security audit. The separate security audit does not change those limits.
 
 Review Case history remains the operational `created` and `closed` events.
 
@@ -260,4 +260,4 @@ Slice 4 is atomic. Partial route coverage is a bypass. Slices 2 and 3 do not add
 
 ## Non-goals
 
-No local user accounts, password hashes, self-registration, OIDC, SMART login, RBAC, multi-tenancy, reviewer assignment, attribution, security-audit storage, MCP, or a generic authentication framework. No changes to Gemini, retrieval, FHIR clients or protocol evaluation. No production IAM claim.
+No local user accounts, password hashes, self-registration, OIDC, SMART login, RBAC, multi-tenancy, reviewer assignment, attribution, security-audit storage owned by this identity contract, MCP, or a generic authentication framework. No changes to Gemini, retrieval, FHIR clients or protocol evaluation. No production IAM claim. The separate audit scope is [SECURITY_AUDIT_V1](security-audit-v1.md).

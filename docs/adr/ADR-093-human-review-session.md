@@ -35,9 +35,9 @@ The development authenticator is enabled only when the explicit flag is on, `AI_
 
 V1 is authentication and session lifetime. A valid session is not clinician authorization, not attribution and not a security audit. Review Case events stay `created` and `closed`. Coordination requests stay unattributed.
 
-Each HMAC message covers the session id, so a form issued to one session fails under another. Manual validation and deterministic regression passed for this development session. Production identity, attribution and security audit remain deferred.
+Each HMAC message covers the session id, so a form issued to one session fails under another. Manual validation and deterministic regression passed for this development session. At the time of this decision, production identity, attribution and security audit remained deferred.
 
-Later, [HUMAN_ATTRIBUTION_V1](../contracts/human-attribution-v1.md) and [ADR-094](ADR-094-human-attribution.md) accepted laboratory attribution for specific human operations. HUMAN_IDENTITY_V1 did not implement that attribution. A development session is still not verified clinical identity, a valid session is still not clinician authorization, and laboratory attribution is not a security audit. Security audit remains deferred.
+Later, [HUMAN_ATTRIBUTION_V1](../contracts/human-attribution-v1.md) and [ADR-094](ADR-094-human-attribution.md) accepted laboratory attribution for specific human operations. HUMAN_IDENTITY_V1 did not implement that attribution. [SECURITY_AUDIT_V1](../contracts/security-audit-v1.md) subsequently added bounded development-login and Human Review close security events. A development session is still not verified clinical identity, a valid session is still not clinician authorization, and laboratory attribution is not itself a security audit.
 
 ## Consequences
 

@@ -241,7 +241,7 @@ Slice 4 is the product boundary. A repository that can store a snapshot is not, 
 
 ## Non-goals
 
-No security-audit table, login or logout record, HMAC failure record, AI assistance record, or model text. No RBAC, assignment, OIDC, SMART login, IAM, SSO, multi-tenancy, MCP, Kafka, or another service. No FHIR write from this service. No hash chain and no claim that the SQLite file is tamper-proof. No retrospective attribution. No production identity claim, no verified clinical identity, and no HIPAA or GDPR claim.
+The attribution table is not a security-audit table and does not store login, logout, HMAC failure, AI assistance, or model text. The separate [SECURITY_AUDIT_V1](security-audit-v1.md) later added bounded login and Human Review close security events without changing this attribution schema. No RBAC, assignment, OIDC, SMART login, IAM, SSO, multi-tenancy, MCP, Kafka, or another service. No FHIR write from this service. No hash chain and no claim that either SQLite file is tamper-proof. No retrospective attribution. No production identity claim, no verified clinical identity, and no HIPAA or GDPR claim.
 
 ## Acceptance matrix
 

@@ -28,7 +28,15 @@ from app.human_attribution import (
     DevelopmentPrincipalSnapshot,
     StoredDevelopmentAttribution,
 )
-from app.human_development_auth import require_human_session
+from app.human_development_auth import SESSION_COOKIE, require_human_session
+from app.security_audit import (
+    SecurityAuditRejected,
+    SecurityAuditStoreInitializationError,
+    SecurityAuditUnavailable,
+    audit_correlation_id,
+    human_review_decision_event,
+)
+from app.security_audit_sqlite import resolve_security_audit_repository
 
 from app.clinical_review_context import (
     ClinicalContextClosed,
@@ -444,10 +452,23 @@ def close_review_case(
 ) -> Response:
     started = time.perf_counter()
     status = 400
+    correlation_id = audit_correlation_id(request.headers.get("X-Correlation-ID"))
     try:
+        had_session_token = bool(request.cookies.get(SESSION_COOKIE))
         session = require_human_session(request, settings)
         if isinstance(session, Response):
             status = session.status_code
+            if status == 303:
+                session = _human_review_denied_response(
+                    request,
+                    settings,
+                    reason_code=(
+                        "human_session_invalid" if had_session_token else "human_session_missing"
+                    ),
+                    correlation_id=correlation_id,
+                    response=session,
+                )
+                status = session.status_code
             return session
         try:
             review_case_id = validate_review_case_id(review_case_id)
@@ -455,7 +476,19 @@ def close_review_case(
             status = 422
             return _html(_page("Review case", _error(MSG_INVALID_LINK) + _queue_home()), status)
         if not _same_origin(request):
-            return _html(_page("Review case", _error(MSG_ORIGIN_INVALID) + _queue_home()), status)
+            response = _human_review_denied_response(
+                request,
+                settings,
+                reason_code="same_origin_rejected",
+                correlation_id=correlation_id,
+                response=_html(
+                    _page("Review case", _error(MSG_ORIGIN_INVALID) + _queue_home()), status
+                ),
+                actor_id=session.principal_id,
+                review_case_id=review_case_id,
+            )
+            status = response.status_code
+            return response
         fields = _form_fields(raw_body, content_type)
         if fields is None:
             return _html(_page("Review case", _error(MSG_CLOSE_INVALID) + _queue_home()), status)
@@ -475,7 +508,19 @@ def close_review_case(
             token=token,
             session_id=session.session_id,
         ):
-            return _html(_page("Review case", _error(MSG_FORM_INVALID) + _queue_home()), status)
+            response = _human_review_denied_response(
+                request,
+                settings,
+                reason_code="form_signature_rejected",
+                correlation_id=correlation_id,
+                response=_html(
+                    _page("Review case", _error(MSG_FORM_INVALID) + _queue_home()), status
+                ),
+                actor_id=session.principal_id,
+                review_case_id=review_case_id,
+            )
+            status = response.status_code
+            return response
         repository = _repository(request)
         if repository is None:
             status = 503
@@ -485,6 +530,31 @@ def close_review_case(
         except ValueError:
             status = 503
             return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
+
+        def audit_allowed_close() -> None:
+            audit_repository = _security_audit_repository(request, settings)
+            if audit_repository is None:
+                raise HumanReviewAuditUnavailable
+            try:
+                audit_repository.append(
+                    human_review_decision_event(
+                        outcome="allowed",
+                        reason_code="access_granted",
+                        correlation_id=correlation_id,
+                        actor_id=attribution.principal_id,
+                        review_case_id=review_case_id,
+                        human_decision=outcome.value,
+                        case_version=version,
+                        clock=getattr(request.app.state, "security_audit_clock", None),
+                    )
+                )
+            except (
+                SecurityAuditUnavailable,
+                SecurityAuditStoreInitializationError,
+                SecurityAuditRejected,
+            ) as exc:
+                raise HumanReviewAuditUnavailable from exc
+
         service = FollowUpReviewCaseService(repository)
         try:
             service.close(
@@ -492,7 +562,11 @@ def close_review_case(
                 expected_version=version,
                 outcome=outcome,
                 attribution=attribution,
+                before_close=audit_allowed_close,
             )
+        except HumanReviewAuditUnavailable:
+            status = 503
+            return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), status)
         except ReviewCaseNotFound:
             status = 404
             return _html(_page("Review case", _error(MSG_NOT_FOUND) + _queue_home()), status)
@@ -517,6 +591,51 @@ def close_review_case(
         return _redirect(review_case_id)
     finally:
         _log(request, "/review-cases/{reviewCaseId}/close", status, started, review_case_id)
+
+
+class HumanReviewAuditUnavailable(RuntimeError):
+    """The Human Review security decision could not be stored."""
+
+
+def _human_review_denied_response(
+    request: Request,
+    settings: Settings,
+    *,
+    reason_code: str,
+    correlation_id: str,
+    response: Response,
+    actor_id: str | None = None,
+    review_case_id: str | None = None,
+) -> Response:
+    repository = _security_audit_repository(request, settings)
+    if repository is None:
+        return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), 503)
+    try:
+        repository.append(
+            human_review_decision_event(
+                outcome="denied",
+                reason_code=reason_code,
+                correlation_id=correlation_id,
+                actor_id=actor_id,
+                review_case_id=review_case_id,
+                clock=getattr(request.app.state, "security_audit_clock", None),
+            )
+        )
+    except (
+        SecurityAuditUnavailable,
+        SecurityAuditStoreInitializationError,
+        SecurityAuditRejected,
+    ):
+        return _html(_page("Review case", _error(MSG_REVIEW_UNAVAILABLE) + _queue_home()), 503)
+    return response
+
+
+def _security_audit_repository(request: Request, settings: Settings):
+    return resolve_security_audit_repository(
+        settings,
+        injected=getattr(request.app.state, "security_audit_repository", None),
+        session_repository=getattr(request.app.state, "human_session_repository", None),
+    )
 
 
 def submit_ai_assistance(

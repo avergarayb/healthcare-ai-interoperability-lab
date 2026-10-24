@@ -333,6 +333,7 @@ class SQLiteFollowUpReviewCaseRepository:
         expected_version: int,
         outcome: ReviewOutcome,
         attribution: DevelopmentPrincipalSnapshot | None = None,
+        before_close: Callable[[], None] | None = None,
     ) -> FollowUpReviewCase:
         validate_review_case_id(review_case_id)
         if expected_version < 1:
@@ -367,6 +368,12 @@ class SQLiteFollowUpReviewCaseRepository:
                 if current.version != expected_version:
                     connection.rollback()
                     raise ReviewCaseConflict
+                if before_close is not None:
+                    try:
+                        before_close()
+                    except BaseException:
+                        connection.rollback()
+                        raise
                 next_version = current.version + 1
                 changed = connection.execute(
                     """
