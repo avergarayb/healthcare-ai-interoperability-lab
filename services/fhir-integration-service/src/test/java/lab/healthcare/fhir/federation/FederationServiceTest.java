@@ -4,6 +4,9 @@ import lab.healthcare.fhir.clinicalread.ClinicalReadException;
 import lab.healthcare.fhir.clinicalread.ClinicalReadLimits;
 import lab.healthcare.fhir.exchange.ExchangeStore;
 import lab.healthcare.fhir.exchange.OrderCorrelation;
+import lab.healthcare.fhir.federation.audit.FederationSecurityAudit;
+import lab.healthcare.fhir.federation.audit.FederationSecurityAuditEvent;
+import lab.healthcare.fhir.federation.audit.FederationSecurityAuditUnavailable;
 import lab.healthcare.fhir.interop.InteropSourcesProperties;
 import lab.healthcare.fhir.interop.SourceRegistry;
 
@@ -13,6 +16,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -95,7 +101,13 @@ class FederationServiceTest {
         Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
         FederationProperties properties = properties(20);
         properties.getGrants().put("mini-his", List.of("mini-his"));
-        FederationService service = new FederationService(registry(), new LinkStore(), List.of(his), properties, json);
+        FederationService service = new FederationService(
+                registry(),
+                new LinkStore(),
+                List.of(his),
+                properties,
+                json,
+                new FederationSecurityAudit(event -> {}));
 
         assertThatThrownBy(() -> service.query("mini-his", request(List.of("mini-his", "mini-lis"), List.of("Patient"))))
                 .isInstanceOf(FederationException.class)
@@ -248,8 +260,225 @@ class FederationServiceTest {
                 .isEqualTo("identity_system_mismatch");
     }
 
+    @Test
+    void authorizedAccessIsAuditedOnceAndOperationalFailureIsNotADenial() {
+        List<FederationSecurityAuditEvent> events = new ArrayList<>();
+        Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
+        Fake lis = patientSource("mini-lis", "https://lab.local/mini-lis", "MLS-PAT-001");
+        FederationService service = auditedService(new LinkStore(), List.of(his, lis), 0, events::add);
+
+        JsonNode body = service.query(
+                "mini-his", request(List.of("mini-his", "mini-lis"), List.of("Patient")));
+
+        assertThat(body.path("status").asText()).isEqualTo("failed");
+        assertThat(outcome(body, "mini-his")).isEqualTo("unavailable");
+        assertThat(outcome(body, "mini-lis")).isEqualTo("unavailable");
+        assertThat(events).singleElement().satisfies(event -> {
+            assertThat(event.outcome()).isEqualTo("allowed");
+            assertThat(event.reasonCode()).isEqualTo("access_granted");
+            assertThat(event.actorId()).isEqualTo("mini-his");
+            assertThat(event.organizationId()).isEqualTo("org-mini-his");
+            assertThat(event.correlationId()).isEqualTo("FED-0123456789ABCDEF");
+            assertThat(event.metadata()).isEqualTo(Map.of(
+                    "route", "/api/clinical-federation/v1/context"));
+        });
+        assertThat(his.resolveCalls).isZero();
+        assertThat(lis.resolveCalls).isZero();
+    }
+
+    @Test
+    void acceptedLegacyCorrelationIsPreservedOnlyInTheResponse() {
+        List<FederationSecurityAuditEvent> events = new ArrayList<>();
+        Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
+        FederationService service = auditedService(new LinkStore(), List.of(his), 0, events::add);
+        ObjectNode request = request(List.of("mini-his"), List.of("Patient"));
+        request.put("correlationId", "FED-UNIT-0001");
+
+        JsonNode body = service.query("mini-his", request);
+
+        assertThat(body.path("correlationId").asText()).isEqualTo("FED-UNIT-0001");
+        assertThat(events).singleElement().satisfies(event -> assertThat(event.correlationId())
+                .matches("FED-[A-F0-9]{16}")
+                .isNotEqualTo("FED-UNIT-0001"));
+        assertThat(his.resolveCalls).isZero();
+    }
+
+    @Test
+    void retryProducesOneIndependentDecisionPerRequest() {
+        List<FederationSecurityAuditEvent> events = new ArrayList<>();
+        Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
+        FederationService service = auditedService(new LinkStore(), List.of(his), 0, events::add);
+        ObjectNode request = request(List.of("mini-his"), List.of("Patient"));
+
+        service.query("mini-his", request);
+        service.query("mini-his", request);
+
+        assertThat(events).hasSize(2);
+        assertThat(events).extracting(FederationSecurityAuditEvent::eventId).doesNotHaveDuplicates();
+        assertThat(events).extracting(FederationSecurityAuditEvent::outcome)
+                .containsExactly("allowed", "allowed");
+        assertThat(events).extracting(FederationSecurityAuditEvent::correlationId)
+                .containsExactly("FED-0123456789ABCDEF", "FED-0123456789ABCDEF");
+        assertThat(his.resolveCalls).isZero();
+    }
+
+    @Test
+    void authorizationDenialsUseVerifiedCallerIdentityAndSpecificReasons() {
+        List<FederationSecurityAuditEvent> events = new ArrayList<>();
+        Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
+        FederationProperties properties = properties(20);
+        properties.getGrants().put("mini-his", List.of("mini-his"));
+        FederationService service = new FederationService(
+                registry(),
+                new LinkStore(),
+                List.of(his),
+                properties,
+                json,
+                audit(events::add));
+
+        ObjectNode organization = request(List.of("mini-his"), List.of("Patient"));
+        organization.put("requestingOrganizationId", "org-mini-lis");
+        assertThatThrownBy(() -> service.query("mini-his", organization))
+                .isInstanceOf(FederationException.class)
+                .extracting("message")
+                .isEqualTo("organization_mismatch");
+
+        ObjectNode callerSystem = request(List.of("mini-his"), List.of("Patient"));
+        callerSystem.withObject("patient").put("systemKey", "mini-lis");
+        assertThatThrownBy(() -> service.query("mini-his", callerSystem))
+                .isInstanceOf(FederationException.class)
+                .extracting("message")
+                .isEqualTo("identity_system_mismatch");
+
+        assertThatThrownBy(() -> service.query(
+                        "mini-his", request(List.of("mini-his", "mini-lis"), List.of("Patient"))))
+                .isInstanceOf(FederationException.class)
+                .extracting("message")
+                .isEqualTo("source_not_authorized");
+
+        assertThat(events).extracting(FederationSecurityAuditEvent::reasonCode)
+                .containsExactly(
+                        "organization_not_authorized",
+                        "caller_system_not_authorized",
+                        "source_not_granted");
+        assertThat(events).allSatisfy(event -> {
+            assertThat(event.outcome()).isEqualTo("denied");
+            assertThat(event.actorId()).isEqualTo("mini-his");
+            assertThat(event.organizationId()).isEqualTo("org-mini-his");
+        });
+        assertThat(his.resolveCalls).isZero();
+    }
+
+    @Test
+    void missingServerAuthenticatedCallerIsAuditedAsAnonymous() {
+        List<FederationSecurityAuditEvent> events = new ArrayList<>();
+        FederationService service = auditedService(new LinkStore(), List.of(), 20, events::add);
+
+        assertThatThrownBy(() -> service.query(null, request(List.of("mini-his"), List.of("Patient"))))
+                .isInstanceOf(FederationException.class)
+                .extracting("message")
+                .isEqualTo("unauthenticated");
+
+        assertThat(events).singleElement().satisfies(event -> {
+            assertThat(event.outcome()).isEqualTo("denied");
+            assertThat(event.reasonCode()).isEqualTo("participant_not_authenticated");
+            assertThat(event.actorType()).isEqualTo("anonymous");
+            assertThat(event.organizationId()).isNull();
+        });
+    }
+
+    @Test
+    void authenticatedButUnregisteredParticipantHasNoVerifiedOrganization() {
+        List<FederationSecurityAuditEvent> events = new ArrayList<>();
+        FederationService service = auditedService(new LinkStore(), List.of(), 20, events::add);
+
+        assertThatThrownBy(() -> service.query(
+                        "unknown-participant", request(List.of("mini-his"), List.of("Patient"))))
+                .isInstanceOf(FederationException.class)
+                .extracting("message")
+                .isEqualTo("unauthenticated");
+
+        assertThat(events).singleElement().satisfies(event -> {
+            assertThat(event.outcome()).isEqualTo("denied");
+            assertThat(event.reasonCode()).isEqualTo("participant_not_registered");
+            assertThat(event.actorId()).isEqualTo("unknown-participant");
+            assertThat(event.organizationId()).isNull();
+        });
+    }
+
+    @Test
+    void controllerPreservesAuthorizationAndAuditUnavailableResponses() {
+        FederationController controller = new FederationController(null);
+
+        var forbidden = controller.failed(FederationException.forbidden("source_not_authorized"));
+        var unavailable = controller.failed(FederationException.unavailable("audit_unavailable"));
+
+        assertThat(forbidden.getStatusCode().value()).isEqualTo(403);
+        assertThat(forbidden.getBody()).isEqualTo(Map.of("error", "source_not_authorized"));
+        assertThat(unavailable.getStatusCode().value()).isEqualTo(503);
+        assertThat(unavailable.getBody()).isEqualTo(Map.of("error", "audit_unavailable"));
+    }
+
+    @Test
+    void invalidSourceSyntaxIsValidationFailureAndNotAnAccessDenial() {
+        List<FederationSecurityAuditEvent> events = new ArrayList<>();
+        Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
+        FederationService service = auditedService(new LinkStore(), List.of(his), 20, events::add);
+
+        assertThatThrownBy(() -> service.query(
+                        "mini-his", request(List.of("outside-grant", "../../patient"), List.of("Patient"))))
+                .isInstanceOf(FederationException.class)
+                .extracting("message")
+                .isEqualTo("invalid_request");
+
+        assertThat(events).isEmpty();
+        assertThat(his.resolveCalls).isZero();
+    }
+
+    @Test
+    void auditFailureIs503AndPreventsEveryConnectorCall() {
+        Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
+        FederationService service = auditedService(
+                new LinkStore(),
+                List.of(his),
+                20,
+                event -> {
+                    throw new FederationSecurityAuditUnavailable();
+                });
+
+        assertThatThrownBy(() -> service.query(
+                        "mini-his", request(List.of("mini-his"), List.of("Patient"))))
+                .isInstanceOfSatisfying(FederationException.class, ex -> {
+                    assertThat(ex.code()).isEqualTo("audit_unavailable");
+                    assertThat(ex.httpStatus()).isEqualTo(503);
+                });
+        assertThat(his.resolveCalls).isZero();
+        assertThat(his.collectCalls).isZero();
+    }
+
     private FederationService service(LinkStore store, List<ClinicalConnector> connectors, int budgetSeconds) {
-        return new FederationService(registry(), store, connectors, properties(budgetSeconds), json);
+        return auditedService(store, connectors, budgetSeconds, event -> {});
+    }
+
+    private FederationService auditedService(
+            LinkStore store,
+            List<ClinicalConnector> connectors,
+            int budgetSeconds,
+            lab.healthcare.fhir.federation.audit.FederationSecurityAuditRecorder recorder) {
+        return new FederationService(
+                registry(),
+                store,
+                connectors,
+                properties(budgetSeconds),
+                json,
+                audit(recorder));
+    }
+
+    private FederationSecurityAudit audit(
+            lab.healthcare.fhir.federation.audit.FederationSecurityAuditRecorder recorder) {
+        return new FederationSecurityAudit(
+                recorder,
+                Clock.fixed(Instant.parse("2026-10-23T12:00:00Z"), ZoneOffset.UTC));
     }
 
     private FederationProperties properties(int budgetSeconds) {
@@ -282,7 +511,7 @@ class FederationServiceTest {
     private ObjectNode request(List<String> sources, List<String> types) {
         ObjectNode body = json.createObjectNode();
         body.put("requestingOrganizationId", "org-mini-his");
-        body.put("correlationId", "FED-UNIT-0001");
+        body.put("correlationId", "FED-0123456789ABCDEF");
         ObjectNode patient = body.putObject("patient");
         patient.put("systemKey", "mini-his");
         patient.put("identifierSystem", "https://lab.local/mini-his/patient");

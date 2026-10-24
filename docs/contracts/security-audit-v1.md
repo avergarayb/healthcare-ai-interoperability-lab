@@ -1,6 +1,6 @@
 # Security audit v1
 
-Operational audit contract for the AI Service. This is not a clinical record and not a tamper-proof log. SQLite stores the rows for one process. An operator who can open the file can change it outside the application. The application API only appends and reads.
+Operational security-audit semantics shared by the two product units. This is not a clinical record, enterprise IAM, or a tamper-proof log. Each service owns its own store; Java never writes the AI Service database. An operator who can open either SQLite file can change it outside the application.
 
 ## Events
 
@@ -12,6 +12,7 @@ Operational audit contract for the AI Service. This is not a clinical record and
 | `workflow_start` | `start_workflow` | `POST /internal/workflows` |
 | `workflow_resume` | `resume_workflow` | `POST /internal/workflows/{workflowId}/resume` |
 | `human_review_decision` | `close_review_case` | `POST /review-cases/{reviewCaseId}/close` |
+| `clinical_federation_access` | `read_federated_context` | Java `POST /api/clinical-federation/v1/context` |
 
 For development login, the actor is the configured development principal identifier, or `anonymous` when the credential is rejected. The stored reference is `development-login`.
 
@@ -28,6 +29,12 @@ Metadata is a strict allowlist containing `route` and, where applicable, a recog
 Workflow reason codes distinguish credential failures (`service_token_missing`, `service_token_invalid`), a disabled workflow capability, an unsupported workflow type, and a Human Review decision mismatch. Missing, malformed, or non-suspended workflows remain request or execution-state errors; they are not recorded as authorization denials. `access_granted` means that the security and applicable resume preconditions permitted execution to begin. It does not claim that the workflow later completed successfully.
 
 Human Review close reason codes distinguish a missing session, an invalid/revoked/expired session, a rejected same-origin check, and a rejected form signature. No role, assignment, per-case grant, organization, or production RBAC rule exists to audit. An unknown case, a closed case, an obsolete version, an invalid decision, malformed input, Review persistence failure, checkpoint failure, or workflow failure is not converted into an authorization denial. A repeated same-outcome close is not a new accepted decision and emits no second `human_review_decision` event.
+
+For Java Clinical Federation, a token match supplies the verified technical actor `federation_participant` and its source-registry key. `organization_id` is stored only from that registry, after the request organization matches it; body fields cannot establish the actor or organization. Authentication failures use `anonymous` and no organization. The resource reference is the constant `clinical-federation/context`, never a patient, order, FHIR, HIS, or LIS identifier.
+
+Java reason codes distinguish missing or invalid participant tokens, an unconfigured participant-token map, a caller that is not registered, an organization mismatch, a caller-system mismatch, and a source outside the caller grant. The existing HTTP error codes remain `organization_mismatch`, `identity_system_mismatch`, and `source_not_authorized`; audit reason codes describe the security decision without copying request values. Malformed fields and source identifiers are validation failures, while identity resolution, connector, timeout, correlation, and clinical-source failures are operational outcomes. They are not recorded as authorization denials.
+
+The Java event metadata allowlist contains only `route=/api/clinical-federation/v1/context`. Its actor, action, resource, outcome, reason, metadata, and contract combinations are validated before insert. It contains no token, body, source list, identifier system/value, resource type list, FHIR payload, patient data, laboratory value, or connector response.
 
 The three relevant results remain separate:
 
@@ -46,6 +53,12 @@ Audit SQLite, Review SQLite, and workflow checkpoint SQLite are separate stores.
 Lock order for a new Human Review close is the existing Review write lock followed by the short audit append. No current path holds the audit transaction and then waits for the Review database. The supported topology remains one AI Service process and one writer boundary; this is not a multi-process deadlock or distributed-atomicity guarantee.
 
 Clinical read failures, FHIR failures, provider failures, protocol results, and deterministic clinical decisions are execution outcomes, not security denials, and are not translated into audit reason codes.
+
+Clinical Federation appends one `allowed` decision after authentication, organization, caller-system, source-grant, and request validation succeed, and before any HIS/LIS connector call. `allowed` means that connector execution may begin; it does not mean that identity resolved, a source was available, the response was complete, or the query succeeded clinically. Connector and query outcomes do not append another access event. Authentication and authorization denials append exactly one denied event before returning. If the mandatory append fails, Java returns HTTP 503 `audit_unavailable` and does not invoke a connector. For an authentication rejection this replaces the normal empty 401 response with an empty 503 response because the denial could not be recorded. The internal error log retains the persistence exception for diagnosis but adds no token, request field, organization, source list, or clinical content.
+
+Java stores these rows in its own SQLite file configured by `federation.security-audit.store-path`, using verified WAL mode, a bounded per-connection busy timeout, one parameterized insert transaction, schema version 1, and no application update/delete API. The default is `${java.io.tmpdir}/healthcare-lab-federation/security-audit.sqlite`. Missing parent directories are created. Failure to initialize or validate that store prevents startup; a runtime append failure is handled fail-closed as described above. This is durable across an ordinary process restart on that host, but an operating-system temporary-file cleanup can remove it. The default supports one local laboratory instance; simultaneous instances must configure distinct paths. It is not permanent retention, replicated, encrypted by the application, immutable, or a production SIEM. A successful access-decision append can remain when a later connector or response operation fails, which is semantically correct because the event records permission to begin.
+
+The Java REST contract still accepts its existing bounded correlation syntax. Security audit and operational logs reuse only the canonical value emitted by the Python federation client, `FED-` plus 16 uppercase hexadecimal characters. Any other accepted REST value is returned for compatibility but replaced with a generated canonical value in audit and logs, so arbitrary client text is not trusted as audit data. Python currently creates that id for the federation POST itself. It can correlate the Python client call with the Java event, logs, and successful response, but it is not propagated from the surrounding workflow or an earlier AI Service audit event and therefore is not complete end-to-end workflow traceability.
 
 ## Scope boundary
 

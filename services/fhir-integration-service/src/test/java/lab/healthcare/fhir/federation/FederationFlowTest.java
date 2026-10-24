@@ -76,6 +76,12 @@ class FederationFlowTest {
         registry.add("federation.participants.mini-his.service-token", () -> HIS_FEDERATION_TOKEN);
         registry.add("federation.participants.mini-lis.service-token", () -> LIS_FEDERATION_TOKEN);
         registry.add("federation.participants.clinic-b.service-token", () -> CLINIC_TOKEN);
+        registry.add(
+                "federation.security-audit.store-path",
+                () -> Path.of(
+                                System.getProperty("java.io.tmpdir"),
+                                "federation-security-audit-" + System.nanoTime() + ".sqlite")
+                        .toString());
         registry.add("federation.grants.mini-his[0]", () -> "mini-his");
         registry.add("federation.grants.mini-his[1]", () -> "mini-lis");
         registry.add("federation.grants.mini-his[2]", () -> "clinic-b");

@@ -43,7 +43,15 @@ If every source fails, `status` is `failed`, `entries` is empty, and HTTP status
 
 ## Security
 
-The caller is the participant token, not the body. Grants are configuration. Checked-in grants allow Mini HIS to read Mini HIS and Mini LIS, and Mini LIS to read only itself. Logs record the correlation id, caller, source key, outcome, and error code. They do not record names, result values, units, or tokens.
+The caller is the participant token, not the body. Grants are configuration. Checked-in grants allow Mini HIS to read Mini HIS and Mini LIS, and Mini LIS to read only itself. Operational logs record a server-trusted correlation id, caller, source key, outcome, and error code. They do not record names, result values, units, or tokens.
+
+Security decisions use a separate `clinical_federation_access` event. Authentication is audited in the filter. Organization, caller-system, source-grant denials, and the single allowed decision are audited in `FederationService`, after validation and before connectors. The controller does not create a second audit event. Source errors and federation `partial`/`failed` results are execution outcomes, not access denials.
+
+The event is appended to the Java-owned SQLite security-audit file before the protected operation proceeds. A failed append returns 503 and no connector is called. The file is durable across a normal single-host process restart, but it is editable by its owner, unreplicated, and not a production SIEM or immutable audit ledger. It is separate from the exchange-correlation database, Mini HIS, Mini LIS, local HAPI, and the AI Service databases.
+
+The default file under `java.io.tmpdir` assumes one laboratory service instance and may be removed by operating-system cleanup. Concurrent service instances must use distinct configured paths; clients of one instance intentionally share that instance's audit ledger. Tests that write audit events use temporary per-test stores, and the federation flow configures its own path.
+
+The Python federation client creates a canonical `FED-` correlation for this HTTP call. Java preserves it in the decision event, operational logs, and response, and Python logs it after a successful response. It is hop-level traceability only: the value is not inherited from the outer LangGraph workflow, checkpoint, or Human Review request.
 
 Tokens are environment variables and are blank in `application.yml`.
 

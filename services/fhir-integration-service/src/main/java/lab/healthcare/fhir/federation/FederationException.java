@@ -28,4 +28,8 @@ public final class FederationException extends RuntimeException {
     public static FederationException forbidden(String code) {
         return new FederationException(code, 403);
     }
+
+    public static FederationException unavailable(String code) {
+        return new FederationException(code, 503);
+    }
 }

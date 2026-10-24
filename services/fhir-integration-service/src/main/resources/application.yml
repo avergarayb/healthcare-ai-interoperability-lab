@@ -163,6 +163,8 @@ federation:
   max-sources: 4
   max-entries: 100
   query-budget-seconds: 20
+  security-audit:
+    store-path: ${FEDERATION_SECURITY_AUDIT_STORE_PATH:${java.io.tmpdir}/healthcare-lab-federation/security-audit.sqlite}
   participants:
     mini-his:
       service-token: ${FEDERATION_MINI_HIS_TOKEN:}
