@@ -437,7 +437,13 @@ def render_review_case(request: Request, settings: Settings, review_case_id: str
             timeline_html=timeline_html,
         )
         response = _html(_page("Caso de revisión", body))
-        response.delete_cookie(_HANDOFF_COOKIE, path=_handoff_path(review_case_id))
+        response.delete_cookie(
+            _HANDOFF_COOKIE,
+            path=_handoff_path(review_case_id),
+            httponly=True,
+            samesite="strict",
+            secure=request.url.scheme == "https",
+        )
         return response
     finally:
         _log(request, "/review-cases/{reviewCaseId}", status, started, review_case_id)
@@ -722,6 +728,7 @@ def submit_ai_assistance(
             httponly=True,
             samesite="strict",
             path=_handoff_path(review_case_id),
+            secure=request.url.scheme == "https",
         )
         return response
     finally:

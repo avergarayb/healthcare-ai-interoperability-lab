@@ -12,7 +12,7 @@ A registered system is not proof that a connector is running.
 
 ## Authentication
 
-`FederationParticipantFilter` applies to `/api/clinical-federation/v1/*`. It requires `X-Service-Token`. The token map is `federation.participants.<system>.service-token`. Blank tokens are omitted. An empty map, a missing header, or a mismatch normally returns HTTP 401 and no body. Tokens must be distinct. The token value is not logged or audited. The filter records one minimized authentication denial. If that mandatory append fails, it returns HTTP 503 with no body instead of an unaudited 401.
+`FederationParticipantFilter` applies to `/api/clinical-federation/v1/*`. It requires exactly one `X-Service-Token`. The token map is `federation.participants.<system>.service-token`. Blank tokens are omitted. An empty map, a missing, empty or duplicate header, or a mismatch normally returns HTTP 401 and no body. A presented credential must match the configured value exactly; surrounding whitespace is not canonicalized. Tokens must be distinct. The token value is not logged or audited. The filter records one minimized authentication denial. If that mandatory append fails, it returns HTTP 503 with no body instead of an unaudited 401.
 
 The caller system is the map key of the matching token. The client cannot choose another caller by a body field.
 

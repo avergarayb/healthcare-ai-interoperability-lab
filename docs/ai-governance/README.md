@@ -9,9 +9,10 @@ The platform contains two independently deployable product units:
 
 ## Current documents
 
-1. [`product-governance-boundary.md`](product-governance-boundary.md) — current product, data-flow and model-authority boundary.
-2. [`regulatory-context.md`](regulatory-context.md) — applicability questions and technical evidence; legal conclusions require revalidation.
-3. [`../contracts/post-consultation-result-review-v1.md`](../contracts/post-consultation-result-review-v1.md) — authoritative internal Clinical Follow-up Review contract.
+1. [`service-security-hardening-v1.md`](service-security-hardening-v1.md) — TASK 005 service, session and federation control matrix, residual risks and MCP readiness gates.
+2. [`product-governance-boundary.md`](product-governance-boundary.md) — current product, data-flow and model-authority boundary.
+3. [`regulatory-context.md`](regulatory-context.md) — applicability questions and technical evidence; legal conclusions require revalidation.
+4. [`../contracts/post-consultation-result-review-v1.md`](../contracts/post-consultation-result-review-v1.md) — authoritative internal Clinical Follow-up Review contract.
 
 ## Historical and experimental evidence
 

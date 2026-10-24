@@ -49,7 +49,7 @@ The authenticator is development-only. It is active only when every guard below 
 | Explicit enablement | `HUMAN_REVIEW_DEVELOPMENT_AUTH_ENABLED` is exactly `true` |
 | Bind address | `AI_SERVICE_HOST` is `127.0.0.1` or `::1` |
 | Development secret | `HUMAN_REVIEW_DEVELOPMENT_AUTH_SECRET` is at least 32 characters |
-| Secret separation | That secret differs from `MODEL_BOUNDARY_SERVICE_TOKEN` and from `HUMAN_REVIEW_FORM_SIGNING_SECRET` |
+| Secret separation | That secret differs from `MODEL_BOUNDARY_SERVICE_TOKEN`, `HUMAN_REVIEW_FORM_SIGNING_SECRET` and `AI_FEDERATION_PARTICIPANT_TOKEN` |
 | Principal | `HUMAN_REVIEW_DEVELOPMENT_PRINCIPAL_ID` matches `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` |
 | Display name | `HUMAN_REVIEW_DEVELOPMENT_PRINCIPAL_DISPLAY_NAME` is 1 to 80 characters and has no control characters |
 | Session file | `HUMAN_SESSION_DB_PATH` is non-blank, is not `:memory:`, and differs from the review and knowledge database paths |

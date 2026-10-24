@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import math
 import os
 from dataclasses import dataclass, field
+from itertools import combinations
 
 
 @dataclass(frozen=True)
@@ -12,7 +15,7 @@ class Settings:
     model_boundary_base_url: str
     model_boundary_path: str
     model_boundary_timeout_seconds: float
-    model_boundary_service_token: str
+    model_boundary_service_token: str = field(repr=False)
     host: str
     port: int
     llm_experimental_enabled: bool = False
@@ -110,11 +113,29 @@ class Settings:
         federation_sources = tuple(part.strip() for part in source_raw.split(",") if part.strip())
         if context_mode == "federated" and not federation_sources:
             raise ValueError("AI_FEDERATION_SOURCES must name at least one source")
+        model_boundary_service_token = os.getenv("MODEL_BOUNDARY_SERVICE_TOKEN", "").strip()
+        human_review_form_signing_secret = os.getenv(
+            "HUMAN_REVIEW_FORM_SIGNING_SECRET", ""
+        ).strip()
+        human_review_development_auth_secret = os.getenv(
+            "HUMAN_REVIEW_DEVELOPMENT_AUTH_SECRET", ""
+        ).strip()
+        federation_participant_token = os.getenv(
+            "AI_FEDERATION_PARTICIPANT_TOKEN", ""
+        ).strip()
+        _require_distinct_security_secrets(
+            {
+                "MODEL_BOUNDARY_SERVICE_TOKEN": model_boundary_service_token,
+                "HUMAN_REVIEW_FORM_SIGNING_SECRET": human_review_form_signing_secret,
+                "HUMAN_REVIEW_DEVELOPMENT_AUTH_SECRET": human_review_development_auth_secret,
+                "AI_FEDERATION_PARTICIPANT_TOKEN": federation_participant_token,
+            }
+        )
         return cls(
             model_boundary_base_url=os.getenv("MODEL_BOUNDARY_BASE_URL", "http://localhost:8081").strip(),
             model_boundary_path=os.getenv("MODEL_BOUNDARY_PATH", "/api/model-boundary/v1").strip(),
             model_boundary_timeout_seconds=timeout,
-            model_boundary_service_token=os.getenv("MODEL_BOUNDARY_SERVICE_TOKEN", "").strip(),
+            model_boundary_service_token=model_boundary_service_token,
             host=os.getenv("AI_SERVICE_HOST", "0.0.0.0").strip() or "0.0.0.0",
             port=port,
             llm_experimental_enabled=enabled_raw == "true",
@@ -122,15 +143,13 @@ class Settings:
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip() or "gemini-flash-latest",
             followup_agent_enabled=followup_raw == "true",
             ai_review_db_path=review_db_path,
-            human_review_form_signing_secret=os.getenv("HUMAN_REVIEW_FORM_SIGNING_SECRET", "").strip(),
+            human_review_form_signing_secret=human_review_form_signing_secret,
             institutional_knowledge_db_path=knowledge_db_path,
             institutional_knowledge_embedding_model=embedding_model,
             institutional_knowledge_min_score=min_score,
             human_session_db_path=session_db_path,
             human_review_development_auth_enabled=development_auth_enabled,
-            human_review_development_auth_secret=os.getenv(
-                "HUMAN_REVIEW_DEVELOPMENT_AUTH_SECRET", ""
-            ).strip(),
+            human_review_development_auth_secret=human_review_development_auth_secret,
             human_review_development_principal_id=os.getenv(
                 "HUMAN_REVIEW_DEVELOPMENT_PRINCIPAL_ID", ""
             ).strip(),
@@ -138,7 +157,7 @@ class Settings:
                 "HUMAN_REVIEW_DEVELOPMENT_PRINCIPAL_DISPLAY_NAME", ""
             ).strip(),
             clinical_context_mode=context_mode,
-            federation_participant_token=os.getenv("AI_FEDERATION_PARTICIPANT_TOKEN", "").strip(),
+            federation_participant_token=federation_participant_token,
             federation_requesting_organization_id=os.getenv(
                 "AI_FEDERATION_REQUESTING_ORGANIZATION_ID", ""
             ).strip(),
@@ -150,3 +169,13 @@ class Settings:
             federation_timeout_seconds=federation_timeout,
             security_audit_db_path=os.getenv("SECURITY_AUDIT_DB_PATH", "").strip(),
         )
+
+
+def _require_distinct_security_secrets(values: dict[str, str]) -> None:
+    configured = [(name, value) for name, value in values.items() if value]
+    for (left_name, left), (right_name, right) in combinations(configured, 2):
+        if hmac.compare_digest(
+            hashlib.sha256(left.encode("utf-8")).digest(),
+            hashlib.sha256(right.encode("utf-8")).digest(),
+        ):
+            raise ValueError(f"{left_name} and {right_name} must use distinct values")

@@ -16,7 +16,7 @@ Python's operational follow-up factories call this API through `ClinicalReadClie
 
 ## Authentication
 
-`ClinicalReadServiceAuthFilter` applies to `/api/clinical-read/v1/*`. It requires the header `X-Service-Token`, the same shared secret as Model Boundary v1 (`ModelBoundaryServiceTokenSettings`). A missing configuration, a missing header, an empty header, or a mismatch returns HTTP 401 and writes no response body. The token value is not logged.
+`ClinicalReadServiceAuthFilter` applies to `/api/clinical-read/v1/*`. It requires exactly one `X-Service-Token`, the same shared secret as Model Boundary v1 (`ModelBoundaryServiceTokenSettings`). A missing configuration, a missing, empty or duplicate header, a value with added whitespace, or a mismatch returns HTTP 401 and writes no response body. The credential is compared exactly and its value is not logged.
 
 ## Source configuration
 

@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+
 from fastapi import Request
 
 from app.config import Settings
 
 
 def authenticate(request: Request, settings: Settings) -> bool:
-    presented = request.headers.get("X-Service-Token")
     configured = settings.model_boundary_service_token
-    if not configured:
+    presented_values = request.headers.getlist("X-Service-Token")
+    if not isinstance(configured, str) or not configured or configured.isspace():
         return False
-    if presented is None or presented == "":
+    if len(presented_values) != 1:
         return False
-    return presented == configured
+    presented = presented_values[0]
+    if not presented or presented.isspace():
+        return False
+    return hmac.compare_digest(
+        hashlib.sha256(configured.encode("utf-8")).digest(),
+        hashlib.sha256(presented.encode("utf-8")).digest(),
+    )

@@ -380,11 +380,11 @@ def _prepare_session(repository) -> None:
     app.state.human_session_repository = store
 
 
-def _login(client: TestClient) -> None:
+def _login(client: TestClient, origin=ORIGIN) -> None:
     response = client.post(
         "/review-login",
         content=urlencode({"developmentSecret": DEV_SECRET}),
-        headers={**ORIGIN, "content-type": "application/x-www-form-urlencoded"},
+        headers={**origin, "content-type": "application/x-www-form-urlencoded"},
         follow_redirects=False,
     )
     assert response.status_code == 303, response.text
@@ -399,7 +399,16 @@ def _session_id(client: TestClient) -> str:
     ).resolve(token).session_id
 
 
-def _client(repository, fhir=None, knowledge=None, provider=None, settings=None):
+def _client(
+    repository,
+    fhir=None,
+    knowledge=None,
+    provider=None,
+    settings=None,
+    *,
+    base_url="http://127.0.0.1",
+    origin=ORIGIN,
+):
     app.state.followup_review_repository = repository
     if fhir is not None:
         app.state.clinical_context_fhir_client = lambda: fhir
@@ -409,8 +418,8 @@ def _client(repository, fhir=None, knowledge=None, provider=None, settings=None)
         app.state.ai_assistance_provider = provider
     _prepare_session(repository)
     app.dependency_overrides[get_settings] = lambda: settings or _settings()
-    client = TestClient(app, base_url="http://127.0.0.1")
-    _login(client)
+    client = TestClient(app, base_url=base_url)
+    _login(client, origin)
     return client
 
 
@@ -432,14 +441,14 @@ def _close_fields(html: str) -> dict[str, str]:
     return fields
 
 
-def _post_assistance(client, case_id, html, **overrides):
+def _post_assistance(client, case_id, html, origin=ORIGIN, **overrides):
     fields = _assistance_fields(html)
     payload = {"assistanceExpiry": fields["assistanceExpiry"], "assistanceToken": fields["assistanceToken"]}
     payload.update(overrides)
     return client.post(
         f"/review-cases/{case_id}/ai-assistance",
         content=urlencode(payload),
-        headers={**ORIGIN, "content-type": "application/x-www-form-urlencoded"},
+        headers={**origin, "content-type": "application/x-www-form-urlencoded"},
     )
 
 
@@ -1116,6 +1125,46 @@ def test_refresh_after_generation_does_not_call_gemini_again(tmp_path):
     explicit = _post_assistance(client, case.id, refreshed.text)
     assert explicit.status_code == 200
     assert len(provider.calls) == 2
+
+
+def test_assistance_handoff_cookie_is_secure_on_https_and_scope_matched_on_delete(tmp_path):
+    repository = _repository(tmp_path)
+    case = _create(repository)
+    origin = {"origin": "https://127.0.0.1"}
+    client = _client(
+        repository,
+        ScriptedFhir(),
+        FakeKnowledge(chunks=(_chunk(),)),
+        FakeProvider(text=_valid_output(summary="SYNTHETIC-HTTPS-HANDOFF")),
+        base_url="https://127.0.0.1",
+        origin=origin,
+    )
+    page = client.get(f"/review-cases/{case.id}")
+
+    posted = client.post(
+        f"/review-cases/{case.id}/ai-assistance",
+        content=urlencode(_assistance_fields(page.text)),
+        headers={**origin, "content-type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+
+    set_cookie = posted.headers["set-cookie"].lower()
+    assert "ai_assistance_once=" in set_cookie
+    assert "secure" in set_cookie
+    assert "httponly" in set_cookie
+    assert "samesite=strict" in set_cookie
+    assert f"path=/review-cases/{case.id}".lower() in set_cookie
+
+    shown = client.get(posted.headers["location"])
+
+    deleted_cookie = shown.headers["set-cookie"].lower()
+    assert "ai_assistance_once=" in deleted_cookie
+    assert "max-age=0" in deleted_cookie
+    assert "secure" in deleted_cookie
+    assert "httponly" in deleted_cookie
+    assert "samesite=strict" in deleted_cookie
+    assert f"path=/review-cases/{case.id}".lower() in deleted_cookie
+    assert "SYNTHETIC-HTTPS-HANDOFF" in shown.text
 
 
 def test_assistance_ticket_does_not_cross_cases(tmp_path):

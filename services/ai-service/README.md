@@ -24,7 +24,7 @@ The separate durable operational workflow is defined by [`FOLLOW_UP_REVIEW_WORKF
 | `GET` | `/internal/follow-up-review-cases/{reviewCaseId}` | Operational state, immutable trigger provenance and transition history. |
 | `POST` | `/internal/follow-up-review-cases/{reviewCaseId}/close` | Idempotent terminal closure with an approved operational outcome. |
 
-All `/internal/*` endpoints require `X-Service-Token` and fail closed when `MODEL_BOUNDARY_SERVICE_TOKEN` is empty, absent or different. Sharing the development token does not merge their contracts. This token authenticates an internal service caller; it does not establish human reviewer identity.
+All `/internal/*` endpoints require exactly one `X-Service-Token` and fail closed when `MODEL_BOUNDARY_SERVICE_TOKEN` is empty, absent, duplicated or different. The exact value is compared with a constant-time primitive; added whitespace is not accepted. Sharing the development token does not merge their contracts. This token authenticates an internal service caller; it does not establish human reviewer identity.
 
 ## Environment
 
@@ -57,6 +57,8 @@ Copy `.env.example` to a local untracked `.env` or export variables in the proce
 | `RUN_LIVE_GEMINI_TESTS` | `false` | Test-only opt-in for live Gemini generation tests. |
 | `RUN_LIVE_EMBEDDING_TESTS` | `false` | Test-only opt-in for live embedding tests. Independent of `RUN_LIVE_GEMINI_TESTS`. |
 | `RUN_LIVE_AI_ASSISTANCE_TESTS` | `false` | Test-only opt-in for one live structured assistance call. Independent of the other live flags. |
+
+When configured, `MODEL_BOUNDARY_SERVICE_TOKEN`, `HUMAN_REVIEW_FORM_SIGNING_SECRET`, `HUMAN_REVIEW_DEVELOPMENT_AUTH_SECRET` and `AI_FEDERATION_PARTICIPANT_TOKEN` must be pairwise distinct. Startup rejects reuse by variable name without including credential values in the error. All credential fields, including `GEMINI_API_KEY`, are excluded from the `Settings` representation.
 
 `Settings` reads `MODEL_BOUNDARY_BASE_URL` and `MODEL_BOUNDARY_SERVICE_TOKEN`. `ClinicalReadClient.from_settings` sends `GET {MODEL_BOUNDARY_BASE_URL}/api/clinical-read/v1/...` with that token. Java then selects the backend with `clinical-read.source`. The checked-in default is `local-hapi`, whose base URL is `http://localhost:8080/fhir`. The other implemented value is `mini-his`, whose base URL is `http://127.0.0.1:8095`.
 

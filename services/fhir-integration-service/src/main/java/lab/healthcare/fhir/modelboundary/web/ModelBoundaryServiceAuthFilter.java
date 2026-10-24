@@ -13,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Enumeration;
 
 /**
  * Rejects unauthenticated access to {@code GET /api/model-boundary/v1} before
@@ -40,14 +41,16 @@ public class ModelBoundaryServiceAuthFilter extends OncePerRequestFilter {
     protected void doFilterInternal(
             HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        String presented = request.getHeader(ModelBoundaryServiceTokenSettings.HEADER);
-        if (settings.matches(presented)) {
+        Enumeration<String> values = request.getHeaders(ModelBoundaryServiceTokenSettings.HEADER);
+        String presented = values != null && values.hasMoreElements() ? values.nextElement() : null;
+        boolean duplicate = values != null && values.hasMoreElements();
+        if (!duplicate && settings.matches(presented)) {
             filterChain.doFilter(request, response);
             return;
         }
         String reason = !settings.configured()
                 ? "unconfigured"
-                : presented == null ? "absent" : presented.isBlank() ? "empty" : "mismatch";
+                : duplicate ? "multiple" : presented == null ? "absent" : presented.isBlank() ? "empty" : "mismatch";
         log.info("Model boundary service authentication rejected reason={}", reason);
         response.setStatus(HttpStatus.UNAUTHORIZED.value());
     }

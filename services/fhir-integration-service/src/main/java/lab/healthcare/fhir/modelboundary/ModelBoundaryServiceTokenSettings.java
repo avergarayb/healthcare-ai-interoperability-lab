@@ -36,7 +36,7 @@ public class ModelBoundaryServiceTokenSettings {
             return false;
         }
         byte[] left = expected.getBytes(StandardCharsets.UTF_8);
-        byte[] right = presented.trim().getBytes(StandardCharsets.UTF_8);
+        byte[] right = presented.getBytes(StandardCharsets.UTF_8);
         return MessageDigest.isEqual(left, right);
     }
 }

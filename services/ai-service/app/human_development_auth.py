@@ -82,7 +82,12 @@ def development_authenticator(settings: Settings) -> DevelopmentAuthenticator | 
     secret = settings.human_review_development_auth_secret
     if not isinstance(secret, str) or len(secret) < 32:
         return None
-    if secret == settings.model_boundary_service_token or secret == settings.human_review_form_signing_secret:
+    independent_secrets = (
+        settings.model_boundary_service_token,
+        settings.human_review_form_signing_secret,
+        settings.federation_participant_token,
+    )
+    if any(candidate and _secret_matches(secret, candidate) for candidate in independent_secrets):
         return None
     principal_id = settings.human_review_development_principal_id
     display_name = settings.human_review_development_principal_display_name
