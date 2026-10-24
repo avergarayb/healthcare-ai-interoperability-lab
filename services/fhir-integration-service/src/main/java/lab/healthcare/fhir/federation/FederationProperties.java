@@ -14,6 +14,7 @@ public class FederationProperties {
     private int queryBudgetSeconds = 20;
     private Map<String, Participant> participants = new LinkedHashMap<>();
     private Map<String, List<String>> grants = new LinkedHashMap<>();
+    private SecurityAudit securityAudit = new SecurityAudit();
 
     public int getMaxSources() {
         return maxSources;
@@ -55,6 +56,14 @@ public class FederationProperties {
         this.grants = grants == null ? new LinkedHashMap<>() : grants;
     }
 
+    public SecurityAudit getSecurityAudit() {
+        return securityAudit;
+    }
+
+    public void setSecurityAudit(SecurityAudit securityAudit) {
+        this.securityAudit = securityAudit == null ? new SecurityAudit() : securityAudit;
+    }
+
     public static class Participant {
         private String serviceToken = "";
 
@@ -64,6 +73,18 @@ public class FederationProperties {
 
         public void setServiceToken(String serviceToken) {
             this.serviceToken = serviceToken == null ? "" : serviceToken;
+        }
+    }
+
+    public static class SecurityAudit {
+        private String storePath = "";
+
+        public String getStorePath() {
+            return storePath;
+        }
+
+        public void setStorePath(String storePath) {
+            this.storePath = storePath == null ? "" : storePath;
         }
     }
 }

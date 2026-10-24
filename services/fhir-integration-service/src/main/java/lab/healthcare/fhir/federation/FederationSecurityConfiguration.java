@@ -1,5 +1,8 @@
 package lab.healthcare.fhir.federation;
 
+import lab.healthcare.fhir.federation.audit.FederationSecurityAudit;
+import lab.healthcare.fhir.federation.audit.FederationSecurityAuditUnavailable;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,9 +29,10 @@ public class FederationSecurityConfiguration {
     static final String CALLER_ATTRIBUTE = "federation.caller";
 
     @Bean
-    FilterRegistrationBean<FederationParticipantFilter> federationParticipantFilter(FederationProperties properties) {
+    FilterRegistrationBean<FederationParticipantFilter> federationParticipantFilter(
+            FederationProperties properties, FederationSecurityAudit securityAudit) {
         FilterRegistrationBean<FederationParticipantFilter> registration = new FilterRegistrationBean<>();
-        registration.setFilter(new FederationParticipantFilter(tokens(properties)));
+        registration.setFilter(new FederationParticipantFilter(tokens(properties), securityAudit));
         registration.addUrlPatterns("/api/clinical-federation/v1/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
         return registration;
@@ -51,9 +55,11 @@ public class FederationSecurityConfiguration {
 
         private static final Logger log = LoggerFactory.getLogger(FederationParticipantFilter.class);
         private final Map<String, String> tokens;
+        private final FederationSecurityAudit securityAudit;
 
-        FederationParticipantFilter(Map<String, String> tokens) {
+        FederationParticipantFilter(Map<String, String> tokens, FederationSecurityAudit securityAudit) {
             this.tokens = tokens;
+            this.securityAudit = securityAudit;
         }
 
         @Override
@@ -73,7 +79,18 @@ public class FederationSecurityConfiguration {
                 filterChain.doFilter(request, response);
                 return;
             }
-            String reason = tokens.isEmpty() ? "unconfigured" : presented == null || presented.isBlank() ? "absent" : "mismatch";
+            String reason = tokens.isEmpty()
+                    ? "participant_authentication_unconfigured"
+                    : presented == null || presented.isBlank()
+                            ? "participant_token_missing"
+                            : "participant_token_invalid";
+            try {
+                securityAudit.authenticationDenied(reason);
+            } catch (FederationSecurityAuditUnavailable ex) {
+                log.error("federation_security_audit_unavailable decision=authentication_denied", ex);
+                response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
+                return;
+            }
             log.info("federation_authentication_rejected reason={}", reason);
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
         }

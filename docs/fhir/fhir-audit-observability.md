@@ -2,7 +2,7 @@
 
 This note adds **traceability** around the integration flow. Read it after [fhir-routing.md](fhir-routing.md). It does not replace mapping, routing, OAuth, or SMART.
 
-There is still no database, SIEM, OpenTelemetry collector, or audit UI.
+For the FHIR routing mechanism described in this document, there is still no database, SIEM, OpenTelemetry collector, or audit UI. Clinical Federation later added a separate Java-owned SQLite access-decision store under [Security audit v1](../contracts/security-audit-v1.md); it does not make `LoggingFhirAuditRecorder` durable and does not contain FHIR operation payloads. Its canonical federation id correlates the Python federation POST with Java, but it is not currently an end-to-end workflow correlation id.
 
 ## Why observability exists
 

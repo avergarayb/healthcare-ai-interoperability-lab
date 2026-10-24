@@ -32,9 +32,7 @@ public class FederationController {
             produces = MediaType.APPLICATION_JSON_VALUE)
     public JsonNode context(HttpServletRequest request, @RequestBody JsonNode body) {
         Object caller = request.getAttribute(FederationSecurityConfiguration.CALLER_ATTRIBUTE);
-        if (!(caller instanceof String system) || system.isBlank()) {
-            throw FederationException.forbidden("unauthenticated");
-        }
+        String system = caller instanceof String value ? value : null;
         return federation.query(system, body);
     }
 

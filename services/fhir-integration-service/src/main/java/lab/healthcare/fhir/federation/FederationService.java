@@ -2,6 +2,9 @@ package lab.healthcare.fhir.federation;
 
 import lab.healthcare.fhir.clinicalread.ClinicalReadException;
 import lab.healthcare.fhir.exchange.ExchangeStore;
+import lab.healthcare.fhir.federation.audit.FederationSecurityAudit;
+import lab.healthcare.fhir.federation.audit.FederationSecurityAuditEvent;
+import lab.healthcare.fhir.federation.audit.FederationSecurityAuditUnavailable;
 import lab.healthcare.fhir.interop.SourceRegistry;
 import lab.healthcare.fhir.interop.SourceRegistry.SourceDescriptor;
 
@@ -55,13 +58,15 @@ public class FederationService {
     private final Map<String, ClinicalConnector> connectors;
     private final FederationProperties properties;
     private final ObjectMapper json;
+    private final FederationSecurityAudit securityAudit;
 
     public FederationService(
             SourceRegistry registry,
             ExchangeStore store,
             List<ClinicalConnector> connectors,
             FederationProperties properties,
-            ObjectMapper json) {
+            ObjectMapper json,
+            FederationSecurityAudit securityAudit) {
         this.registry = registry;
         this.store = store;
         this.connectors = new LinkedHashMap<>();
@@ -70,22 +75,56 @@ public class FederationService {
         }
         this.properties = properties;
         this.json = json;
+        this.securityAudit = securityAudit;
     }
 
     public JsonNode query(String callerSystem, JsonNode request) {
         if (callerSystem == null || callerSystem.isBlank()) {
+            authenticationDenied("participant_not_authenticated");
             throw FederationException.forbidden("unauthenticated");
         }
         Requested requested = parse(request);
-        SourceDescriptor caller = registry.find(callerSystem).orElseThrow(() -> FederationException.forbidden("unauthenticated"));
+        SourceDescriptor caller = registry.find(callerSystem).orElse(null);
+        if (caller == null) {
+            authorizationDenied(
+                    callerSystem,
+                    null,
+                    "participant_not_registered",
+                    requested.correlationId());
+            throw FederationException.forbidden("unauthenticated");
+        }
         if (!caller.organizationId().equals(requested.organizationId())) {
+            authorizationDenied(
+                    caller.key(),
+                    caller.organizationId(),
+                    "organization_not_authorized",
+                    requested.correlationId());
             throw FederationException.forbidden("organization_mismatch");
         }
         if (!caller.key().equals(requested.patientSystemKey())) {
+            authorizationDenied(
+                    caller.key(),
+                    caller.organizationId(),
+                    "caller_system_not_authorized",
+                    requested.correlationId());
             throw FederationException.forbidden("identity_system_mismatch");
         }
-        List<String> sources = select(caller.key(), requested.sources());
-        String correlationId = requested.correlationId();
+        List<String> sources;
+        try {
+            sources = select(caller.key(), requested.sources());
+        } catch (FederationException ex) {
+            if ("source_not_authorized".equals(ex.code())) {
+                authorizationDenied(
+                        caller.key(),
+                        caller.organizationId(),
+                        "source_not_granted",
+                        requested.correlationId());
+            }
+            throw ex;
+        }
+        FederationSecurityAuditEvent allowed = allowed(
+                caller.key(), caller.organizationId(), requested.correlationId());
+        String auditCorrelationId = allowed.correlationId();
         long deadline = System.nanoTime() + Duration.ofSeconds(Math.max(properties.getQueryBudgetSeconds(), 0)).toNanos();
         ArrayNode sourceNodes = json.createArrayNode();
         ArrayNode entries = json.createArrayNode();
@@ -106,20 +145,54 @@ public class FederationService {
             sourceNodes.add(sourceNode(sourceKey, result.organizationId(), result.outcome(), result.count(), result.errorCode()));
             log.info(
                     "federation_source correlation={} source={} outcome={} error={}",
-                    correlationId, sourceKey, result.outcome(), result.errorCode() == null ? "" : result.errorCode());
+                    auditCorrelationId, sourceKey, result.outcome(), result.errorCode() == null ? "" : result.errorCode());
         }
         String status = statusOf(complete, sourceNodes.size(), truncated);
         ObjectNode body = json.createObjectNode();
         body.put("contractVersion", CONTRACT_VERSION);
-        body.put("correlationId", correlationId);
+        body.put("correlationId", requested.correlationId());
         body.put("requestingOrganizationId", requested.organizationId());
         body.put("callerSystem", caller.key());
         body.put("status", status);
         body.put("truncated", truncated || entries.size() >= properties.getMaxEntries());
         body.set("sources", sourceNodes);
         body.set("entries", entries);
-        log.info("federation_query correlation={} caller={} status={} sources={}", correlationId, caller.key(), status, sourceNodes.size());
+        log.info(
+                "federation_query correlation={} caller={} status={} sources={}",
+                auditCorrelationId,
+                caller.key(),
+                status,
+                sourceNodes.size());
         return body;
+    }
+
+    private void authenticationDenied(String reasonCode) {
+        try {
+            securityAudit.authenticationDenied(reasonCode);
+        } catch (FederationSecurityAuditUnavailable ex) {
+            log.error("federation_security_audit_unavailable decision=authentication_denied", ex);
+            throw FederationException.unavailable("audit_unavailable");
+        }
+    }
+
+    private void authorizationDenied(
+            String callerSystem, String organizationId, String reasonCode, String correlationId) {
+        try {
+            securityAudit.authorizationDenied(callerSystem, organizationId, reasonCode, correlationId);
+        } catch (FederationSecurityAuditUnavailable ex) {
+            log.error("federation_security_audit_unavailable decision=authorization_denied", ex);
+            throw FederationException.unavailable("audit_unavailable");
+        }
+    }
+
+    private FederationSecurityAuditEvent allowed(
+            String callerSystem, String organizationId, String correlationId) {
+        try {
+            return securityAudit.allowed(callerSystem, organizationId, correlationId);
+        } catch (FederationSecurityAuditUnavailable ex) {
+            log.error("federation_security_audit_unavailable decision=allowed", ex);
+            throw FederationException.unavailable("audit_unavailable");
+        }
     }
 
     private SourceResult readSource(
@@ -295,6 +368,8 @@ public class FederationService {
             if (source == null || !KEY.matcher(source).matches() || !unique.add(source)) {
                 throw FederationException.invalidRequest();
             }
+        }
+        for (String source : unique) {
             if (!granted.contains(source)) {
                 throw FederationException.forbidden("source_not_authorized");
             }
