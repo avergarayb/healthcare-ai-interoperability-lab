@@ -10,7 +10,7 @@ This is not a master patient index and it is not a production federation client.
 
 ## Configuration
 
-The base URL is `MODEL_BOUNDARY_BASE_URL`, the same Java process as Clinical Read. The token is `AI_FEDERATION_PARTICIPANT_TOKEN`. It is a federation participant token, not `MODEL_BOUNDARY_SERVICE_TOKEN`.
+The base URL is `MODEL_BOUNDARY_BASE_URL`, the same Java process as Clinical Read. The token is `AI_FEDERATION_PARTICIPANT_TOKEN`. It is a federation participant token and must not reuse `MODEL_BOUNDARY_SERVICE_TOKEN`, the Human Review form-signing secret or the development-login secret.
 
 | Variable | Use |
 |---|---|

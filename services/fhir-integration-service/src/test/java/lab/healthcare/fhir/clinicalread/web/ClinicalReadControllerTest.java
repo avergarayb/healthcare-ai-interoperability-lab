@@ -73,6 +73,27 @@ class ClinicalReadControllerTest {
     }
 
     @Test
+    void whitespaceWrappedAndDuplicateTokensAre401WithoutRead() throws Exception {
+        mockMvc.perform(get("/api/clinical-read/v1/patients/pat-1")
+                        .header(ModelBoundaryServiceTokenSettings.HEADER,
+                                " " + ModelBoundaryServiceTokenSettings.TEST_DUMMY + " "))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(""));
+        mockMvc.perform(get("/api/clinical-read/v1/patients/pat-1")
+                        .header(ModelBoundaryServiceTokenSettings.HEADER,
+                                ModelBoundaryServiceTokenSettings.TEST_DUMMY,
+                                ModelBoundaryServiceTokenSettings.TEST_DUMMY))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(""));
+        mockMvc.perform(get("/api/clinical-read/v1/patients/pat-1")
+                        .header(ModelBoundaryServiceTokenSettings.HEADER, "tökén-inválido"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(""));
+        verify(routing, never()).readPatientByLogicalId(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void readAndSearchKeepFhirIdentifiers() throws Exception {
         Patient patient = new Patient();
         patient.setId("pat-1");

@@ -20,6 +20,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -72,8 +73,10 @@ public class FederationSecurityConfiguration {
         protected void doFilterInternal(
                 HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
                 throws ServletException, IOException {
-            String presented = request.getHeader("X-Service-Token");
-            String caller = match(presented);
+            Enumeration<String> values = request.getHeaders("X-Service-Token");
+            String presented = values != null && values.hasMoreElements() ? values.nextElement() : null;
+            boolean duplicate = values != null && values.hasMoreElements();
+            String caller = duplicate ? null : match(presented);
             if (caller != null) {
                 request.setAttribute(CALLER_ATTRIBUTE, caller);
                 filterChain.doFilter(request, response);
@@ -99,7 +102,7 @@ public class FederationSecurityConfiguration {
             if (presented == null || presented.isBlank()) {
                 return null;
             }
-            byte[] right = presented.trim().getBytes(StandardCharsets.UTF_8);
+            byte[] right = presented.getBytes(StandardCharsets.UTF_8);
             for (Map.Entry<String, String> entry : tokens.entrySet()) {
                 byte[] left = entry.getValue().getBytes(StandardCharsets.UTF_8);
                 if (MessageDigest.isEqual(left, right)) {

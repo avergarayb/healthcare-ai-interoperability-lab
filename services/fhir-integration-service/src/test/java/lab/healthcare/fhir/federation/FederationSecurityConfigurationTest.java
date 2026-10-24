@@ -117,6 +117,32 @@ class FederationSecurityConfigurationTest {
     }
 
     @Test
+    void whitespaceWrappedAndDuplicateTokensAreInvalid() throws Exception {
+        List<FederationSecurityAuditEvent> events = new ArrayList<>();
+        var filter = new FederationSecurityConfiguration.FederationParticipantFilter(
+                Map.of("mini-his", "synthetic-participant-token"),
+                audit(events));
+
+        MockHttpServletResponse wrapped = invoke(filter, " synthetic-participant-token ");
+        MockHttpServletResponse unicode = invoke(filter, "tökén-inválido");
+        MockHttpServletRequest duplicateRequest = request();
+        duplicateRequest.addHeader("X-Service-Token", "synthetic-participant-token");
+        duplicateRequest.addHeader("X-Service-Token", "synthetic-participant-token");
+        MockHttpServletResponse duplicate = new MockHttpServletResponse();
+        filter.doFilter(duplicateRequest, duplicate, new MockFilterChain());
+
+        assertThat(wrapped.getStatus()).isEqualTo(401);
+        assertThat(unicode.getStatus()).isEqualTo(401);
+        assertThat(duplicate.getStatus()).isEqualTo(401);
+        assertThat(duplicateRequest.getAttribute(FederationSecurityConfiguration.CALLER_ATTRIBUTE)).isNull();
+        assertThat(events).extracting(FederationSecurityAuditEvent::reasonCode)
+                .containsExactly(
+                        "participant_token_invalid",
+                        "participant_token_invalid",
+                        "participant_token_invalid");
+    }
+
+    @Test
     void auditFailureChangesAuthenticationRejectionToUnavailable() throws Exception {
         var filter = new FederationSecurityConfiguration.FederationParticipantFilter(
                 Map.of("mini-his", "synthetic-participant-token"),

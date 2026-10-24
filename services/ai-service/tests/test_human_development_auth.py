@@ -165,6 +165,7 @@ def test_disabled_or_non_loopback_configuration_hides_login(tmp_path):
         dict(human_review_development_auth_secret="short-secret"),
         dict(model_boundary_service_token=SECRET),
         dict(human_review_form_signing_secret=SECRET),
+        dict(federation_participant_token=SECRET),
         dict(human_review_development_principal_id="Lab-Reviewer"),
         dict(human_review_development_principal_display_name="Lab\nreviewer"),
         dict(human_session_db_path=str(tmp_path / "review.sqlite3"), ai_review_db_path=str(tmp_path / "review.sqlite3")),

@@ -29,9 +29,9 @@ Empty context uses collection `retainedCount` only, the same idea as `AgentStub.
 
 ## Service authentication (Task 075)
 
-`GET /api/model-boundary/v1` requires header `X-Service-Token` matching `MODEL_BOUNDARY_SERVICE_TOKEN` on both processes.
+`GET /api/model-boundary/v1` requires exactly one header `X-Service-Token` matching `MODEL_BOUNDARY_SERVICE_TOKEN` on both processes. The credential match is exact; duplicate headers or surrounding whitespace are rejected.
 
-Missing, empty, or wrong token: Java returns HTTP 401 **before** `currentContract()`, with no contract body and no Oracle/Epic call. If the Java variable is blank, that HTTP surface stays fail-closed; Spring Boot, `/lab/*`, and SMART stay up.
+Missing, empty, duplicate, whitespace-altered, or wrong token: Java returns HTTP 401 **before** `currentContract()`, with no contract body and no Oracle/Epic call. If the Java variable is blank, that HTTP surface stays fail-closed; Spring Boot, `/lab/*`, and SMART stay up.
 
 A valid token only lets the request reach the existing controller. HTTP still follows `ModelBoundaryHttpStatuses` (200 / 401 / 409 / 502). Service 401 is not SMART `AUTHENTICATION_REQUIRED`. Python maps any Java 4xx to `rejected` / `boundary_http_4xx`.
 

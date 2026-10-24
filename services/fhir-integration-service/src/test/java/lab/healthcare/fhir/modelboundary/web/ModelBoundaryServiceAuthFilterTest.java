@@ -55,6 +55,31 @@ class ModelBoundaryServiceAuthFilterTest {
         mockMvc.perform(get("/api/model-boundary/v1").header(ModelBoundaryServiceTokenSettings.HEADER, "invalid-token"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().string(""));
+        mockMvc.perform(get("/api/model-boundary/v1").header(
+                        ModelBoundaryServiceTokenSettings.HEADER, "tökén-inválido"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(""));
+        verify(provider, never()).currentContract();
+    }
+
+    @Test
+    void whitespaceWrappedTokenIs401WithoutContract() throws Exception {
+        mockMvc.perform(get("/api/model-boundary/v1").header(
+                        ModelBoundaryServiceTokenSettings.HEADER,
+                        " " + ModelBoundaryServiceTokenSettings.TEST_DUMMY + " "))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(""));
+        verify(provider, never()).currentContract();
+    }
+
+    @Test
+    void duplicateTokenHeadersAre401WithoutContract() throws Exception {
+        mockMvc.perform(get("/api/model-boundary/v1").header(
+                        ModelBoundaryServiceTokenSettings.HEADER,
+                        ModelBoundaryServiceTokenSettings.TEST_DUMMY,
+                        ModelBoundaryServiceTokenSettings.TEST_DUMMY))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().string(""));
         verify(provider, never()).currentContract();
     }
 
