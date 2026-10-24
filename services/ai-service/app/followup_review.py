@@ -141,6 +141,7 @@ class FollowUpReviewCaseRepository(Protocol):
         expected_version: int,
         outcome: ReviewOutcome,
         attribution: DevelopmentPrincipalSnapshot | None = None,
+        before_close: Callable[[], None] | None = None,
     ) -> FollowUpReviewCase: ...
 
     def events(self, review_case_id: str) -> tuple[FollowUpReviewCaseEvent, ...]: ...
@@ -470,19 +471,23 @@ class FollowUpReviewCaseService:
         expected_version: int,
         outcome: ReviewOutcome,
         attribution: DevelopmentPrincipalSnapshot | None = None,
+        before_close: Callable[[], None] | None = None,
     ) -> FollowUpReviewCase:
-        if attribution is None:
+        if attribution is None and before_close is None:
             return self._repository.close(
                 review_case_id,
                 expected_version=expected_version,
                 outcome=outcome,
             )
-        return self._repository.close(
-            review_case_id,
-            expected_version=expected_version,
-            outcome=outcome,
-            attribution=validate_development_principal_snapshot(attribution),
-        )
+        arguments: dict[str, object] = {
+            "expected_version": expected_version,
+            "outcome": outcome,
+        }
+        if attribution is not None:
+            arguments["attribution"] = validate_development_principal_snapshot(attribution)
+        if before_close is not None:
+            arguments["before_close"] = before_close
+        return self._repository.close(review_case_id, **arguments)
 
     def events(self, review_case_id: str) -> tuple[FollowUpReviewCaseEvent, ...]:
         return self._repository.events(review_case_id)
