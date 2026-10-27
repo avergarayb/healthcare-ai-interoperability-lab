@@ -38,7 +38,7 @@ services\ai-service\.venv\Scripts\python.exe scripts\end-to-end-demo\run_demo.py
 services\ai-service\.venv\Scripts\python.exe scripts\end-to-end-demo\run_demo.py stop
 ```
 
-`run` crea un directorio nuevo en `services/ai-service/.tmp-e2e-demo/`. Ese directorio está ignorado por Git. Contiene el reporte, el SQLite y el secreto local de acceso. El comando no imprime el secreto.
+`run` crea un directorio nuevo en `services/ai-service/.tmp-e2e-demo/`. Ese directorio está ignorado por Git. Contiene el reporte, las bases SQLite aisladas de la ejecución —incluidas las auditorías Python y Java— y el secreto local de acceso. El comando no imprime el secreto. No reutiliza los stores de auditoría predeterminados del usuario.
 
 `run` sin `--keep` detiene los procesos y elimina solo `e2e-demo-pg`. `--keep` deja el entorno cuando la ejecución termina bien. Si el arranque falla, los procesos de esa ejecución se detienen aunque se haya pedido `--keep`. `stop` lee `current.json` y limpia solo esos PID y el contenedor `e2e-demo-pg`. No ejecuta `docker compose down -v` y no toca las bases del entorno habitual.
 
@@ -54,6 +54,8 @@ El runner las asigna solo al proceso de demostración. No edita `.env` ni `appli
 - `AI_FEDERATION_PATIENT_IDENTIFIER_SYSTEM=https://lab.local/mini-his/patient`
 - `AI_FEDERATION_SOURCES=mini-his,mini-lis`
 - `AI_SERVICE_HOST=127.0.0.1`
+- `SECURITY_AUDIT_DB_PATH=<directorio de ejecución>/security-audit.sqlite3`
+- `federation.security-audit.store-path=<directorio de ejecución>/federation-security-audit.sqlite`
 - Tokens de laboratorio del exchange y de la federación, distintos del secreto de Human Review.
 - El secreto de acceso queda en `review-login.secret` dentro del directorio de la ejecución.
 

@@ -16,17 +16,18 @@ Las modalidades de agentes son: clínico (flujos acotados ya implementados), emp
 ## Última EPIC y TASK integradas
 
 - **EPIC vigente:** Security & Governance V1.
-- **Última TASK integrada en `main`:** TASK 001, base durable de auditoría de seguridad.
+- **Última TASK integrada en `main`:** TASK 005, endurecimiento de autenticación entre servicios, separación de secretos y cookies de handoff.
 
-TASK 001 añadió `SECURITY_AUDIT_V1` al AI Service: repositorio SQLite append/read para un solo proceso, evento `authentication` para login de desarrollo, allowlist de metadata y comportamiento fail-closed antes de emitir una sesión si la auditoría no puede persistirse. No es un registro inviolable, IAM/RBAC, auditoría clínica ni auditoría de producción. Documentos anteriores que dicen que toda auditoría sigue diferida deben leerse con este alcance: solo el login cubierto por el contrato nuevo está implementado.
+TASK 001–005 implementaron `SECURITY_AUDIT_V1` en Python y Java para los eventos contratados, decisiones de workflow y Human Review, atribución del principal sintético, auditoría de acceso a Clinical Federation y autenticación estricta entre servicios. TASK 006 valida esos controles, aísla los stores de auditoría del runner E2E y prepara el documento de cierre; permanece en revisión hasta que el Product Owner apruebe e integre su rama. El alcance continúa siendo de laboratorio: no es un registro inviolable, IAM/RBAC, identidad clínica verificada ni auditoría de producción.
 
 ## Próxima TASK prevista
 
-Security & Governance V1 — TASK 002. No está iniciada y su alcance/criterios de aceptación no están definidos en la documentación integrada examinada. No inferirlos ni implementar trabajo preparatorio: solicitar al Product Owner el enunciado aprobado.
+No hay una TASK posterior autorizada. Identity & Access Foundation V1, Enterprise Connector Authorization V1 y MCP Integration Foundation V1 son dependencias futuras descritas en el cierre de Security & Governance V1, no implementaciones iniciadas. Solicitar siempre el enunciado aprobado del Product Owner antes de trabajar en cualquiera de ellas.
 
 ## Dependencias y riesgos
 
 - Java 21 y Maven 3.9+ para Healthcare Interoperability; Python 3.11+ y el entorno de `services/ai-service` para Healthcare AI. Docker es necesario solo para pruebas/integraciones que lo declaran.
+- El recorrido operativo real Mini HIS → Mini LIS → Clinical Federation → LangGraph → Human Review requiere Docker Engine para el PostgreSQL dedicado. Si Docker no está disponible, ejecutar la cobertura aislada y registrar el bloqueo; no sustituirlo iniciando HAPI.
 - Los stores de revisión, checkpoint, sesión, conocimiento y auditoría son SQLite con límites de laboratorio y, donde se documenta, un único proceso escritor. No constituyen persistencia distribuida ni cifrado de aplicación.
 - Producción aún carece de IAM/RBAC y multi-tenancy, identidad clínica verificada, assignment, secret management y arquitectura de red aprobadas, checkpoint distribuido y aprobación para datos clínicos reales.
 - El default suite de Python conserva una prueba que consulta HAPI local sin flag opt-in. No iniciar ni modificar `local-hapi` para satisfacerla; reportar el prerrequisito o el fallo.
@@ -44,13 +45,14 @@ Security & Governance V1 — TASK 002. No está iniciada y su alcance/criterios 
 - Seguridad y autorización son obligatorias; los contratos existentes se preservan.
 - No tocar `local-hapi` sin autorización explícita.
 - No hacer commit ni push sin autorización. Staging, cuando se solicite, debe ser por rutas explícitas y después de revisar el diff.
-- TASK 002 no se inicia como parte de la creación de este contexto compartido.
+- No iniciar IAM, conectores empresariales o MCP sin una TASK posterior explícita.
 
 ## Documentos que deben consultarse
 
 - [`../AGENTS.md`](../AGENTS.md): reglas operativas comunes.
 - [`../README.md`](../README.md), [`PROJECT.md`](PROJECT.md), [`roadmap.md`](roadmap.md) y [`architecture/README.md`](architecture/README.md): producto, estado y autoridad arquitectónica.
 - [`contracts/security-audit-v1.md`](contracts/security-audit-v1.md): alcance exacto de Security & Governance V1 — TASK 001.
+- [`ai-governance/service-security-hardening-v1.md`](ai-governance/service-security-hardening-v1.md) y [`ai-governance/security-governance-v1-closure.md`](ai-governance/security-governance-v1-closure.md): endurecimiento de TASK 005 y evidencia/límites del cierre de TASK 006.
 - [`contracts/clinical-read-v1.md`](contracts/clinical-read-v1.md), [`contracts/clinical-federation-v1.md`](contracts/clinical-federation-v1.md) y [`contracts/ai-clinical-federation-v1.md`](contracts/ai-clinical-federation-v1.md): fronteras Java/Python y federación.
 - [`design/langgraph-workflow-orchestration-v1.md`](design/langgraph-workflow-orchestration-v1.md) y [`contracts/follow-up-review-workflow-v1.md`](contracts/follow-up-review-workflow-v1.md): orquestación y autoridad operacional.
 - [`contracts/human-identity-v1.md`](contracts/human-identity-v1.md), [`contracts/human-attribution-v1.md`](contracts/human-attribution-v1.md), [`adr/ADR-088-server-rendered-human-review-demo.md`](adr/ADR-088-server-rendered-human-review-demo.md), [`adr/ADR-093-human-review-session.md`](adr/ADR-093-human-review-session.md) y [`adr/ADR-094-human-attribution.md`](adr/ADR-094-human-attribution.md): Human Review, sesión y atribución de desarrollo.
