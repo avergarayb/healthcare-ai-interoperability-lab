@@ -2,11 +2,11 @@
 
 ## Status
 
-**Implementation complete; operational full-stack validation pending.**
+**Implementation complete; operational laboratory E2E validated; validation remains partial.**
 
 Security & Governance V1 TASK 006 records the available laboratory validation evidence for the controls implemented in TASK 001 through TASK 005 and the reproducible checks added in TASK 006. It does not declare production readiness, regulatory compliance, verified clinical identity, enterprise IAM, or a complete end-to-end security trace.
 
-The validation used synthetic data only. Gemini, HAPI, cloud resources, external sandboxes and production identity providers were not started or contacted. The operational multi-process demonstration was not rerun during TASK 006 because Docker Engine was unavailable. Its runner and isolated profile were validated deterministically, and the maximum non-container coverage was executed.
+The validation used synthetic data only. Gemini, local HAPI, cloud resources, external sandboxes and production identity providers were not started or contacted. On 2026-10-27 the operational multi-process demonstration was executed with isolated Mini HIS, Mini LIS, Java FHIR Integration, Python AI Service and PostgreSQL processes. The run passed its positive and negative scenarios, live security checks, Human Review close/resume, audit inspection and Demo Experience review. The mandatory `FederationFlowTest` remains unexecuted because its single test explicitly reads from `local-hapi`, which the Product Owner prohibited TASK 006 from touching.
 
 ## Implemented scope by task
 
@@ -49,6 +49,10 @@ The E2E profile does not reuse an operator's default audit database. Tests reope
 
 Python covers `authentication`, `workflow_start`, `workflow_resume` and `human_review_decision`. Java covers `clinical_federation_access`. An `allowed` row means the validated operation was permitted to begin; it does not claim connector success, Review commit, workflow completion or a favorable clinical result.
 
+The operational run produced three allowed `authentication` events, one denied `human_review_decision` and one allowed `human_review_decision`. The log timestamps tie the three authentications to the runner opening Review, the operator session used to close the case, and the later Demo Experience detail review. It produced no `workflow_start` or `workflow_resume` event by contract: the runner calls `start_workflow(...)` directly in its process rather than `POST /internal/workflows`, and the successful Review close invokes the internal checkpoint auto-resume rather than `POST /internal/workflows/{workflowId}/resume`. Neither internal path invents the endpoint's generic `service_client` actor. The completed checkpoint proves execution and resume, not an audited service-token request.
+
+The two workflow event types are implemented only at those authenticated HTTP boundaries and are covered by deterministic endpoint tests, including mandatory-audit failure and checkpoint preservation. The operational run did not exercise those boundaries or a live audit-storage failure. No workflow access event exists in another store: `agent-workflow.sqlite3` is business checkpoint/index state, while `security-audit.sqlite3` is the sole Python security-audit store for the execution.
+
 Human attribution is stored with the operational Review transaction, while security audit is a separate transaction and database. The accepted inconsistency windows are therefore:
 
 - an allowed Human Review audit can remain if the later Review transaction rolls back;
@@ -78,14 +82,14 @@ A denied close does not change the case. A completed case does not record anothe
 
 | Area | Unit / component | Isolated local integration | Real laboratory processes | Dedicated container | External infrastructure |
 |---|---|---|---|---|---|
-| Python service authentication and secret separation | Executed | FastAPI/TestClient, temporary configuration | Runner profile inspected; live process not started | Not required | Not required |
-| Java service authentication | Executed | MockMvc/Spring | Runner profile inspected; live process not started | Not required | Not required |
-| Clinical Federation authorization and audit | Executed | Service/filter tests and temporary SQLite | Blocked by Docker Engine | PostgreSQL path blocked | Not required |
-| Python audit and Human Review | Executed | Temporary Review, Session, Audit and checkpoint files | Blocked with the stack | Not required | Not required |
-| Cross-organization LangGraph flow | Executed with deterministic clients | Positive and negative correlation scenarios | Blocked by Docker Engine | PostgreSQL path blocked | Gemini disabled |
-| Mini HIS | Executed | Spring/SQLite tests | Not started | Not required | Not required |
-| Mini LIS | Deterministic transition tests executed | REST/normalizer tests executed in Java consumer | Not started | PostgreSQL tests blocked | Not required |
-| Demo Experience V2 | Report rendering tests executed | Temporary stored reports | Live view not started | Depends on the operational stack | Not required |
+| Python service authentication and secret separation | Executed | FastAPI/TestClient, temporary configuration | Live isolated process passed | Not required | Not required |
+| Java service authentication | Executed | MockMvc/Spring | Live isolated process passed | Not required | Not required |
+| Clinical Federation authorization and audit | Executed | Service/filter tests and temporary SQLite | Live allow/deny boundaries and audit passed | Operational PostgreSQL passed; `FederationFlowTest` blocked by its `local-hapi` dependency | Not required |
+| Python audit and Human Review | Executed | Temporary Review, Session, Audit and checkpoint files | Live login, Review denial/close, attribution and internal resume passed; workflow HTTP audit remained deterministic | Not required | Not required |
+| Cross-organization LangGraph flow | Executed with deterministic clients | Positive and negative correlation scenarios | Live positive and negative scenarios passed | Operational PostgreSQL and directly related isolated flow passed | Gemini disabled |
+| Mini HIS | Executed | Spring/SQLite tests | Live isolated process passed | Not required | Not required |
+| Mini LIS | Deterministic transition tests executed | REST/normalizer tests executed in Java consumer | Live isolated process passed | 16 Testcontainers tests passed across Mini LIS and Java consumer suites | Not required |
+| Demo Experience V2 | Report rendering tests executed | Temporary stored reports | Live authenticated historical detail passed | Backed by the operational stack | Not required |
 | IAM, enterprise connectors and MCP | Not implemented | Not applicable | Not applicable | Not applicable | Outside TASK 006 |
 
 ## Validation execution
@@ -98,6 +102,12 @@ The following non-container results were obtained on the TASK 006 branch:
 - Java Mini HIS/Mini LIS connector, normalization and exchange regression: `31 tests`, no failures.
 - Mini HIS module: `14 tests`, no failures.
 - Mini LIS deterministic transition suite: `4 tests`, no failures.
+- Operational run `E2E-20261027T213944Z-541B0A`: started at `2026-10-27T21:39:44Z`, report written at `2026-10-27T21:40:31Z`, inspected live and stopped at `2026-10-27T21:55:52Z`.
+- Live services: Mini HIS `127.0.0.1:18295`, Mini LIS `127.0.0.1:18296`, Java FHIR Integration `127.0.0.1:18281`, Python AI Service `127.0.0.1:18290` and PostgreSQL `127.0.0.1:15434`; all health checks passed.
+- Live Clinical Federation: valid token returned `200`; missing and invalid tokens returned `401`; wrong organization, wrong caller system and ungranted source returned `403` with the expected fail-closed reasons.
+- Python audit persisted five minimized events—three allowed authentications, one denied Review decision and one allowed Review decision—and Java audit persisted ten minimized events in separate execution-local SQLite files. Event ids and correlation ids were valid and unique, metadata matched the allowlists, and structured review found no credentials or clinical payloads. Python workflow start/resume events were absent for the contractual direct-execution reason described above, not because they were written elsewhere.
+- Mini LIS Testcontainers suites: `MiniLisApiTest` (`8`) and `MiniLisHl7Test` (`5`), `13 tests`, no failures or skips.
+- Direct Java consumer Testcontainers suites: `MiniLisClinicalFlowTest` (`2`) and `CrossOrgLabExchangeFlowTest` (`1`), `3 tests`, no failures or skips.
 
 The four deliberate Python deselections were the three known CRLF byte-hash checks for `001_follow_up_review.sql` and the Windows ACL mutation check. The CRLF tests were also executed separately and reproduced exactly their three known failures: expected LF hash `94a043...be80`, working-tree CRLF hash `c58dc0...2676`. Historical migrations were not modified. The ACL test was not executed because TASK 006 forbids permission changes.
 
@@ -107,21 +117,25 @@ Representative commands:
 
 ```text
 services\ai-service\.venv\Scripts\python.exe scripts\end-to-end-demo\run_demo.py check
+services\ai-service\.venv\Scripts\python.exe scripts\end-to-end-demo\run_demo.py run --keep
+services\ai-service\.venv\Scripts\python.exe scripts\end-to-end-demo\run_demo.py stop
 services\ai-service\.venv\Scripts\python.exe -m pytest -p no:cacheprovider <security-and-workflow-files> -k <documented exclusions> -q
 mvn -q -Dtest=FederationSecurityConfigurationTest,FederationServiceTest,FederationSecurityAuditTest,ModelBoundaryServiceAuthFilterTest,ModelBoundaryServiceAuthUnconfiguredTest,ClinicalReadControllerTest,ClinicalReadAuthUnconfiguredTest test
 mvn -q -Dtest=MiniLisExchangeConnectorTest,ExchangeServiceTest,Hl7ExchangeCodecTest,MiniHisConnectorTest,MiniHisLongitudinalNormalizationTest,MiniHisServiceRequestTest,MiniLisConnectorTest,MiniLisNormalizerTest test
+mvn -q -Dtest=MiniLisApiTest,MiniLisHl7Test test
+mvn -q -Dtest=MiniLisClinicalFlowTest,CrossOrgLabExchangeFlowTest test
 ```
 
 ## Positive and negative scenarios
 
-The deterministic baseline preserves both `cross_org_lab_result` scenarios:
+The operational run and deterministic baseline preserve both `cross_org_lab_result` scenarios:
 
-- correlated Mini HIS order, linked Mini LIS order and final result: `matched`, `waiting_human`, open Review case;
-- final result on another order: `not_matched`, completed workflow, no Review case.
+- correlated Mini HIS order, linked Mini LIS order and final result: `matched`, `waiting_human`, Review case `7034e356-bd45-43c2-96b9-3ed40c597bfb`; an authenticated synthetic operator closed it as `follow_up_coordination_planned`, attribution was persisted and workflow `wf-84a5260a30ad7d6ee9cf18d552f0e8c3` resumed to `completed`;
+- final result on another order: `not_matched`, reason `result_order_mismatch`, completed workflow and no Review case.
 
-Security scenarios cover valid, missing, invalid, empty, whitespace-altered and duplicate service tokens; valid and reused credential configuration; wrong organization and caller system; allowed, ungranted, mixed and syntactically invalid source requests; unauthenticated Review; bad Origin/HMAC; stale version; repeated and concurrent closure; and unavailable mandatory audit.
+Live security scenarios covered valid, missing and invalid Java federation tokens; wrong organization and caller system; an ungranted source; unauthenticated Review; and an authorized Review close. Empty, whitespace-altered and duplicate credentials, mixed and syntactically invalid sources, bad Origin/HMAC, stale version, repeated and concurrent closure, Python workflow service-token boundaries, and unavailable mandatory audit remain deterministic test evidence.
 
-Rejected authentication and authorization paths assert that protected providers, connectors, graph transitions or Review writes are not invoked. Java operational connector errors remain authorized operational failures rather than false security denials.
+Deterministic rejected authentication and authorization paths assert that protected providers, connectors, graph transitions or Review writes are not invoked. In the live run, an unauthenticated Review close redirected to login, recorded `human_session_missing` and left the case open; the later authorized close succeeded. Java operational connector errors remain authorized operational failures rather than false security denials. Fail-closed behavior for an unavailable audit store was not induced in the live stack.
 
 ## Correlation boundary
 
@@ -135,11 +149,13 @@ Automated and manual inspection covered Python/Java log templates, HTTP denials,
 
 Synthetic clinical identifiers and results may legitimately appear in functional clinical responses and isolated connector tests. They must not appear in access-decision audit rows. The E2E public report retains only the documented synthetic references and provenance needed to demonstrate the protocol; it excludes tokens, names and secret files.
 
-No real secret or clinical data was added to versioned files. High-entropy runtime secrets remain untracked inside the ignored execution directory and are not printed by the runner.
+No real secret or clinical data was added to versioned files. High-entropy runtime secrets were not printed or found in reports, logs or audit stores; the two execution-local secret files were removed after the stack stopped. The synthetic report and both audit databases remain untracked in the ignored execution directory as review evidence.
 
 ## Blocked or deferred validation
 
-- The real multi-process operational run, `FederationFlowTest`, Mini LIS Testcontainers suites and Demo Experience V2 live page were blocked because Docker Engine was unavailable. The executable was present, all dedicated ports were free and the recorded previous run was not active.
+- `FederationFlowTest` was not run. Its single method combines two responsibilities: it starts isolated Mini HIS/Mini LIS/PostgreSQL and validates complete/partial federation, provenance, unavailable connector and authorization rejection; it then asserts that the legacy Clinical Read route still selects `local-hapi` and performs exact live reads, including `syn-demo-patient-102`. The second responsibility makes the entire class depend on the preexisting HAPI instance and would violate the Product Owner's explicit prohibition on touching it. This is a mixed test-design constraint, not a Docker infrastructure or product failure.
+- The operational runner, `CrossOrgLabExchangeFlowTest`, `MiniLisClinicalFlowTest`, Mini LIS Testcontainers suites and deterministic federation security/service tests already cover the isolated federation, exchange, normalization, PostgreSQL, authorization and partial-outcome behavior. They do not prove startup, seeding, persistence or exact-read interoperability against a real HAPI FHIR deployment.
+- Minimum follow-up scope after TASK 006 is integrated: separate the federation assertions from the legacy Clinical Read compatibility assertions; make the federation class select only isolated Mini HIS/Mini LIS sources; and move exact Clinical Read into a dedicated opt-in test backed by either bounded fixtures/mock HTTP for contract behavior or an independently named, test-owned HAPI container seeded by that test. Fixture-based decoupling would still leave real HAPI image, database, seed/read and network integration pending; only the isolated HAPI option could supply that evidence without touching `local-hapi`.
 - Live HAPI tests were not run and `local-hapi` was not started, stopped, seeded or modified.
 - Gemini, Epic, Oracle, Azure and AWS paths were not run because they require external infrastructure or credentials and are outside this task.
 - No operating-system ACL test was run because TASK 006 prohibits ACL changes.
@@ -151,7 +167,7 @@ No real secret or clinical data was added to versioned files. High-entropy runti
 - SQLite supports the documented single-process laboratory topology; it is neither encrypted by the application nor immutable, centralized or replicated.
 - Human Review audit, business state and checkpoint are not transactionally atomic with each other.
 - The network boundary, TLS termination, rate limiting, protected secret storage, retention and backup remain deployment responsibilities.
-- The real container-backed E2E result must be obtained on a host with Docker Engine before claiming current full-stack evidence.
+- The isolated container-backed operational E2E result was obtained, but the overall validation remains partial until the required Federation Testcontainers coverage can run without accessing the protected preexisting `local-hapi`, or the Product Owner authorizes that dependency explicitly.
 - The three CRLF hash failures remain a Windows checkout issue and must not be hidden by editing historical migrations.
 
 ## Readiness for later epics
