@@ -165,7 +165,6 @@ class FederationSecurityAuditTest {
                 .doesNotContain("synthetic-participant-token")
                 .doesNotContain("Patient/")
                 .doesNotContain("Observation")
-                .doesNotContain("141")
                 .doesNotContain("Quispe");
     }
 

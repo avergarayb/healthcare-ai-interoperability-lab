@@ -12,7 +12,10 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts" / "end-to-end-demo"))
 
 from demo_profile import (  # noqa: E402
+    AI_SERVICE_TOKEN,
     CONTAINER,
+    HIS_EXCHANGE_TOKEN,
+    HIS_FEDERATION_TOKEN,
     LIS_TOKEN,
     assert_profile_is_isolated,
     check_dependencies,
@@ -22,6 +25,7 @@ from demo_profile import (  # noqa: E402
 from demo_runner import (  # noqa: E402
     DemoFailure,
     DemoIo,
+    _ai_environment,
     new_execution_id,
     public_report,
     refuse_if_running,
@@ -140,10 +144,40 @@ def test_profile_does_not_select_hapi_or_reserved_ports():
     text = " ".join(fhir_arguments("exchange.sqlite", "http://127.0.0.1:1", "http://127.0.0.1:2"))
     assert "clinical-read.source" not in text
     assert "hapi" not in text.lower()
+    assert "--federation.security-audit.store-path=federation-security-audit.sqlite" in text
     command = postgres_command()
     assert command[0] == "docker"
     assert "postgres:16-alpine" in command
     assert CONTAINER in command
+
+
+def test_profile_isolates_audit_stores_and_component_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "operator-provider-secret")
+    monkeypatch.setenv("SECURITY_AUDIT_DB_PATH", "operator-audit.sqlite3")
+    monkeypatch.setenv("JAVA_HOME", str(tmp_path / "operator-jdk"))
+    (tmp_path / "review-login.secret").write_text("login-secret-" + "a" * 32, encoding="utf-8")
+    (tmp_path / "form-signing.secret").write_text("form-secret-" + "b" * 32, encoding="utf-8")
+
+    from demo_runner import _java_env
+
+    env = _ai_environment(tmp_path)
+    java_env = _java_env()
+    fhir = " ".join(
+        fhir_arguments(
+            str(tmp_path / "exchange.sqlite"),
+            "http://127.0.0.1:18295",
+            "http://127.0.0.1:18296",
+        )
+    )
+
+    assert env["SECURITY_AUDIT_DB_PATH"] == str(tmp_path / "security-audit.sqlite3")
+    assert env["AI_REVIEW_DB_PATH"] == str(tmp_path / "review.sqlite3")
+    assert env["HUMAN_SESSION_DB_PATH"] == str(tmp_path / "human-session.sqlite3")
+    assert "operator-audit.sqlite3" not in env.values()
+    assert "operator-provider-secret" not in env.values()
+    assert java_env["JAVA_HOME"] == str(tmp_path / "operator-jdk")
+    assert f"--federation.security-audit.store-path={(tmp_path / 'federation-security-audit.sqlite').as_posix()}" in fhir
+    assert len({LIS_TOKEN, HIS_EXCHANGE_TOKEN, HIS_FEDERATION_TOKEN, AI_SERVICE_TOKEN}) == 4
 
 
 def test_unavailable_service_stops_before_the_workflow():

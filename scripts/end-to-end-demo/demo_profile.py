@@ -65,11 +65,13 @@ def postgres_command() -> list[str]:
 
 def fhir_arguments(exchange_db: str, his_url: str, lis_url: str) -> list[str]:
     """Spring arguments for the isolated FHIR process. The HAPI default stays untouched."""
+    federation_audit_db = Path(exchange_db).with_name("federation-security-audit.sqlite")
     return [
         f"--server.port={FHIR_PORT}",
         "--server.address=127.0.0.1",
         "--spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration",
         f"--exchange.store-path={exchange_db}",
+        f"--federation.security-audit.store-path={federation_audit_db.as_posix()}",
         f"--exchange.connectors.mini-lis.base-url={lis_url}",
         f"--exchange.connectors.mini-lis.service-token={LIS_TOKEN}",
         f"--exchange.participants.mini-his.service-token={HIS_EXCHANGE_TOKEN}",

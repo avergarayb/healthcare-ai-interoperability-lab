@@ -614,12 +614,7 @@ def _release(processes: list[subprocess.Popen], state_path: Path) -> None:
 
 
 def _java_env() -> dict[str, str]:
-    env = _scrubbed_environment()
-    java_home = Path(r"C:\Proyectos_JAVA\jdk-21.0.2")
-    if java_home.exists():
-        env["JAVA_HOME"] = str(java_home)
-        env["PATH"] = str(java_home / "bin") + os.pathsep + env.get("PATH", "")
-    return env
+    return _scrubbed_environment()
 
 
 def _lis_arguments() -> list[str]:
@@ -689,10 +684,7 @@ def _restrict_secret(path: Path) -> None:
     path.chmod(0o600)
 
 
-def _ai_process(runtime: Path) -> subprocess.Popen:
-    python = repo_root() / "services" / "ai-service" / ".venv" / "Scripts" / "python.exe"
-    if not python.exists():
-        python = Path(os.sys.executable)
+def _ai_environment(runtime: Path) -> dict[str, str]:
     env = _scrubbed_environment()
     env.update(
         {
@@ -711,6 +703,7 @@ def _ai_process(runtime: Path) -> subprocess.Popen:
             "AI_REVIEW_DB_PATH": str(runtime / "review.sqlite3"),
             "HUMAN_SESSION_DB_PATH": str(runtime / "human-session.sqlite3"),
             "INSTITUTIONAL_KNOWLEDGE_DB_PATH": str(runtime / "institutional-knowledge.sqlite3"),
+            "SECURITY_AUDIT_DB_PATH": str(runtime / "security-audit.sqlite3"),
             "HUMAN_REVIEW_DEVELOPMENT_AUTH_ENABLED": "true",
             "HUMAN_REVIEW_DEVELOPMENT_AUTH_SECRET": (runtime / "review-login.secret").read_text(encoding="utf-8").strip(),
             "HUMAN_REVIEW_DEVELOPMENT_PRINCIPAL_ID": "demo-operator",
@@ -718,6 +711,14 @@ def _ai_process(runtime: Path) -> subprocess.Popen:
             "HUMAN_REVIEW_FORM_SIGNING_SECRET": (runtime / "form-signing.secret").read_text(encoding="utf-8").strip(),
         }
     )
+    return env
+
+
+def _ai_process(runtime: Path) -> subprocess.Popen:
+    python = repo_root() / "services" / "ai-service" / ".venv" / "Scripts" / "python.exe"
+    if not python.exists():
+        python = Path(os.sys.executable)
+    env = _ai_environment(runtime)
     log = (runtime / "ai-service.log").open("w", encoding="utf-8")
     return subprocess.Popen(
         [str(python), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(AI_PORT)],
