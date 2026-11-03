@@ -2,11 +2,11 @@
 
 ## Status
 
-**Implementation complete; operational laboratory E2E validated; validation remains partial.**
+**Security & Governance V1 implementation complete; operational laboratory E2E and isolated federation validated; broader validation remains partial.**
 
-Security & Governance V1 TASK 006 records the available laboratory validation evidence for the controls implemented in TASK 001 through TASK 005 and the reproducible checks added in TASK 006. It does not declare production readiness, regulatory compliance, verified clinical identity, enterprise IAM, or a complete end-to-end security trace.
+Security & Governance V1 TASK 006 and TASK 007 record the available laboratory validation evidence for the controls implemented in TASK 001 through TASK 005, the reproducible checks added in TASK 006 and the isolated federation boundary completed in TASK 007. They do not declare production readiness, regulatory compliance, verified clinical identity, enterprise IAM, or a complete end-to-end security trace.
 
-The validation used synthetic data only. Gemini, local HAPI, cloud resources, external sandboxes and production identity providers were not started or contacted. On 2026-10-27 the operational multi-process demonstration was executed with isolated Mini HIS, Mini LIS, Java FHIR Integration, Python AI Service and PostgreSQL processes. The run passed its positive and negative scenarios, live security checks, Human Review close/resume, audit inspection and Demo Experience review. The mandatory `FederationFlowTest` remains unexecuted because its single test explicitly reads from `local-hapi`, which the Product Owner prohibited TASK 006 from touching.
+The validation used synthetic data only. Gemini, local HAPI, cloud resources, external sandboxes and production identity providers were not started or contacted. On 2026-10-27 the operational multi-process demonstration was executed with isolated Mini HIS, Mini LIS, Java FHIR Integration, Python AI Service and PostgreSQL processes. The run passed its positive and negative scenarios, live security checks, Human Review close/resume, audit inspection and Demo Experience review. TASK 007 then separated the autonomous Clinical Federation proof from legacy HAPI exact-read compatibility and executed the federation proof against only test-owned Mini HIS, Mini LIS and PostgreSQL resources. Operational compatibility with a real, independently provisioned HAPI server remains an opt-in legacy validation and was not run.
 
 ## Implemented scope by task
 
@@ -18,6 +18,7 @@ The validation used synthetic data only. Gemini, local HAPI, cloud resources, ex
 | TASK 004 | Java Clinical Federation access audit, verified participant/organization attribution, authorization reason codes and fail-closed audit before connectors. |
 | TASK 005 | Exact constant-time service-token checks, duplicate-header rejection, Python credential separation, secret-safe settings representation and HTTPS handoff-cookie hardening. |
 | TASK 006 | Security coverage inventory, isolated audit paths in the existing E2E runner, regression automation, sensitive-data review and this closure evidence. |
+| TASK 007 | Autonomous Clinical Federation integration proof, explicit legacy HAPI opt-in boundary and preservation of the original federation/Clinical Read assertions. |
 
 No task in this epic implemented Keycloak, OIDC, enterprise RBAC, workload identity, mTLS, managed secret rotation, Azure/AWS authorization, MCP, a new agent, a new microservice or a new clinical protocol.
 
@@ -84,7 +85,7 @@ A denied close does not change the case. A completed case does not record anothe
 |---|---|---|---|---|---|
 | Python service authentication and secret separation | Executed | FastAPI/TestClient, temporary configuration | Live isolated process passed | Not required | Not required |
 | Java service authentication | Executed | MockMvc/Spring | Live isolated process passed | Not required | Not required |
-| Clinical Federation authorization and audit | Executed | Service/filter tests and temporary SQLite | Live allow/deny boundaries and audit passed | Operational PostgreSQL passed; `FederationFlowTest` blocked by its `local-hapi` dependency | Not required |
+| Clinical Federation authorization and audit | Executed | Service/filter tests and temporary SQLite | Live allow/deny boundaries and audit passed | `FederationFlowTest` passed with isolated Mini HIS, Mini LIS, PostgreSQL and audit SQLite | Not required |
 | Python audit and Human Review | Executed | Temporary Review, Session, Audit and checkpoint files | Live login, Review denial/close, attribution and internal resume passed; workflow HTTP audit remained deterministic | Not required | Not required |
 | Cross-organization LangGraph flow | Executed with deterministic clients | Positive and negative correlation scenarios | Live positive and negative scenarios passed | Operational PostgreSQL and directly related isolated flow passed | Gemini disabled |
 | Mini HIS | Executed | Spring/SQLite tests | Live isolated process passed | Not required | Not required |
@@ -108,6 +109,23 @@ The following non-container results were obtained on the TASK 006 branch:
 - Python audit persisted five minimized events—three allowed authentications, one denied Review decision and one allowed Review decision—and Java audit persisted ten minimized events in separate execution-local SQLite files. Event ids and correlation ids were valid and unique, metadata matched the allowlists, and structured review found no credentials or clinical payloads. Python workflow start/resume events were absent for the contractual direct-execution reason described above, not because they were written elsewhere.
 - Mini LIS Testcontainers suites: `MiniLisApiTest` (`8`) and `MiniLisHl7Test` (`5`), `13 tests`, no failures or skips.
 - Direct Java consumer Testcontainers suites: `MiniLisClinicalFlowTest` (`2`) and `CrossOrgLabExchangeFlowTest` (`1`), `3 tests`, no failures or skips.
+
+TASK 007 added and executed the following non-duplicated evidence:
+
+- Isolated federation: `FederationFlowTest` (`1`), no failures or skips. It verified complete and partial federation, normalized resources, source-qualified provenance, strict FHIR parsing, identity unresolved, connector unavailable, source grants, 401, organization/caller/source 403 denials and seven persisted access decisions.
+- Mini LIS Testcontainers: `MiniLisApiTest` (`8`) and `MiniLisHl7Test` (`5`), `13 tests`, no failures or skips.
+- Java consumer Testcontainers: `MiniLisClinicalFlowTest` (`2`) and `CrossOrgLabExchangeFlowTest` (`1`), `3 tests`, no failures or skips. Together with the isolated federation proof this is `17` unique container-backed tests.
+- Mini HIS: `MiniHisSimulatorTest` (`9`), `MiniHisSchemaMigrationTest` (`4`) and `MiniHisLabOrderTest` (`1`), `14 tests`, no failures or skips. Mini LIS transition regression: `OrderTransitionTest` (`4`), no failures or skips.
+- Federation authorization/audit, Model Boundary authentication, Clinical Read and Mini HIS/LIS connector/normalizer regression: `76 tests` across 14 explicitly selected classes, no failures or skips.
+- Test compilation, including `LegacyHapiClinicalReadCompatibilityLiveIT`, passed. The legacy class was not executed.
+
+### TASK 007 final review — 2026-11-02
+
+Test compilation and the seven related Java security/audit classes passed again: `48 tests`, no failures or skips. The earlier `17` container-backed tests and `111` total Java tests remain evidence from the previous TASK 007 execution, not results of this review.
+
+The effective Maven configuration was checked for default, HAPI, Epic and Oracle live profiles. Surefire and default Failsafe exclude `LiveIT`; the HAPI profile marker is false outside its dedicated Failsafe profile, and invocation ownership confirmation defaults to false. Five safe discovery checks skipped the legacy class before Spring startup: Surefire with inherited HAPI environment opt-ins; Failsafe without the HAPI profile; Failsafe with the Epic profile; the HAPI profile without explicit ownership confirmation; and the HAPI profile without the environment opt-in. None executed the HAPI test body or contacted HAPI. These are gate checks, not five successful HAPI compatibility tests.
+
+Docker Engine was unavailable at preflight, including a check outside the filesystem sandbox. The isolated Federation Testcontainers rerun was therefore not started, and no Docker resource was created or changed. The Product Owner explicitly approved committing and pushing TASK 007 without an immediate rerun, based on the earlier passing FederationFlowTest, 111 Java tests, the current 48 passing security/audit tests, five legacy-HAPI gate checks, successful compilation and no production changes. FederationFlowTest was not rerun after the final gate adjustments; the previous container results were not relabeled as current validation. The final container rerun remains deferred and does not block the authorized commit/push.
 
 The four deliberate Python deselections were the three known CRLF byte-hash checks for `001_follow_up_review.sql` and the Windows ACL mutation check. The CRLF tests were also executed separately and reproduced exactly their three known failures: expected LF hash `94a043...be80`, working-tree CRLF hash `c58dc0...2676`. Historical migrations were not modified. The ACL test was not executed because TASK 006 forbids permission changes.
 
@@ -153,10 +171,11 @@ No real secret or clinical data was added to versioned files. High-entropy runti
 
 ## Blocked or deferred validation
 
-- `FederationFlowTest` was not run. Its single method combines two responsibilities: it starts isolated Mini HIS/Mini LIS/PostgreSQL and validates complete/partial federation, provenance, unavailable connector and authorization rejection; it then asserts that the legacy Clinical Read route still selects `local-hapi` and performs exact live reads, including `syn-demo-patient-102`. The second responsibility makes the entire class depend on the preexisting HAPI instance and would violate the Product Owner's explicit prohibition on touching it. This is a mixed test-design constraint, not a Docker infrastructure or product failure.
-- The operational runner, `CrossOrgLabExchangeFlowTest`, `MiniLisClinicalFlowTest`, Mini LIS Testcontainers suites and deterministic federation security/service tests already cover the isolated federation, exchange, normalization, PostgreSQL, authorization and partial-outcome behavior. They do not prove startup, seeding, persistence or exact-read interoperability against a real HAPI FHIR deployment.
-- Minimum follow-up scope after TASK 006 is integrated: separate the federation assertions from the legacy Clinical Read compatibility assertions; make the federation class select only isolated Mini HIS/Mini LIS sources; and move exact Clinical Read into a dedicated opt-in test backed by either bounded fixtures/mock HTTP for contract behavior or an independently named, test-owned HAPI container seeded by that test. Fixture-based decoupling would still leave real HAPI image, database, seed/read and network integration pending; only the isolated HAPI option could supply that evidence without touching `local-hapi`.
-- Live HAPI tests were not run and `local-hapi` was not started, stopped, seeded or modified.
+- The historical mixed-test constraint is resolved: `FederationFlowTest` now selects only the isolated Mini HIS source in its Spring context, assigns any unused local-HAPI endpoint to an inaccessible loopback port and contains no Clinical Read request or `syn-demo-patient-102` dependency. All original federation assertions execute there; explicit wrong-organization and wrong-caller assertions plus persisted audit-decision checks strengthen the live boundary.
+- The original legacy Clinical Read assertions now live in `LegacyHapiClinicalReadCompatibilityLiveIT`. Surefire and default Failsafe explicitly exclude it. JUnit requires the dedicated `hapi-legacy-live` profile marker, the invocation flag `-Dhapi.legacy.testOwnedConfirmed=true`, `HAPI_LEGACY_LIVE_IT=true`, an explicit loopback `HAPI_LEGACY_BASE_URL` and `HAPI_LEGACY_TEST_OWNED=true`. Inherited environment variables alone cannot enable it. The operator must verify ownership of the dedicated HAPI R4 server and storage before confirming; loopback and flags do not prove ownership. The server must already contain synthetic Patient `syn-demo-patient-102`; this test only reads.
+- That opt-in compatibility test was compiled and its disabled gates were checked, but its live body was not executed. Therefore startup, readiness, seeding, persistence and exact-read interoperability against a real HAPI deployment remain unvalidated. Deterministic Clinical Read tests preserve contract behavior but do not substitute for this evidence.
+- A future bounded task can supply a dedicated HAPI Testcontainers fixture with an approved image, readiness check, synthetic seed and automatic cleanup. Until then, the preexisting `local-hapi` is not an admissible test dependency.
+- `local-hapi` was not started, stopped, seeded, queried or modified.
 - Gemini, Epic, Oracle, Azure and AWS paths were not run because they require external infrastructure or credentials and are outside this task.
 - No operating-system ACL test was run because TASK 006 prohibits ACL changes.
 
@@ -167,7 +186,7 @@ No real secret or clinical data was added to versioned files. High-entropy runti
 - SQLite supports the documented single-process laboratory topology; it is neither encrypted by the application nor immutable, centralized or replicated.
 - Human Review audit, business state and checkpoint are not transactionally atomic with each other.
 - The network boundary, TLS termination, rate limiting, protected secret storage, retention and backup remain deployment responsibilities.
-- The isolated container-backed operational E2E result was obtained, but the overall validation remains partial until the required Federation Testcontainers coverage can run without accessing the protected preexisting `local-hapi`, or the Product Owner authorizes that dependency explicitly.
+- Security & Governance V1 now has both the operational multi-process E2E and autonomous Federation Testcontainers evidence. Broader interoperability validation remains partial because the separate legacy HAPI live compatibility boundary has not been executed against a dedicated test-owned server.
 - The three CRLF hash failures remain a Windows checkout issue and must not be hidden by editing historical migrations.
 
 ## Readiness for later epics

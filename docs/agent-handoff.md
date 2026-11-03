@@ -16,18 +16,19 @@ Las modalidades de agentes son: clínico (flujos acotados ya implementados), emp
 ## Última EPIC y TASK integradas
 
 - **EPIC vigente:** Security & Governance V1.
-- **Última TASK integrada en `main`:** TASK 005, endurecimiento de autenticación entre servicios, separación de secretos y cookies de handoff.
+- **Última TASK integrada en `main`:** TASK 006, cobertura de regresión, aislamiento de auditorías y evidencia operacional E2E de Security & Governance V1.
 
-TASK 001–005 implementaron `SECURITY_AUDIT_V1` en Python y Java para los eventos contratados, decisiones de workflow y Human Review, atribución del principal sintético, auditoría de acceso a Clinical Federation y autenticación estricta entre servicios. TASK 006 valida esos controles, aísla los stores de auditoría del runner E2E y prepara el documento de cierre; permanece en revisión hasta que el Product Owner apruebe e integre su rama. El alcance continúa siendo de laboratorio: no es un registro inviolable, IAM/RBAC, identidad clínica verificada ni auditoría de producción.
+TASK 001–006 implementaron y validaron `SECURITY_AUDIT_V1` en Python y Java para los eventos contratados, decisiones de workflow y Human Review, atribución del principal sintético, auditoría de acceso a Clinical Federation, autenticación estricta entre servicios y evidencia operacional E2E. TASK 007 separa la prueba autónoma de Clinical Federation de la compatibilidad Clinical Read con HAPI legacy; permanece en revisión hasta que el Product Owner apruebe e integre su rama. El alcance continúa siendo de laboratorio: no es un registro inviolable, IAM/RBAC, identidad clínica verificada ni auditoría de producción.
 
 ## Próxima TASK prevista
 
-No hay una TASK posterior autorizada. Identity & Access Foundation V1, Enterprise Connector Authorization V1 y MCP Integration Foundation V1 son dependencias futuras descritas en el cierre de Security & Governance V1, no implementaciones iniciadas. Solicitar siempre el enunciado aprobado del Product Owner antes de trabajar en cualquiera de ellas.
+No hay una TASK posterior a TASK 007 autorizada. Identity & Access Foundation V1, Enterprise Connector Authorization V1 y MCP Integration Foundation V1 son dependencias futuras descritas en el cierre de Security & Governance V1, no implementaciones iniciadas. Solicitar siempre el enunciado aprobado del Product Owner antes de trabajar en cualquiera de ellas.
 
 ## Dependencias y riesgos
 
 - Java 21 y Maven 3.9+ para Healthcare Interoperability; Python 3.11+ y el entorno de `services/ai-service` para Healthcare AI. Docker es necesario solo para pruebas/integraciones que lo declaran.
 - El recorrido operativo real Mini HIS → Mini LIS → Clinical Federation → LangGraph → Human Review requiere Docker Engine para el PostgreSQL dedicado. Si Docker no está disponible, ejecutar la cobertura aislada y registrar el bloqueo; no sustituirlo iniciando HAPI.
+- `FederationFlowTest` es autónomo y usa Mini HIS, Mini LIS y PostgreSQL propios de la ejecución. La compatibilidad Clinical Read con HAPI real está separada en `LegacyHapiClinicalReadCompatibilityLiveIT`: es opt-in, requiere un HAPI test-owned con `syn-demo-patient-102` y nunca debe apuntar al `local-hapi` preexistente.
 - Los stores de revisión, checkpoint, sesión, conocimiento y auditoría son SQLite con límites de laboratorio y, donde se documenta, un único proceso escritor. No constituyen persistencia distribuida ni cifrado de aplicación.
 - Producción aún carece de IAM/RBAC y multi-tenancy, identidad clínica verificada, assignment, secret management y arquitectura de red aprobadas, checkpoint distribuido y aprobación para datos clínicos reales.
 - El default suite de Python conserva una prueba que consulta HAPI local sin flag opt-in. No iniciar ni modificar `local-hapi` para satisfacerla; reportar el prerrequisito o el fallo.
