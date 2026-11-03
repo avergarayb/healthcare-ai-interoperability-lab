@@ -69,6 +69,8 @@ def get_settings() -> Settings:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings = get_settings()
+    from app.oidc_workload import configure_boundary
+    configure_boundary(application, settings)
     repository = SQLiteFollowUpReviewCaseRepository(settings.ai_review_db_path)
     repository.initialize()
     application.state.followup_review_repository = repository

@@ -2,7 +2,9 @@
 
 ## Status and authority
 
-Approved architectural design contract for Identity & Access Foundation V1 — TASK 001, following Product Owner review and the lifecycle clarifications below. Documentation only; no resolver, registry, database, verifier or endpoint implements this contract yet. It does not supersede [Human identity v1](human-identity-v1.md), [Human attribution v1](human-attribution-v1.md), [Security audit v1](security-audit-v1.md) or [Clinical Federation v1](clinical-federation-v1.md).
+Approved architectural design contract for Identity & Access Foundation V1 — TASK 001, following Product Owner review and the lifecycle clarifications below. TASK 001 itself introduced no runtime resolver, registry, database, verifier or endpoint. It does not supersede [Human identity v1](human-identity-v1.md), [Human attribution v1](human-attribution-v1.md), [Security audit v1](security-audit-v1.md) or [Clinical Federation v1](clinical-federation-v1.md).
+
+Implementation status after TASK 001: [TASK 003](python-oidc-workload-v1.md), approved by the Product Owner for laboratory scope and pending main integration, implements only the Python workload adapter on a new opt-in boundary. Human/session/legacy adapters remain unimplemented; the original design semantics below are unchanged.
 
 `identity-principal-context-v1` describes a request-local, immutable application identity after authentication. It is not an incoming JSON credential, an access token, a JWT claim set or a clinical identity certificate. Only the receiving service's trusted authentication and policy boundary may construct it. Java and Python implement the same semantics independently when later authorized; neither requires the other process to authenticate its own requests.
 
