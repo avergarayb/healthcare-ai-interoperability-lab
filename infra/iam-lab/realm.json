@@ -1,0 +1,43 @@
+{
+  "realm": "healthcare-iam-lab",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "accessTokenLifespan": 30,
+  "ssoSessionIdleTimeout": 600,
+  "ssoSessionMaxLifespan": 1800,
+  "defaultSignatureAlgorithm": "RS256",
+  "defaultDefaultClientScopes": [],
+  "defaultOptionalClientScopes": [],
+  "clientScopes": [
+    {"name": "basic", "protocol": "openid-connect", "protocolMappers": [
+      {"name": "subject", "protocol": "openid-connect", "protocolMapper": "oidc-sub-mapper", "config": {"access.token.claim": "true", "id.token.claim": "true", "introspection.token.claim": "true"}}
+    ]},
+    {"name": "iam-ai", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}, "protocolMappers": [
+      {"name": "ai-audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper", "config": {"included.client.audience": "healthcare-ai-api", "access.token.claim": "true", "id.token.claim": "false"}}
+    ]},
+    {"name": "iam-interop", "protocol": "openid-connect", "attributes": {"include.in.token.scope": "true"}, "protocolMappers": [
+      {"name": "interop-audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper", "config": {"included.client.audience": "healthcare-interop-api", "access.token.claim": "true", "id.token.claim": "false"}}
+    ]}
+  ],
+  "clients": [
+    {"clientId": "healthcare-review-web", "enabled": true, "protocol": "openid-connect", "publicClient": true, "standardFlowEnabled": true, "implicitFlowEnabled": false, "directAccessGrantsEnabled": false, "serviceAccountsEnabled": false, "fullScopeAllowed": false, "redirectUris": ["http://127.0.0.1:18190/callback"], "webOrigins": [], "defaultClientScopes": ["basic"], "optionalClientScopes": [], "attributes": {"pkce.code.challenge.method": "S256"}},
+    {"clientId": "healthcare-ai-api", "enabled": true, "protocol": "openid-connect", "bearerOnly": true, "publicClient": false, "standardFlowEnabled": false, "implicitFlowEnabled": false, "directAccessGrantsEnabled": false, "serviceAccountsEnabled": false, "fullScopeAllowed": false, "defaultClientScopes": [], "optionalClientScopes": []},
+    {"clientId": "healthcare-interop-api", "enabled": true, "protocol": "openid-connect", "bearerOnly": true, "publicClient": false, "standardFlowEnabled": false, "implicitFlowEnabled": false, "directAccessGrantsEnabled": false, "serviceAccountsEnabled": false, "fullScopeAllowed": false, "defaultClientScopes": [], "optionalClientScopes": []},
+    {"clientId": "lab-ai-workload", "enabled": true, "protocol": "openid-connect", "publicClient": false, "clientAuthenticatorType": "client-secret", "standardFlowEnabled": false, "implicitFlowEnabled": false, "directAccessGrantsEnabled": false, "serviceAccountsEnabled": true, "fullScopeAllowed": false, "defaultClientScopes": ["basic", "iam-ai"], "optionalClientScopes": []},
+    {"clientId": "lab-python-to-java", "enabled": true, "protocol": "openid-connect", "publicClient": false, "clientAuthenticatorType": "client-secret", "standardFlowEnabled": false, "implicitFlowEnabled": false, "directAccessGrantsEnabled": false, "serviceAccountsEnabled": true, "fullScopeAllowed": false, "defaultClientScopes": ["basic", "iam-interop"], "optionalClientScopes": []},
+    {"clientId": "lab-unregistered-workload", "enabled": true, "protocol": "openid-connect", "publicClient": false, "clientAuthenticatorType": "client-secret", "standardFlowEnabled": false, "implicitFlowEnabled": false, "directAccessGrantsEnabled": false, "serviceAccountsEnabled": true, "fullScopeAllowed": false, "defaultClientScopes": ["basic", "iam-ai"], "optionalClientScopes": []}
+  ],
+  "users": [
+    {"id": "00000000-0000-4000-8000-000000000101", "username": "lab-human-a", "enabled": true, "firstName": "Synthetic", "lastName": "Lab A", "email": "lab-human-a@example.invalid", "emailVerified": false},
+    {"id": "00000000-0000-4000-8000-000000000102", "username": "lab-human-b", "enabled": true, "firstName": "Synthetic", "lastName": "Lab B", "email": "lab-human-b@example.invalid", "emailVerified": false},
+    {"id": "00000000-0000-4000-8000-000000000103", "username": "lab-human-both", "enabled": true, "firstName": "Synthetic", "lastName": "Lab Both", "email": "lab-human-both@example.invalid", "emailVerified": false},
+    {"id": "00000000-0000-4000-8000-000000000104", "username": "lab-human-none", "enabled": true, "firstName": "Synthetic", "lastName": "Lab None", "email": "lab-human-none@example.invalid", "emailVerified": false},
+    {"id": "00000000-0000-4000-8000-000000000201", "username": "service-account-lab-ai-workload", "enabled": true, "serviceAccountClientId": "lab-ai-workload"},
+    {"id": "00000000-0000-4000-8000-000000000202", "username": "service-account-lab-python-to-java", "enabled": true, "serviceAccountClientId": "lab-python-to-java"},
+    {"id": "00000000-0000-4000-8000-000000000203", "username": "service-account-lab-unregistered-workload", "enabled": true, "serviceAccountClientId": "lab-unregistered-workload"}
+  ]
+}

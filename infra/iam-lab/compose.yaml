@@ -1,0 +1,56 @@
+name: ${IAM_LAB_PROJECT:?Use lab.py to prepare an owned run}
+services:
+  keycloak:
+    profiles: [iam-lab]
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
+    entrypoint: [/bin/bash, -ec]
+    command:
+      - |
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(</run/secrets/bootstrap_password)"
+        exec /opt/keycloak/bin/kc.sh start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: iam-lab-bootstrap
+      KC_HOSTNAME: ${IAM_LAB_ORIGIN:?Canonical loopback origin required}
+      KC_HOSTNAME_STRICT: "true"
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_DB: dev-file
+      KC_CACHE: local
+      KC_LOG_LEVEL: WARN
+      KC_HTTP_ACCESS_LOG_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${IAM_LAB_HTTP_PORT:?Loopback port required}:8080"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - type: bind
+        source: ${IAM_LAB_RUN_DIR:?Owned runtime directory required}/healthcare-iam-lab-realm.json
+        target: /opt/keycloak/data/import/healthcare-iam-lab-realm.json
+        read_only: true
+    secrets: [bootstrap_password]
+    mem_limit: 1g
+    cpus: 2
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+    networks: [lab]
+    labels:
+      org.healthcare.iam-lab.owner: iam-lab-v1
+      org.healthcare.iam-lab.run: ${IAM_LAB_RUN_ID:?Run id required}
+      org.healthcare.iam-lab.workspace: ${IAM_LAB_WORKSPACE:?Workspace identity required}
+secrets:
+  bootstrap_password:
+    file: ${IAM_LAB_RUN_DIR:?Owned runtime directory required}/bootstrap-password.txt
+volumes:
+  keycloak-data:
+    labels:
+      org.healthcare.iam-lab.owner: iam-lab-v1
+      org.healthcare.iam-lab.run: ${IAM_LAB_RUN_ID:?Run id required}
+      org.healthcare.iam-lab.workspace: ${IAM_LAB_WORKSPACE:?Workspace identity required}
+networks:
+  lab:
+    # Dedicated bridge; internal:true suppresses host publication on Docker 29.
+    # Only the declared loopback port is published. No other projects join it.
+    labels:
+      org.healthcare.iam-lab.owner: iam-lab-v1
+      org.healthcare.iam-lab.run: ${IAM_LAB_RUN_ID:?Run id required}
+      org.healthcare.iam-lab.workspace: ${IAM_LAB_WORKSPACE:?Workspace identity required}
