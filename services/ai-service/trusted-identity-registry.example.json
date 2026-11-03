@@ -1,0 +1,22 @@
+{
+  "contract_version": "trusted-identity-registry-v1",
+  "provider_id": "synthetic-provider",
+  "issuer": "https://identity.example.invalid/realms/lab",
+  "audience": "healthcare-ai-api",
+  "principals": [
+    {"principal_id": "fixture-ai-workload", "principal_type": "workload", "enabled": true}
+  ],
+  "organizations": [
+    {"organization_id": "org-lab-a", "enabled": true},
+    {"organization_id": "org-lab-b", "enabled": true}
+  ],
+  "bindings": [
+    {"binding_id": "binding-ai", "issuer": "https://identity.example.invalid/realms/lab", "external_subject": "00000000-0000-4000-8000-000000000201", "client_id": "lab-ai-workload", "principal_id": "fixture-ai-workload", "enabled": true}
+  ],
+  "memberships": [
+    {"principal_id": "fixture-ai-workload", "organization_id": "org-lab-a", "enabled": true}
+  ],
+  "grants": [
+    {"principal_id": "fixture-ai-workload", "organization_id": "org-lab-a", "permission": "iam.workload-context.read", "enabled": true}
+  ]
+}
