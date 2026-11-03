@@ -16,15 +16,15 @@ Las modalidades de agentes son: clínico (flujos acotados ya implementados), emp
 ## Última EPIC y TASK integradas
 
 - **EPIC vigente:** Identity & Access Foundation V1.
-- **Última TASK integrada en `main`:** Security & Governance V1 — TASK 007, aislamiento de Clinical Federation respecto de HAPI legacy.
+- **Última TASK integrada en `main`:** Identity & Access Foundation V1 — TASK 001, arquitectura provider-agnostic y ADR-096 (PR #103). Verificar la referencia remota en cada sesión.
 
 Security & Governance V1 TASK 001–007 están integradas y la EPIC está técnicamente cerrada para su alcance de laboratorio por decisión del Product Owner. Incluye `SECURITY_AUDIT_V1`, autenticación estricta en sus fronteras contratadas, atribución sintética, E2E operacional y federación aislada validada. La reejecución final de FederationFlowTest tras los ajustes de gates quedó diferida por Docker; el Product Owner autorizó el commit sin repetirla. HAPI legacy live sigue como validación independiente pendiente. No implica IAM empresarial, identidad clínica verificada ni preparación productiva.
 
-Identity & Access Foundation V1 — TASK 001 define documentalmente contratos provider-agnostic, PrincipalContext, límites de confianza y adopción incremental. El Product Owner aprobó la dirección arquitectónica y ADR-096, con precisiones sobre ciclo de vida de sesiones y audiences efectivos. La sesión humana tendrá su propio contrato de expiración/reautenticación/revocación; el contexto de un workload no superará la expiración efectiva de su access token. La arquitectura aceptada todavía no está implementada: no hay Keycloak runtime, verifier OIDC, nueva base de usuarios ni migración de sesiones. TASK 001 no debe considerarse integrada en main sin verificarlo en Git.
+Identity & Access Foundation V1 — TASK 001 define contratos provider-agnostic, PrincipalContext, límites de confianza y adopción incremental. El Product Owner aprobó ADR-096 y los ciclos de vida separados: la sesión humana tendrá su contrato de expiración/reautenticación/revocación; el contexto de un workload no superará la expiración efectiva de su access token. TASK 002 incorpora un [fixture Keycloak aislado](design/identity-keycloak-lab-v1.md) en `infra/iam-lab/`, aprobado para laboratorio y sin integración implícita en main. No hay verifier OIDC productivo, nueva base empresarial de usuarios ni migración de sesiones. El fixture no cambia la autenticación Java/Python.
 
 ## Próxima TASK prevista
 
-La siguiente propuesta es Identity & Access Foundation V1 — TASK 002: fixture Keycloak local opt-in con versión/digest fijados, puerto propio (18090 propuesto, sujeto a disponibilidad), realm y clientes sintéticos, discovery/JWKS y evidencia aislada. Debe configurar audiences efectivos mediante mappers/scopes y comprobar aceptación propia, rechazo cruzado entre APIs, rechazo de ID token como access token y workload desconocido, con issuer/JWKS exactos. Esas pruebas son exclusivas del fixture, no de verificadores OIDC de producto. Requiere un enunciado aprobado antes de descargar o ejecutar runtime. Enterprise Connector Authorization V1 y MCP Integration Foundation V1 continúan como EPICs futuras, sin implementación autorizada por esta TASK.
+TASK 002 completó Code + PKCE real en navegador, verificación criptográfica del ID token y rechazo de ese token sin modificar en ambos perfiles API, con controles independientes de audience y propósito. El Product Owner aprobó su cierre operacional de laboratorio y autorizó commit/push de sus quince archivos; la integración en main requiere revisión separada y no hay autorización para crear PR o hacer merge. El procedimiento, la tentativa incompleta anterior, los identificadores de evidencia y las limitaciones están en el runbook; no confundirlos con validación OIDC de producto. Una futura TASK 003 requiere enunciado aprobado y contratos explícitos de frontera, perfiles, sesiones y auditoría antes de adoptar OIDC en producto. No está iniciada. Enterprise Connector Authorization V1 y MCP Integration Foundation V1 continúan como EPICs futuras no autorizadas.
 
 ## Dependencias y riesgos
 
@@ -51,7 +51,7 @@ La siguiente propuesta es Identity & Access Foundation V1 — TASK 002: fixture 
 - El diseño IAM debe admitir Keycloak de laboratorio y proveedores corporativos OIDC sin acoplar agentes/protocolos al proveedor. TASK 001 es solo documental; no cambia los métodos de autenticación existentes ni habilita OIDC en endpoints.
 - No tocar `local-hapi` sin autorización explícita.
 - No hacer commit ni push sin autorización. Staging, cuando se solicite, debe ser por rutas explícitas y después de revisar el diff.
-- No iniciar IAM, conectores empresariales o MCP sin una TASK posterior explícita.
+- TASK 002 autoriza solo el fixture IAM aislado y su validación. No iniciar adopción OIDC productiva, conectores empresariales o MCP sin una TASK posterior explícita.
 
 ## Documentos que deben consultarse
 
@@ -61,6 +61,7 @@ La siguiente propuesta es Identity & Access Foundation V1 — TASK 002: fixture 
 - [`ai-governance/service-security-hardening-v1.md`](ai-governance/service-security-hardening-v1.md) y [`ai-governance/security-governance-v1-closure.md`](ai-governance/security-governance-v1-closure.md): endurecimiento de TASK 005 y evidencia/límites del cierre de TASK 006.
 - [`contracts/clinical-read-v1.md`](contracts/clinical-read-v1.md), [`contracts/clinical-federation-v1.md`](contracts/clinical-federation-v1.md) y [`contracts/ai-clinical-federation-v1.md`](contracts/ai-clinical-federation-v1.md): fronteras Java/Python y federación.
 - [`contracts/identity-principal-context-v1.md`](contracts/identity-principal-context-v1.md), [`contracts/oidc-provider-integration-v1.md`](contracts/oidc-provider-integration-v1.md), [`design/identity-access-foundation-v1.md`](design/identity-access-foundation-v1.md) y [`adr/ADR-096-identity-provider-agnostic-v1.md`](adr/ADR-096-identity-provider-agnostic-v1.md): arquitectura y contratos de diseño IAM TASK 001 aprobados, inventario real, límites de confianza y criterios para TASK 002; aún no son capacidades implementadas.
+- [`design/identity-keycloak-lab-v1.md`](design/identity-keycloak-lab-v1.md): fixture TASK 002 opt-in, imagen fijada, operación y limpieza por propiedad, evidencia y pendientes; sus pruebas no validan OIDC de producto.
 - [`design/langgraph-workflow-orchestration-v1.md`](design/langgraph-workflow-orchestration-v1.md) y [`contracts/follow-up-review-workflow-v1.md`](contracts/follow-up-review-workflow-v1.md): orquestación y autoridad operacional.
 - [`contracts/human-identity-v1.md`](contracts/human-identity-v1.md), [`contracts/human-attribution-v1.md`](contracts/human-attribution-v1.md), [`adr/ADR-088-server-rendered-human-review-demo.md`](adr/ADR-088-server-rendered-human-review-demo.md), [`adr/ADR-093-human-review-session.md`](adr/ADR-093-human-review-session.md) y [`adr/ADR-094-human-attribution.md`](adr/ADR-094-human-attribution.md): Human Review, sesión y atribución de desarrollo.
 

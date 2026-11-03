@@ -1,0 +1,4 @@
+# Dedicated fixture environment; never install into either product service.
+PyJWT[crypto]==2.15.1
+cryptography==50.0.2
+pytest==9.2.0

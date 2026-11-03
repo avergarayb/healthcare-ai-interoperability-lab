@@ -1,0 +1,14 @@
+{
+  "contract": "iam-lab-policy-v1",
+  "organizations": ["org-lab-a", "org-lab-b"],
+  "workloads": {
+    "lab-ai-workload": {"subject": "00000000-0000-4000-8000-000000000201", "principal": "fixture-ai-workload", "audience": "healthcare-ai-api", "memberships": {"org-lab-a": ["fixture.ai.read"]}},
+    "lab-python-to-java": {"subject": "00000000-0000-4000-8000-000000000202", "principal": "fixture-java-workload", "audience": "healthcare-interop-api", "memberships": {"org-lab-b": ["fixture.interop.read"]}}
+  },
+  "humans": {
+    "00000000-0000-4000-8000-000000000101": {"principal": "fixture-human-a", "memberships": {"org-lab-a": ["fixture.ai.read"]}},
+    "00000000-0000-4000-8000-000000000102": {"principal": "fixture-human-b", "memberships": {"org-lab-b": ["fixture.interop.read"]}},
+    "00000000-0000-4000-8000-000000000103": {"principal": "fixture-human-both", "memberships": {"org-lab-a": ["fixture.ai.read"], "org-lab-b": ["fixture.interop.read"]}},
+    "00000000-0000-4000-8000-000000000104": {"principal": "fixture-human-none", "memberships": {}}
+  }
+}

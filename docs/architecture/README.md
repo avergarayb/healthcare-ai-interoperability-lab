@@ -131,7 +131,8 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 
 ## Authoritative documents
 
-- [Identity & Access Foundation v1 design](../design/identity-access-foundation-v1.md), [Principal Context v1](../contracts/identity-principal-context-v1.md) and [OIDC provider integration v1](../contracts/oidc-provider-integration-v1.md) — TASK 001 architecture/design contracts approved by the Product Owner; no OIDC runtime, session migration or SaaS resource isolation implemented. Human-session and workload-token lifetimes remain distinct; TASK 002 must verify effective Keycloak audiences in its fixture harness only.
+- [Identity & Access Foundation v1 design](../design/identity-access-foundation-v1.md), [Principal Context v1](../contracts/identity-principal-context-v1.md) and [OIDC provider integration v1](../contracts/oidc-provider-integration-v1.md) — TASK 001 architecture/design contracts approved by the Product Owner. No product OIDC verifier, session migration or SaaS resource isolation implemented; human-session and workload-token lifetimes remain distinct.
+- [Isolated Keycloak laboratory](../design/identity-keycloak-lab-v1.md) — TASK 002 opt-in fixture and harness, independent audiences and trusted synthetic membership policy. Laboratory Code + PKCE and real ID-token rejection under both API profiles validated; laboratory closure approved by the Product Owner, main integration pending. Its provider checks do not validate product OIDC authentication.
 - [Product scope](../PROJECT.md)
 - [Clinical Follow-up Review V1 contract](../contracts/post-consultation-result-review-v1.md)
 - [Missed follow-up review V1 contract](../contracts/missed-follow-up-review-v1.md)
@@ -182,7 +183,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 | [ADR-093](../adr/ADR-093-human-review-session.md) | Accepted current decision for a development-only human session. Not production identity, IAM, SSO or RBAC. |
 | [ADR-094](../adr/ADR-094-human-attribution.md) | Accepted development attribution. The review UI records a synthetic development principal. Manual validation passed. Not production-ready. Not a security audit, not IAM or SSO, not RBAC, and not verified clinical identity. |
 | [ADR-095](../adr/ADR-095-clinical-normalization-boundary.md) | Accepted target: Healthcare Interoperability is an independent bidirectional exchange platform. Laboratory increments now include Clinical Read API v1, Mini HIS normalization, a Mini LIS read normalized to FHIR R4, one REST order and result path through Java, and an optional loopback HL7 v2.5.1 connector. Clinical Federation v1 is a separate read endpoint. It does not replace single-source Clinical Read. The order path itself is not federation. SOAP, file connectors, and a general organizational broker are not implemented. |
-| [ADR-096](../adr/ADR-096-identity-provider-agnostic-v1.md) | Accepted architectural direction: provider-independent identity, internal bindings, verified memberships and separate resource authorization. Keycloak remains a future laboratory fixture, not a mandatory customer dependency. No runtime changes in TASK 001; later tasks need their own authorization. |
+| [ADR-096](../adr/ADR-096-identity-provider-agnostic-v1.md) | Accepted architectural direction: provider-independent identity, internal bindings, verified memberships and separate resource authorization. Keycloak is an optional laboratory fixture, not a mandatory customer dependency. No product runtime changes in TASK 001/002; later adoption needs its own authorization. |
 
 ## Historical governance artifacts
 
