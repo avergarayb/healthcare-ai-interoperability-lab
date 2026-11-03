@@ -40,6 +40,9 @@ class Settings:
     federation_sources: tuple[str, ...] = ("mini-his", "mini-lis")
     federation_timeout_seconds: float = 20.0
     security_audit_db_path: str = ""
+    oidc_workload_lab_enabled: bool = False
+    oidc_workload_trust_config_path: str = ""
+    oidc_workload_audit_db_path: str = ""
 
     @property
     def model_boundary_url(self) -> str:
@@ -168,6 +171,9 @@ class Settings:
             federation_sources=federation_sources,
             federation_timeout_seconds=federation_timeout,
             security_audit_db_path=os.getenv("SECURITY_AUDIT_DB_PATH", "").strip(),
+            oidc_workload_lab_enabled=os.getenv("OIDC_WORKLOAD_LAB_ENABLED", "false") == "true",
+            oidc_workload_trust_config_path=os.getenv("OIDC_WORKLOAD_TRUST_CONFIG_PATH", ""),
+            oidc_workload_audit_db_path=os.getenv("OIDC_WORKLOAD_AUDIT_DB_PATH", ""),
         )
 
 

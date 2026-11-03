@@ -1,0 +1,40 @@
+{
+  "contract_version": "python-oidc-workload-v1",
+  "provider_id": "synthetic-provider",
+  "enabled": false,
+  "issuer": "https://identity.example.invalid/realms/lab",
+  "discovery_url": "https://identity.example.invalid/realms/lab/.well-known/openid-configuration",
+  "expected_jwks_uri": "https://identity.example.invalid/realms/lab/protocol/openid-connect/certs",
+  "endpoint_allowlist": [
+    "https://identity.example.invalid/realms/lab/.well-known/openid-configuration",
+    "https://identity.example.invalid/realms/lab/protocol/openid-connect/certs",
+    "https://identity.example.invalid/realms/lab/protocol/openid-connect/auth",
+    "https://identity.example.invalid/realms/lab/protocol/openid-connect/token"
+  ],
+  "accepted_audiences": ["healthcare-ai-api"],
+  "allowed_algorithms": ["RS256"],
+  "access_token_profile": "keycloak-client-credentials-v1",
+  "allow_http_loopback": false,
+  "allowed_organization_ids": ["org-lab-a"],
+  "clock_skew_seconds": 0,
+  "max_access_token_lifetime_seconds": 300,
+  "jwks_refresh_seconds": 300,
+  "jwks_hard_ttl_seconds": 900,
+  "unknown_kid_refresh_min_interval_seconds": 30,
+  "http_timeout_seconds": 2.0,
+  "metadata_max_bytes": 1048576,
+  "bindings": [
+    {
+      "client_id": "lab-ai-workload",
+      "external_subject": "00000000-0000-4000-8000-000000000201",
+      "internal_principal_id": "fixture-ai-workload",
+      "principal_type": "workload",
+      "binding_enabled": true,
+      "principal_enabled": true,
+      "organization_id": "org-lab-a",
+      "membership_enabled": true,
+      "audience": "healthcare-ai-api",
+      "permissions": ["iam.workload-context.read"]
+    }
+  ]
+}

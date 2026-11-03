@@ -131,8 +131,9 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 
 ## Authoritative documents
 
-- [Identity & Access Foundation v1 design](../design/identity-access-foundation-v1.md), [Principal Context v1](../contracts/identity-principal-context-v1.md) and [OIDC provider integration v1](../contracts/oidc-provider-integration-v1.md) — TASK 001 architecture/design contracts approved by the Product Owner. No product OIDC verifier, session migration or SaaS resource isolation implemented; human-session and workload-token lifetimes remain distinct.
-- [Isolated Keycloak laboratory](../design/identity-keycloak-lab-v1.md) — TASK 002 opt-in fixture and harness, independent audiences and trusted synthetic membership policy. Laboratory Code + PKCE and real ID-token rejection under both API profiles validated; laboratory closure approved by the Product Owner, main integration pending. Its provider checks do not validate product OIDC authentication.
+- [Identity & Access Foundation v1 design](../design/identity-access-foundation-v1.md), [Principal Context v1](../contracts/identity-principal-context-v1.md) and [OIDC provider integration v1](../contracts/oidc-provider-integration-v1.md) — TASK 001 approved design; TASK 003 adds only the opt-in Python workload boundary below. No human-session migration or SaaS resource isolation; human-session and workload-token lifetimes remain distinct.
+- [Isolated Keycloak laboratory](../design/identity-keycloak-lab-v1.md) — TASK 002 integrated opt-in fixture/harness, independent audiences and trusted synthetic membership policy. Its browser/provider evidence is separate from product authentication.
+- [Python OIDC resource server](../design/python-oidc-resource-server-v1.md) — TASK 003 laboratory implementation/evidence approved by the Product Owner, main integration pending: opt-in workload-only identity projection, exact trusted provider profile, bounded key cache and [additive audit](../contracts/oidc-workload-security-audit-v1.md). Existing routes, Human Review and Java authentication unchanged.
 - [Product scope](../PROJECT.md)
 - [Clinical Follow-up Review V1 contract](../contracts/post-consultation-result-review-v1.md)
 - [Missed follow-up review V1 contract](../contracts/missed-follow-up-review-v1.md)
