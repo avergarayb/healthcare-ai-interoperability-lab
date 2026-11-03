@@ -11,12 +11,10 @@ import org.hl7.fhir.r4.model.Resource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.core.env.Environment;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -26,6 +24,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -44,7 +43,9 @@ class FederationFlowTest {
     private static final String HIS_FEDERATION_TOKEN = "his-federation-read";
     private static final String LIS_FEDERATION_TOKEN = "lis-federation-read";
     private static final String CLINIC_TOKEN = "clinic-federation-token";
-    private static final String READ_TOKEN = "federation-clinical-read-test";
+    private static final Path FEDERATION_AUDIT = Path.of(
+            System.getProperty("java.io.tmpdir"),
+            "federation-security-audit-" + System.nanoTime() + ".sqlite");
 
     private static PostgreSQLContainer<?> postgres;
     private static ConfigurableApplicationContext lis;
@@ -67,6 +68,8 @@ class FederationFlowTest {
         registry.add("clinical-read.mini-his.base-url", () -> hisUrl);
         registry.add("clinical-read.mini-lis.base-url", () -> lisUrl);
         registry.add("clinical-read.mini-lis.service-token", () -> LIS_TOKEN);
+        registry.add("clinical-read.source", () -> "mini-his");
+        registry.add("fhir.servers.local-hapi.base-url", () -> "http://127.0.0.1:9/fhir");
         registry.add("interop.sources.mini-his.base-url", () -> hisUrl);
         registry.add("interop.sources.mini-lis.base-url", () -> lisUrl);
         registry.add("interop.sources.clinic-b.organization-id", () -> "org-clinic-b");
@@ -78,21 +81,14 @@ class FederationFlowTest {
         registry.add("federation.participants.clinic-b.service-token", () -> CLINIC_TOKEN);
         registry.add(
                 "federation.security-audit.store-path",
-                () -> Path.of(
-                                System.getProperty("java.io.tmpdir"),
-                                "federation-security-audit-" + System.nanoTime() + ".sqlite")
-                        .toString());
+                () -> FEDERATION_AUDIT.toString());
         registry.add("federation.grants.mini-his[0]", () -> "mini-his");
         registry.add("federation.grants.mini-his[1]", () -> "mini-lis");
         registry.add("federation.grants.mini-his[2]", () -> "clinic-b");
-        registry.add("MODEL_BOUNDARY_SERVICE_TOKEN", () -> READ_TOKEN);
     }
 
     @LocalServerPort
     private int federationPort;
-
-    @Autowired
-    private Environment environment;
 
     private final ObjectMapper json = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
@@ -112,7 +108,6 @@ class FederationFlowTest {
 
     @Test
     void twoRealSystemsReturnOneFederatedContext() throws Exception {
-        assertThat(environment.getProperty("clinical-read.source")).isEqualTo("local-hapi");
         String base = "http://127.0.0.1:" + federationPort;
         JsonNode accepted = post(base + "/api/exchange/v1/orders", HIS_EXCHANGE_TOKEN, """
                 {"sourceOrganizationId":"org-mini-his","destinationSystemKey":"mini-lis","externalRequestId":"FED-ORDER-001","testCode":"GLU","testDescription":"Glucose","requestedAt":"2026-03-01T10:00:00Z","patient":{"identifierSystem":"https://lab.local/mini-his/patient","identifierValue":"MHS-PAT-001","familyName":"Quispe","givenName":"Ana","birthDate":"1984-03-12","administrativeSex":"female"}}
@@ -174,30 +169,64 @@ class FederationFlowTest {
         assertThat(forbidden.statusCode()).isEqualTo(403);
         assertThat(forbidden.body()).contains("source_not_authorized").doesNotContain("13.4").doesNotContain("141");
 
+        HttpResponse<String> wrongOrganization = send(
+                base + "/api/clinical-federation/v1/context",
+                HIS_FEDERATION_TOKEN,
+                context(
+                        "org-clinic-b",
+                        "mini-his",
+                        "https://lab.local/mini-his/patient",
+                        "MHS-PAT-001",
+                        "[\"mini-his\"]"));
+        assertThat(wrongOrganization.statusCode()).isEqualTo(403);
+        assertThat(wrongOrganization.body())
+                .contains("organization_mismatch")
+                .doesNotContain("13.4")
+                .doesNotContain("141");
+
+        HttpResponse<String> wrongCallerSystem = send(
+                base + "/api/clinical-federation/v1/context",
+                HIS_FEDERATION_TOKEN,
+                context(
+                        "org-mini-his",
+                        "mini-lis",
+                        "https://lab.local/mini-his/patient",
+                        "MHS-PAT-001",
+                        "[\"mini-his\"]"));
+        assertThat(wrongCallerSystem.statusCode()).isEqualTo(403);
+        assertThat(wrongCallerSystem.body())
+                .contains("identity_system_mismatch")
+                .doesNotContain("13.4")
+                .doesNotContain("141");
+
         HttpResponse<String> anonymous = send(base + "/api/clinical-federation/v1/context", null, context(
                 "org-mini-his", "mini-his", "https://lab.local/mini-his/patient", "MHS-PAT-001",
                 "[\"mini-his\"]"));
         assertThat(anonymous.statusCode()).isEqualTo(401);
         assertThat(anonymous.body()).doesNotContain("13.4");
 
-        HttpResponse<String> previous = send(
-                base + "/api/clinical-read/v1/patients/MHS-PAT-001", READ_TOKEN, null);
-        assertThat(previous.statusCode()).isIn(200, 404, 503);
-        assertThat(previous.body()).doesNotContain("clinical-federation-v1");
-        if (previous.statusCode() == 200) {
-            assertThat(json.readTree(previous.body()).path("contractVersion").asText()).isEqualTo("clinical-read-v1");
-            assertThat(json.readTree(previous.body()).path("destination").asText()).isEqualTo("local-hapi");
-        }
+        assertThat(auditReasonCodes())
+                .containsExactly(
+                        "access_granted",
+                        "access_granted",
+                        "access_granted",
+                        "source_not_granted",
+                        "organization_not_authorized",
+                        "caller_system_not_authorized",
+                        "participant_token_missing");
+    }
 
-        HttpResponse<String> present = send(
-                base + "/api/clinical-read/v1/patients/syn-demo-patient-102", READ_TOKEN, null);
-        assertThat(present.statusCode()).isEqualTo(200);
-        JsonNode read = json.readTree(present.body());
-        assertThat(read.path("contractVersion").asText()).isEqualTo("clinical-read-v1");
-        assertThat(read.path("destination").asText()).isEqualTo("local-hapi");
-        assertThat(read.path("resource").path("resourceType").asText()).isEqualTo("Patient");
-        assertThat(read.path("resource").path("id").asText()).isEqualTo("syn-demo-patient-102");
-        assertThat(present.body()).doesNotContain("clinical-federation-v1");
+    private static List<String> auditReasonCodes() throws Exception {
+        List<String> reasons = new ArrayList<>();
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + FEDERATION_AUDIT.toAbsolutePath());
+                var statement = connection.createStatement();
+                var rows = statement.executeQuery(
+                        "SELECT reason_code FROM federation_security_audit_events ORDER BY rowid")) {
+            while (rows.next()) {
+                reasons.add(rows.getString(1));
+            }
+        }
+        return reasons;
     }
 
     private static void startSystems() {

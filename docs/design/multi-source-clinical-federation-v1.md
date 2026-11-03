@@ -57,13 +57,40 @@ Tokens are environment variables and are blank in `application.yml`.
 
 ## Reproduce the laboratory demo
 
-The automated proof is the flow test. It starts PostgreSQL 16 with Testcontainers, Mini LIS, and Mini HIS on ephemeral ports, submits one synthetic order through the exchange, records one Mini LIS result, and federates both systems. It does not use the live Clinical Read port, the live Mini HIS database, or `POST /synthetic/reset`. `clinical-read.source` stays `local-hapi` in that process.
+The automated proof is the flow test. It starts PostgreSQL 16 with Testcontainers, Mini LIS, and Mini HIS on ephemeral ports, submits one synthetic order through the exchange, records one Mini LIS result, and federates both systems. Its Spring test context selects `clinical-read.source=mini-his` and assigns the unused local-HAPI URL to an inaccessible loopback port. It does not call Clinical Read, use `syn-demo-patient-102`, reuse an operator database, or contact local HAPI.
 
 ```text
 mvn -f services/fhir-integration-service/pom.xml "-Dtest=FederationFlowTest,FederationServiceTest,ClinicalReadServiceTest" test
 ```
 
-Docker Desktop must be running. The flow test is the multi-system evidence. `FederationServiceTest` covers identity, deduplication, authorization, a missing connector, and a timeout with fakes. `ClinicalReadServiceTest` covers the previous single-source service.
+Docker Desktop must be running. The flow test is the multi-system evidence. `FederationServiceTest` covers identity, deduplication, authorization, a missing connector, and a timeout with fakes. `ClinicalReadServiceTest` covers the single-source service without claiming live HAPI compatibility.
+
+### Coverage split
+
+| Original assertion group | Responsibility | Executing test | Dependency | Expected evidence |
+|---|---|---|---|---|
+| Federation contract, caller and complete source outcomes | Clinical Federation | `FederationFlowTest` | Isolated Mini HIS, Mini LIS and PostgreSQL Testcontainers | `clinical-federation-v1`, `complete`, both sources complete |
+| Patient, Observation and ServiceRequest counts; values and units | Normalization | `FederationFlowTest` | Synthetic per-run fixtures | Both source payloads, preserved units, no invented LOINC |
+| Unique `fullUrl`, `meta.source`, rewritten references and strict parsing | Provenance and FHIR validity | `FederationFlowTest` | Ephemeral source URLs | Source-qualified entries and valid R4 resources |
+| Unlinked patient and unavailable registered connector | Partial federation | `FederationFlowTest` | Isolated exchange link and unreachable synthetic registry entry | `identity_unresolved` and `connector_unavailable` without leakage |
+| Valid participant, source grant, organization, caller system and anonymous request | Authentication and authorization | `FederationFlowTest` | Test-only participant tokens and per-run audit SQLite | Allowed requests plus 401/403 denials and seven ordered audit decisions |
+| Clinical Read remains distinct from Federation | Contract regression | `ClinicalReadServiceTest` and controller tests | Deterministic unit/MockMvc fixtures | `clinical-read-v1` without a federation envelope |
+| Default source is `local-hapi` and exact read of `syn-demo-patient-102` | Legacy HAPI compatibility | `LegacyHapiClinicalReadCompatibilityLiveIT` | Explicit, test-owned HAPI R4 server seeded by the operator of that test | Exact Patient read through `clinical-read.source=local-hapi` |
+
+### Legacy HAPI compatibility boundary
+
+The legacy exact-read assertion is explicitly excluded by Surefire and the default Failsafe configuration. JUnit also requires the dedicated `hapi-legacy-live` profile marker, `-Dhapi.legacy.testOwnedConfirmed=true` on the invocation and the environment opt-ins below. Other live profiles leave the HAPI profile marker false. Inherited HAPI environment variables alone cannot activate this test, even with the dedicated profile, because ownership confirmation defaults to false.
+
+Before supplying the command-line ownership confirmation, the operator must verify that the URL and port belong to an independently managed HAPI R4 server dedicated to this test, with its own storage and the synthetic Patient `syn-demo-patient-102`. Loopback and boolean flags do not establish infrastructure ownership. Never point this test to the repository's preexisting `local-hapi` containers or any operator-owned server. The class only reads: it does not provision, seed, delete or modify HAPI resources.
+
+```powershell
+$env:HAPI_LEGACY_LIVE_IT='true'
+$env:HAPI_LEGACY_TEST_OWNED='true'
+$env:HAPI_LEGACY_BASE_URL='http://127.0.0.1:<dedicated-port>/fhir'
+mvn -f services/fhir-integration-service/pom.xml verify -Phapi-legacy-live "-Dhapi.legacy.testOwnedConfirmed=true"
+```
+
+Leave the test omitted when those ownership, fixture and isolation requirements are not met. It checks the existing Clinical Read adapter against a real HAPI endpoint; a stub would prove only HTTP/contract behavior. A later task may provision a dedicated HAPI Testcontainers fixture, but image choice, readiness, seeding and cleanup are outside this increment.
 
 A manual call, after the tokens and both simulators are running and an exchange order has created the patient link:
 
