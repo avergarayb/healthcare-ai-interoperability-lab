@@ -42,7 +42,7 @@ Product scope lives in [PROJECT.md](PROJECT.md). Current authority boundaries li
 - On-demand AI-assisted review for an open follow-up case, with one structured Gemini explanation, claim-level citations and no stored model output.
 - One explicit internal follow-up coordination request after a closed review case whose outcome is follow-up coordination planned. The request status `requested` records that internal request. It does not send a message, write FHIR, or schedule an appointment.
 - Development authentication for the synthetic review pages: a server-side session, login and logout, and form signatures bound to that session. It is not production identity, verified reviewer identity, RBAC or institutional SSO.
-- Development attribution for a new Human Review close and for the first coordination request from that UI. The stored principal is a synthetic development principal. Manual validation passed. It is not verified clinical identity, IAM, SSO, RBAC, or a security audit. Historical rows stay unattributed. This service does not write FHIR. Security audit remains a separate later decision.
+- Development attribution for a new Human Review close and for the first coordination request from that UI. The stored principal is a synthetic development principal. Manual validation passed. It is not verified clinical identity, IAM, SSO, RBAC, or a security audit. Historical rows stay unattributed. This service does not write FHIR. Separate laboratory security-audit decisions are now implemented under [Security audit v1](contracts/security-audit-v1.md).
 - `DEMO_EXPERIENCE_V1`, including slice 2, is complete and validated in the laboratory as presentation for the synthetic Human Review queue and case page. Implementation covers Spanish operational labels, readable UTC dates, one closed technical-details group, one rendering of the appointment that opened a missed-follow-up case, and the unclassified appointment label. Automated tests passed. Manual validation of slice 1 is complete. Visual validation of slice 2 is complete: `SYN-DEMO-102` through Java Clinical Read against local HAPI, and `SYN-DEMO-101` in an isolated temporary review with an in-memory FHIR gateway. Java Clinical Read was used for `SYN-DEMO-102` only. It does not change protocols, outcomes, coordination policy, sessions, or attribution. It is not production-ready and not a complete localization.
 - Deterministic, evaluation-harness and opt-in real-HAPI coverage. Live embedding and live AI-assistance checks are separate opt-ins from live Gemini narrative tests.
 - Laboratory stages 1 and 2 of Mini HIS to Java Clinical Read to the missed-follow-up agent were executed on 2026-10-19. The record is [E2E interoperability validation results](results/e2e-interoperability-validation-v1-results.md). The procedure remains [the design](design/e2e-interoperability-validation-v1.md). Post-consultation live execution was not run. This is not a production certification.
@@ -58,7 +58,7 @@ The following capabilities are not established by the current repository:
 - enterprise IAM/RBAC and multi-tenancy;
 - demographic or probabilistic patient matching. Federation uses an explicit identifier link only;
 - a production master patient index or production clinical federation. The laboratory federated mode is opt-in, sequential, and limited to the granted Mini HIS and Mini LIS connectors. It does not emit a FHIR Provenance resource. A complete envelope can run the existing structural follow-up rules. That is a synthetic demonstration, not production clinical decision support. A partial envelope stays insufficient;
-- durable audit storage and production operations;
+- production-grade centralized/tamper-evident audit retention and operations; local durable laboratory SQLite audit is implemented under Security & Governance V1;
 - production secret management and enforced network architecture;
 - autonomous actions or FHIR writes from Healthcare AI;
 - retirement of `HapiReadClient` and `FHIR_BASE_URL`;
@@ -85,6 +85,8 @@ Future product decisions may consider:
 Each candidate requires a separate product decision, security assessment and acceptance contract. Historical phase names under `docs/tasks/` remain development history rather than current sequencing authority.
 
 ## Current position
+
+Security & Governance V1 TASK 001–007 are integrated and technically closed for their laboratory scope; [the closure](ai-governance/security-governance-v1-closure.md) preserves the independent pending HAPI legacy validation. Identity & Access Foundation V1 — TASK 001 records the Product Owner-approved [provider-independent architecture](design/identity-access-foundation-v1.md), internal identity and OIDC trust design contracts, with ADR-096 accepted as direction rather than runtime implementation. TASK 002 proposes a separately owned Keycloak laboratory fixture, explicit audience mappers/scopes and fixture-only token-profile tests; it is not runtime work authorized by TASK 001. Enterprise IAM, SaaS resource isolation, Enterprise Connectors and MCP remain unimplemented.
 
 The repository has an implemented interoperability foundation and an implemented Healthcare AI workflow foundation. It is beyond the former “Phase 2–3” and “future AI/LangGraph” descriptions.
 
