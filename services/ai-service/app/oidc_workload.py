@@ -11,9 +11,10 @@ from time import time
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from app.oidc_config import AUDIENCE, PERMISSION, ROUTE, Rejected, load_config
+from app.oidc_config import AUDIENCE, ID, PERMISSION, ROUTE, Rejected, load_config
 from app.oidc_verifier import AccessVerifier
 from app.oidc_workload_audit import WorkloadAudit
+from app.trusted_identity_registry import RegistryError, TrustedIdentityRegistry
 
 
 @dataclass(frozen=True, repr=False)
@@ -66,11 +67,27 @@ def credential(request):
     return value[7:]
 
 
+def organization_for(request):
+    values = request.headers.getlist("X-IAM-Lab-Organization")
+    if not values:
+        return None
+    if len(values) != 1 or not ID.fullmatch(values[0]):
+        raise Rejected("organization_rejected", 403)
+    return values[0]
+
+
 class WorkloadBoundary:
-    def __init__(self, config_path, audit_path, forbidden_paths=()):
+    def __init__(self, config_path, audit_path, forbidden_paths=(), *, policy_mode="static", registry_path=""):
         self.config = self.verifier = self.audit = None
+        self.policy_mode, self.registry = policy_mode, None
+        if policy_mode == "sqlite":
+            try:
+                self.registry = TrustedIdentityRegistry(registry_path, (*forbidden_paths, audit_path))
+            except (RegistryError, OSError, ValueError):
+                pass
         try:
-            if not audit_path or Path(audit_path).resolve() in {Path(p).resolve() for p in forbidden_paths if p}:
+            audit_forbidden = (*forbidden_paths, registry_path) if policy_mode == "sqlite" else forbidden_paths
+            if not audit_path or Path(audit_path).resolve() in {Path(p).resolve() for p in audit_forbidden if p}:
                 raise ValueError("separate audit store required")
             self.audit = WorkloadAudit(audit_path)
         except (ValueError, OSError):
@@ -81,11 +98,25 @@ class WorkloadBoundary:
         except Rejected:
             pass
 
-    def context(self, token, correlation):
+    def context(self, token, correlation, candidate=None, *, request=None):
         if self.config is None or self.verifier is None:
             raise Rejected("configuration_incomplete", 503)
         config = self.config
         verified = self.verifier.verify(token)
+        if request is not None:
+            candidate = organization_for(request)
+        if self.policy_mode == "sqlite":
+            if self.registry is None:
+                raise Rejected("registry_unavailable", 503)
+            policy = self.registry.resolve(config, verified, candidate)
+            now = time()
+            if now >= verified.expires_at:
+                raise Rejected("token_expired")
+            return PrincipalContext(policy.principal_id, policy.organization_id, config.provider_id,
+                                    config.issuer, verified.subject, policy.permissions,
+                                    instant(now), instant(verified.expires_at), correlation)
+        if self.policy_mode != "static":
+            raise Rejected("configuration_incomplete", 503)
         binding = next((b for b in config.bindings if b.client_id == verified.client_id and b.external_subject == verified.subject), None)
         if binding is None:
             raise Rejected("binding_unknown")
@@ -94,6 +125,8 @@ class WorkloadBoundary:
         if not binding.principal_enabled:
             raise Rejected("principal_disabled", 403)
         if not binding.membership_enabled or binding.organization_id not in config.allowed_organization_ids:
+            raise Rejected("organization_rejected", 403)
+        if candidate is not None and candidate != binding.organization_id:
             raise Rejected("organization_rejected", 403)
         if PERMISSION not in binding.permissions:
             raise Rejected("policy_rejected", 403)
@@ -108,7 +141,9 @@ class WorkloadBoundary:
         correlation = correlation_for(request)
         context, status, reason = None, 200, "access_granted"
         try:
-            context = self.context(credential(request), correlation)
+            token = credential(request)
+            # Crypto precedes policy; this bounded candidate never proves membership.
+            context = self.context(token, correlation, request=request)
         except Rejected as error:
             status, reason = error.status, error.reason
         # Only fixed server codes and trusted registration ids reach the audit.
@@ -139,7 +174,10 @@ def configure_boundary(application, settings):
     legacy_audit = settings.security_audit_db_path or str(Path(settings.human_session_db_path).parent / "security-audit.sqlite3")
     boundary = WorkloadBoundary(settings.oidc_workload_trust_config_path, settings.oidc_workload_audit_db_path,
                                 (settings.ai_review_db_path, settings.human_session_db_path,
-                                 settings.institutional_knowledge_db_path, legacy_audit))
+                                 settings.institutional_knowledge_db_path, legacy_audit,
+                                 str(Path(settings.ai_review_db_path).resolve().parent / "agent-workflow.sqlite3")),
+                                policy_mode=settings.oidc_workload_policy_mode,
+                                registry_path=settings.oidc_workload_registry_db_path)
     def endpoint(request: Request):
         return boundary.handle(request)
     application.add_api_route(ROUTE, endpoint, methods=["GET"], name="oidc_workload_context_v1")

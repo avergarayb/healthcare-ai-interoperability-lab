@@ -8,6 +8,8 @@ The commercial target is one provider-independent identity boundary usable in Sa
 
 Approved design interfaces: [Principal Context v1](../contracts/identity-principal-context-v1.md) and [OIDC Provider Integration v1](../contracts/oidc-provider-integration-v1.md). Accepted decision record: [ADR-096](../adr/ADR-096-identity-provider-agnostic-v1.md). Existing operational contracts remain authoritative until a later task explicitly implements/adopts these interfaces.
 
+Subsequent adoption: TASK 002's isolated provider fixture and TASK 003's opt-in Python workload boundary are integrated (PR #104/#105). TASK 004's [Trusted Identity Registry](trusted-identity-registry-v1.md), approved for laboratory scope with main integration pending, adds opt-in dedicated local SQLite principal/binding/membership/grant policy, fresh request reads and atomic local policy-change auditing. It is not a central identity service, human directory or new trust source. The TASK 001 inventory/target and future proposals below remain historical design scope; existing endpoint/session/Java policies are not migrated by these increments.
+
 ## Existing authentication inventory
 
 The table records inspected source, not inferred production capabilities. Paths below are relative to `services/`.

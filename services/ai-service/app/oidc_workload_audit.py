@@ -16,7 +16,7 @@ REASONS = frozenset({"access_granted", "credential_missing", "credential_ambiguo
                      "provider_unavailable", "discovery_mismatch", "keys_invalid", "keys_unavailable", "unknown_key",
                      "algorithm_rejected", "key_source_rejected", "verification_rejected", "token_expired",
                      "time_rejected", "purpose_rejected", "audience_rejected", "binding_unknown", "binding_disabled",
-                     "principal_disabled", "organization_rejected", "policy_rejected"})
+                     "principal_disabled", "organization_rejected", "policy_rejected", "registry_unavailable"})
 
 
 class WorkloadAudit:

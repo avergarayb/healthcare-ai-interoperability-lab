@@ -22,7 +22,7 @@ WORKSPACE = lab.ROOT.parents[1]
 SERVICE = WORKSPACE / "services/ai-service"
 
 
-def startup(directory, trust_file, label, port=PORT):
+def startup(directory, trust_file, label, port=PORT, *, registry_path=None):
     lab.free_port(port)
     env = {k: v for k, v in os.environ.items() if k.upper() in {
         "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "COMSPEC", "PATHEXT"}}
@@ -35,6 +35,8 @@ def startup(directory, trust_file, label, port=PORT):
                MODEL_BOUNDARY_BASE_URL="http://127.0.0.1:9",
                OIDC_WORKLOAD_LAB_ENABLED="true", OIDC_WORKLOAD_TRUST_CONFIG_PATH=str(trust_file),
                OIDC_WORKLOAD_AUDIT_DB_PATH=str(directory / "oidc-audit.sqlite"))
+    if registry_path is not None:
+        env.update(OIDC_WORKLOAD_POLICY_MODE="sqlite", OIDC_WORKLOAD_REGISTRY_DB_PATH=str(registry_path))
     log = open(directory / (label + ".log"), "x", encoding="utf-8")
     process = subprocess.Popen([str(SERVICE / ".venv/Scripts/python.exe"), "-B", "-m", "uvicorn", "app.main:app",
                                 "--app-dir", str(SERVICE), "--host", "127.0.0.1", "--port", str(port),
