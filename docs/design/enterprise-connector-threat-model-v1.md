@@ -1,0 +1,83 @@
+# Enterprise Connector Threat Model V1
+
+TASK 001, **dirección arquitectónica aceptada; no controles nuevos implementados**. [ADR-097](../adr/ADR-097-enterprise-connector-authorization-boundaries.md) acepta solo dirección, no pruebas operacionales ni tareas futuras. Método STRIDE: S suplantación, T alteración, R repudio, I divulgación, D denegación de servicio, E elevación. Alcance y fronteras en [arquitectura](enterprise-connector-authorization-v1.md); invariantes en [contrato](../contracts/enterprise-connector-authorization-v1.md); hechos Microsoft en [perfil Graph](../contracts/microsoft-graph-connector-permissions-v1.md), consultado 2026-11-04.
+
+## Activos, adversarios y controles existentes
+
+Activos: A1 credenciales/tokens/refresh/certificados; A2 contenido y derivados empresariales; A3 catálogo/bindings/grants/configuración; A4 decisiones/auditoría/procedencia; A5 índices/cachés futuros. Fronteras: B1 identidad receptora; B2 agente→política; B3 control plane/almacenamiento; B4 vault/broker; B5 red/proveedor/recurso; B6 contenido→extracción/modelo/RAG; B7 administración/telemetría. Un tercero puede ser solicitante malicioso, usuario de otra organización, autor de documento, operador comprometido o proveedor fallido; no se presume que un tenant admin o el host estén inmunes a compromiso.
+
+**Existente (E):** verificadores workload, bindings locales, audiencias, PrincipalContext y auditorías opt-in IAM; fuentes clínicas/grants existentes; reglas de no confiar en modelo/documentos. La [validación IAM](identity-access-foundation-v1-final-validation.md) solo acredita su alcance de laboratorio. **Propuesto (P):** todos los gates de conector, broker/vault, Selected externo, administración corporativa, saneamiento/egress, extracción segura, auditoría de conector y ACL-RAG de este modelo. No se presenta E como si cubriera P. Tener una regla documental no demuestra enforcement de runtime.
+
+## Registro de ataques (24)
+
+La segunda tabla completa cada fila con prevención, detección, evidencia, riesgo residual y responsable. IDs son la unión estable entre ambas; no se omiten columnas del análisis. Severidades residuales son estimaciones cualitativas después de controles propuestos, todavía no aceptaciones de riesgo ni mediciones de producción.
+
+| ID / STRIDE | Activo y frontera | Actor/condición | Ataque | Impacto |
+|---|---|---|---|---|
+| T01 S/I/E | A1/A2/A3, B1–B5 | Usuario A conoce IDs de B | Instancia/tenant/credencial B usada desde organización A | Lectura cross-tenant/organización |
+| T02 S/E | A1/A2, B2/B4/B5 | Agente o cliente no autorizado | Induce al lector privilegiado a actuar como deputy | Extracción con autoridad ajena |
+| T03 T/E | A3, B1–B3 | JWT/prompt de actor malicioso | Roles, groups o nombre de permiso crean grants locales | Elevación y bypass de política |
+| T04 I/S | A1, B4/B5/B7 | Atacante de host/red/cache | Roba/reproduce access token o clave privada | Impersonación hasta límites de credencial/grant |
+| T05 I/S | A1, B4/B7 | Cache/log/copia insegura | Expone refresh token delegado y renueva fuera del usuario | Acceso persistente y suplantación |
+| T06 S/T | A3, B1/B3/B5 | Campo tenant/hostname/email no verificado | Envenena binding hacia otro tenant o app | Mezcla de credenciales y datos |
+| T07 T/I | A2/A3, B2/B5 | Cliente cambia drive/item/parent IDs | Sustituye recurso o aprovecha move/remoteItem | Lectura fuera de grant, TOCTOU |
+| T08 T/E | A2/A3, B3/B5 | ACL heredada/administrador cambia padre | Asume que permiso de padre/hijo autoriza todo árbol | Exposición de descendientes/hermanos |
+| T09 E/I | A2/A3, B3/B5 | Onboarding o consentimiento excesivo | Pide All o conserva un grant amplio coexistente | Selected deja de ser límite efectivo suficiente |
+| T10 E/I | A1/A2, B4/B5 | Worker app-only comprometido | Usa autoridad sin usuario o se autoconcede recursos | Lectura masiva/administración |
+| T11 S/I/E | A1/A3, B1/B7 | Phisher/app maliciosa | Consent screen/redirect/cuenta o tenant engañosos | Vinculación de cuenta o consentimiento equivocado |
+| T12 T/I | A2/A3/A5, B3–B6 | Revocación con caches/in-flight | Reutiliza decisión/token/resultado después de retiro | Ventana de acceso residual |
+| T13 T/I | A2/A3, B3/B5 | ACL/revisión externa obsoleta | Snapshot antiguo se interpreta como permiso actual | Lectura o entrega con autorización retirada |
+| T14 E/I | A1/A2, B2/B4/B5 | 401/403, CA o proveedor fallido | Recupera con app-only, tenant o credencial mayor | Escalada silenciosa por fallback |
+| T15 D | A1/A2/A4, B4/B5 | 429, timeouts, volumen o abuso | Reintentos ilimitados/crawling/cache stampede | Cuotas, costos, indisponibilidad |
+| T16 S/I | A1/A2, B5 | nextLink/Location/URL manipulados | SSRF, DNS rebinding, envío Bearer a host ajeno | Exfiltración o acceso a red interna |
+| T17 S/T/E | A2/A3, B2/B5 | Autor de enlace compartido | Link malicioso/remoteItem redime acceso o cambia tenant | Autoridad por URL y ampliación de ámbito |
+| T18 T/E | A2/A3, B6 | Documento empresarial hostil | Prompt injection modifica organización/scopes/tools | Cruce de frontera de instrucciones |
+| T19 I/E | A2, B2/B6/B7 | LLM inducido por documento | Envía contenido a URL, modelo o destinatario no aprobado | Exfiltración aunque lectura original fuese válida |
+| T20 I/T/D | A2/A5, B6 | Ingestión insegura no autorizada | Indexa/embebe todo, formatos activos o bombas | Copias permanentes, malware, costos |
+| T21 I/E | A2/A5, B3/B6 | Cache/índice compartido, ACL obsoleta | Retrieval de chunks/citas/títulos de otra organización | Fuga semántica y persistencia tras revocación |
+| T22 R/T/I | A4, B3/B7 | Sink caído u operador/atacante | Omite, modifica o inventa audit success | Pérdida de evidencia y acceso no atribuible |
+| T23 I | A1/A2, B5/B7 | SDK, tracing, exception o soporte | Log de Authorization, signed URLs, documentos o PII | Secreto reutilizable/filtración indirecta |
+| T24 S/T/E | A1/A3/A4, B3/B7 | Operador no verificado o agente | Reconfigura tenant/app/grants/credential ref/versión | Acceso persistente y borrado de límites |
+
+## Controles y evidencia requerida
+
+Todos los controles listados como P se implementarán solo en una tarea autorizada. «Test» en esta tabla es evidencia **requerida futura**, no ejecutada en TASK 001.
+
+| ID | Control preventivo | Detección | Evidencia requerida | Residual | Responsable futuro |
+|---|---|---|---|---|---|
+| T01 | P binding exacto por organización/instancia/tenant/app/modo/cuenta; E contexto receptor | P auditoría organization_mismatch y verificación de refs | Mismo ID externo con A/B, cache hit y solicitud paralela; B inaccesible desde A, cero vault/Graph | Medio: host/operador puede comprometer varios ámbitos | TASK 002/003/005/007 |
+| T02 | P decisión interna de un uso, recursos/operaciones/destino cerrados; broker no acepta prompt | P correlación decisión/adquisición/llamada | Principal sin grant y workload vs humano; referencia forjada/replay sin llamadas externas | Medio: error en consumer o política | TASK 002/003/005/007 |
+| T03 | P grants locales versionados, sin unión; E JWT verificado no concede claims como permisos | P denial policy y detección de drift | Roles/groups/admin y permisos de otro proveedor no autorizan operación | Bajo–medio: mala administración local | TASK 002/007 |
+| T04 | P vault/certificado/federación aprobados, uso transitorio, TLS y cache segregada; no tokens al agente | P alertas de acceso a secreto, logs sanitizados y anomalías | Canary secretos en todos los outputs, credencial retirada deja de adquirirse; revisión de custodia/egress | Alto: compromiso del host/credencial con ventana externa | TASK 003/004/007 |
+| T05 | P refresh cache cifrada por cuenta/tenant/instancia, sin fallback y revocación/reauth explícitas | P eventos de interacción requerida/uso anómalo | Reutilización en otra cuenta/instancia negada; no prompt/log/checkpoint; retiro requiere reconsent si aplica | Alto: refresh robado y revocación externa no instantánea | TASK 003/006/007 |
+| T06 | P binding aprobado fuera del request; sin discovery/email automático; endpoints exactos | P auditoría binding inválido y revisión administrativa | tid/email/hostname adulterados y guest-home/resource mismatch no cambian tenant | Medio: onboarding confiable equivocado | TASK 002/003/006/007 |
+| T07 | P IDs cualificados, relación padre/tenant actual y revalidación antes de entrega | P resource_out_of_scope y cambio de versión/parent | Swap item/drive/list, move entre ámbitos y carrera de revocación suprimen entrega | Medio: cambios externos concurrentes | TASK 002/004/005/007 |
+| T08 | P grants con exact/subtree explícitos y revalidación; no asumir ACL por path | P inventario/revisión de permisos y herencia | Recurso hijo, hermano, padre y cambios de herencia; lower scope no permite parent | Medio: complejidad ACL externa | TASK 002/004/007 |
+| T09 | P inventario de consentimiento efectivo, Selected mínimo+read, excepción All separada | P alerta drift de scopes/roles/grants coexistentes | No consentimiento/grant/token: cero acceso; amplio coexistente detectado; ningún 403 pide más scope | Alto: administrador externo puede ampliar privilegios | TASK 003/004/007 |
+| T10 | P identidad administrativa separada; worker sin FullControl/permission-write; cuotas read | P detección de operaciones no catalogadas y anomalías de volumen | No admin routes/consent en runtime; vecino no asignado rechazado; extracción masiva bloqueada | Alto: app-only comprometida puede usar su alcance legítimo | TASK 003/004/007 |
+| T11 | P Code+PKCE state/nonce/redirect/tenant exactos, linking aprobado y reauth sensible | P audit de linking/consent y fallo de transacción | Cuenta/tenant distinto, callback mix-up/replay, consentimiento negado; no passwords | Medio: ingeniería social y tenant policy | TASK 006/007 |
+| T12 | P nuevas decisiones con revisión vigente, invalidate local, recheck páginas/entrega, offboarding | P versiones/revocation logs y trabajos cancelados | Mismo token antes/después retiro; in-flight y cache no sirven al detectar cambio; medir retraso externo | Medio–alto: bytes ya entregados/ventana proveedor | TASK 002/003/004/005/007 |
+| T13 | P revisión de evidencia externa, expiraciones y proveedor como autoridad final | P external_access_denied y stale review | ACL/consent retirados; token válido no supera 403; evidencia vieja no habilita recursos | Medio: permisos efectivos externos no precomputables | TASK 003/004/006/007 |
+| T14 | P modo/tenant/credencial fijados; sin retry privilegiado ni relajar auth | P evento de denegación y trazas mínimas de perfil elegido | 401/403/CA/refresh fallido: solo identidad/perfil original o interacción, nunca app-only alternativo | Bajo–medio: errores de integración | TASK 002/003/004/006/007 |
+| T15 | P presupuesto de páginas/bytes/tiempo/concurrencia/reintentos; backoff bounded | P métricas 429/timeouts/cuotas por instancia | Retry-After grande, 5xx, loops de nextLink, oversize/zip bomb interrumpen sin crawling | Medio: cuotas compartidas y proveedor fuera de control | TASK 002/004/007 |
+| T16 | P endpoints de catálogo, HTTPS/egress/IP/DNS, redirects manuales aprobados; no reenviar Bearer a descarga | P red/host rechazado sin URL sensible | metadata-IP, DNS cambio, nextLink/302 a host ajeno, esquema/userinfo malicioso; cero secreto enviado | Alto hasta validar política de descarga/egress | TASK 002/003/004/007 |
+| T17 | P shared links/remoteItem/cross-tenant deshabilitados; sin redeem automático | P recurso externo no soportado | Link conocido, codificado, guest o shortcut no da grant ni cambia tenant; parser no hace fetch | Bajo inicialmente; alto si se habilita sin nueva revisión | TASK 002/004/006/007 |
+| T18 | P contenido siempre datos, fuera de instrucciones; capacidades server-owned y autorización en cada acción | P detección de intentos/operaciones no permitidas, sin log del prompt sensible | Documento pide cambiar organización/scopes/tools/secretos: ninguna acción ni grant nuevo | Medio: prompt injection no se elimina con un clasificador | TASK 002/004/005/007; MCP futuro |
+| T19 | P allowlist de destino/modelo, clasificación y salida separada de read; no egress arbitrario | P decision audit de salida y métricas de volumen | Documento/LLM pide envío externo o tool no autorizada; ninguna llamada ni contenido en log | Medio–alto: uso indebido dentro de destinos ya autorizados | TASK 002/004/005/007; sin framework empresarial genérico |
+| T20 | P sin indexación V1; extractores aislados, formatos/límites aprobados, no macros/fetch secundarios | P rechazo de operación y cuarentena mínima | Solicitud de sync/index/bulk o archivo activo/bomba denegada; cero embedding por defecto | Medio: parsers/proveedor/modelo y retención | TASK 002/004/005/007; RAG futuro |
+| T21 | P ACL/procedencia/organización preservadas, filtrado y revalidación también en cache/citas | P señales cross-org y auditoría de retrieval | Chunks similares A/B, revocación antes de retrieval y títulos/citas laterales no se filtran | Alto hasta diseño de ACL-RAG; no implementado V1 | TASK 002/005/007: cache, citas y no habilitación; ACL-RAG futuro |
+| T22 | P audit previo fail-closed; resultado/entrega diferenciados; sink con acceso/retención/integridad aprobados | P diagnóstico fijo de fallo y reconciliación, no evento ficticio | Sink caído: cero vault/Graph; sink final falla: suprime entrega; manipulación detectable bajo diseño futuro | Medio–alto: sin atomicidad Graph ni inmunidad a admin de host | TASK 002/003/005/007 |
+| T23 | P allowlists de campos y scrub en SDK/telemetría/errores; no signed URLs ni cuerpos | P canaries y revisión de artefactos/exportes | Tokens/refresh/certificados y datos señuelo no aparecen en logs, auditoría, chats, errores o RAG | Medio: herramientas de soporte/configuración futura | TASK 002/003/004/005/006/007 |
+| T24 | P control plane autenticado/versionado, separación de funciones y revisión de cambios sensibles | P auditoría administrativa y drift/rollback controlado | Agente/CLI no verificada no cambia binding; rollback viejo/replay/change sin autoridad rechazados | Alto: compromiso de administrador/tenant/host | TASK 002/003/006/007 |
+
+## Gates y aceptación de riesgo
+
+Antes de Graph real, exigir al menos T01–T17, T22–T24 en fixture sintético, custodia/administración aprobadas y política de transporte/descarga. T18–T21 exigen pruebas negativas de que documentos no ejecutan acciones, activan RAG ni cruzan organización; habilitar RAG/MCP requiere su propio threat model y aprobación. No etiquetar la matriz como PASS de implementación: en TASK 001 solo se verifica cobertura documental.
+
+La numeración del [plan de siete tareas](enterprise-connector-authorization-implementation-plan-v1.md) reserva TASK 005 a integración LangGraph controlada, TASK 006 a delegated y TASK 007 a E2E. T02/T18 requieren envelope server-owned derivado de una frontera autenticada y autorizada; PrincipalContext en prompt/tool arguments/checkpoint/entrada de usuario no es autoridad. Trabajo asíncrono/continuaciones se reautoriza, sin tokens Microsoft en el grafo. El endpoint IAM de laboratorio no autentica cualquier invocación LangGraph ni acredita un framework empresarial genérico.
+
+Para T12/T18–T21, aplicar gates independientes A consulta, B entrega, C modelo concreto/destino aprobado y D indexación/conservación de derivados (deshabilitado V1). Pruebas futuras TASK 002/005/007: A permitido pero C no aprobado deniega envío; documento hostil no activa tools ni altera permisos; cache hit reautoriza B; documentos de organización B no aparecen en respuestas/citas/resultados de A; read no permite indexar, sharing o exfiltrar. Auditar autorización, acceso externo y entrega como hechos distintos. La integración futura revisará compatibilidad clínica sin cambiar protocolos ni Human Review. Cada tarea necesita autorización propia.
+
+Riesgos abiertos de mayor prioridad: módulo comparte host con su consumidor, permisos app-only usados por un host comprometido, descarga preautenticada/SSRF, administración del cliente, cachés/refresh/retirada externa y datos derivados persistentes. Un servicio dedicado puede reducir algunas fronteras pero no elimina estos riesgos ni sustituye políticas por hop. La aceptación corresponde al Product Owner/cliente y responsables de seguridad, no al agente.
+
+Evidencia futura debe vincular amenaza → requisito → caso negativo/positivo → clasificación sintética/live/documental → resultado y limitación. No usar captura de un permiso configurado como prueba de acceso efectivo ni una sola lectura positiva como prueba de aislamiento. TASK 001 no solicita cuentas, secretos o datos para resolver estos gates.
