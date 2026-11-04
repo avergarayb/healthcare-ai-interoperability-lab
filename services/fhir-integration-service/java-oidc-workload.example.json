@@ -1,0 +1,40 @@
+{
+  "contract_version": "java-oidc-workload-v1",
+  "provider_id": "synthetic-provider",
+  "enabled": false,
+  "issuer": "https://identity.example.invalid/realms/lab",
+  "discovery_url": "https://identity.example.invalid/realms/lab/.well-known/openid-configuration",
+  "expected_jwks_uri": "https://identity.example.invalid/realms/lab/protocol/openid-connect/certs",
+  "endpoint_allowlist": [
+    "https://identity.example.invalid/realms/lab/.well-known/openid-configuration",
+    "https://identity.example.invalid/realms/lab/protocol/openid-connect/certs",
+    "https://identity.example.invalid/realms/lab/protocol/openid-connect/token",
+    "https://identity.example.invalid/realms/lab/protocol/openid-connect/auth"
+  ],
+  "audience": "healthcare-interop-api",
+  "algorithm": "RS256",
+  "access_token_profile": "keycloak-client-credentials-v1",
+  "allow_http_loopback": false,
+  "allowed_organization_ids": ["org-lab-b"],
+  "clock_skew_seconds": 0,
+  "max_access_token_lifetime_seconds": 300,
+  "jwks_refresh_seconds": 300,
+  "jwks_hard_ttl_seconds": 900,
+  "unknown_kid_refresh_min_interval_seconds": 30,
+  "http_timeout_millis": 2000,
+  "metadata_max_bytes": 1048576,
+  "bindings": [
+    {
+      "client_id": "lab-python-to-java",
+      "external_subject": "00000000-0000-4000-8000-000000000202",
+      "internal_principal_id": "fixture-python-to-java",
+      "principal_type": "workload",
+      "binding_enabled": true,
+      "principal_enabled": true,
+      "organization_id": "org-lab-b",
+      "membership_enabled": true,
+      "audience": "healthcare-interop-api",
+      "permissions": ["iam.java-workload-context.read"]
+    }
+  ]
+}
