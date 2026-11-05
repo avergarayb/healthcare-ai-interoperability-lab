@@ -621,12 +621,19 @@ def test_concurrent_budget_denies_second_read_without_another_acquisition(lab):
 def test_new_package_has_no_network_llm_http_routes_or_production_imports():
     package = Path(__file__).resolve().parents[1] / "app/enterprise_connectors"
     allowed = {"__future__", "dataclasses", "datetime", "enum", "typing", "threading", "uuid", "re"}
+    persistence_imports = {
+        "control_types.py": {"json"},
+        "sqlite_store.py": {"contextlib", "contextvars", "functools", "hashlib", "pathlib", "sqlite3"},
+        "control_plane.py": {"contextlib", "hashlib", "sqlite3"},
+        "durable_audit.py": {"sqlite3"},
+    }
     for path in package.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        file_allowed = allowed | persistence_imports.get(path.name, set())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                assert all(alias.name.split(".")[0] in allowed for alias in node.names)
+                assert all(alias.name.split(".")[0] in file_allowed for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.level == 0:
-                assert node.module.split(".")[0] in allowed
+                assert node.module.split(".")[0] in file_allowed
             elif isinstance(node, ast.Call):
                 assert not isinstance(node.func, ast.Name) or node.func.id not in {"open", "eval", "exec", "__import__"}
