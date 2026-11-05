@@ -117,7 +117,7 @@ class ConnectorService:
             else:
                 # This is cached data, not a new external execution or cached ALLOW.
                 external = None
-            with self.store.lock:
+            with self.store.delivery_guard():
                 if self.policy.clock() >= deadline:
                     raise ConnectorFailure(Reason.LIMIT)
                 self._validate_delivery(context, request, documents, local_only)

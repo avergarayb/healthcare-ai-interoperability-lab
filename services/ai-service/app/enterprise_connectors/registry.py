@@ -67,6 +67,9 @@ class SyntheticPolicyStore:
         with self.lock:
             return self._snapshot
 
+    def delivery_guard(self):
+        return self.lock
+
     def replace_rows(self, table: str, rows: tuple, *, expected_revision: int) -> int:
         """Server/test-only CAS; not an authenticated enterprise admin interface."""
         with self.lock:
