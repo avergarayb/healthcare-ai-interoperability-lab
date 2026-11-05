@@ -15,8 +15,8 @@ Las modalidades de agentes son: clínico (flujos acotados ya implementados), emp
 
 ## Última EPIC y TASK integradas
 
-- **EPIC vigente:** Enterprise Connector Authorization V1 — TASK 001, exclusivamente documental; dirección arquitectónica aprobada, ajustes finales autorizados y revisión del PO pendiente antes del PR.
-- **Última TASK integrada en `main`:** Identity & Access Foundation V1 — TASK 006, validación transversal de laboratorio (PR #108). El Product Owner confirma sus seis tareas completadas; no implica preparación productiva. Verificar la referencia remota en cada sesión.
+- **EPIC vigente:** Enterprise Connector Authorization V1 — TASK 002, aceptada para laboratorio sintético; revisión final y commit/push de trece rutas autorizados, integración pendiente.
+- **Última TASK integrada en `main`:** Enterprise Connector Authorization V1 — TASK 001, arquitectura/contratos/threat model (PR #109). Identity & Access Foundation V1 TASK 006 está integrada mediante PR #108. Verificar la referencia remota en cada sesión; ninguna integración implica preparación productiva.
 
 Security & Governance V1 TASK 001–007 están integradas y la EPIC está técnicamente cerrada para su alcance de laboratorio por decisión del Product Owner. Incluye `SECURITY_AUDIT_V1`, autenticación estricta en sus fronteras contratadas, atribución sintética, E2E operacional y federación aislada validada. La reejecución final de FederationFlowTest tras los ajustes de gates quedó diferida por Docker; el Product Owner autorizó el commit sin repetirla. HAPI legacy live sigue como validación independiente pendiente. No implica IAM empresarial, identidad clínica verificada ni preparación productiva.
 
@@ -30,7 +30,9 @@ El plan propone siete tareas: 001 arquitectura/contratos/amenazas, 002 fixture s
 
 Los gates de datos son independientes: A consulta, B entrega al usuario autorizado, C modelo concreto/destino aprobado, D indexación/conservación de derivados (**deshabilitado V1**). A no implica B/C/D. Son requisitos futuros: sin tokens Microsoft en LangGraph/estados/logs, contenido no confiable, clasificación/modelo/destino/uso aprobados antes del LLM, auditoría separada y pruebas negativas de injection/exfiltración/cache/citas cross-org, preservando protocolos clínicos. No RAG/MCP automático.
 
-La autorización vigente permite refinamiento, staging explícito de los nueve documentos, commit y push de TASK 001 tras validar; **no PR ni merge**. No registrar apps Entra, solicitar credenciales/consentimiento, llamar Graph, descargar documentos, crear endpoints/vault ni iniciar servicios, Docker o cloud. TASK 002 sería exclusivamente sintética; el PO debe autorizar alcance y aceptación antes de iniciarla. No modificar código productivo ni protocolos clínicos.
+TASK 001 está integrada mediante PR #109. La autorización vigente es TASK 002 exclusivamente sintética: módulo aislado `app/enterprise_connectors`, fábrica de identidades solo de test, snapshots/grants en memoria, broker/adaptador simulados, auditoría in-memory y pruebas de concurrencia. [Runbook TASK 002](design/enterprise-connector-synthetic-fixture-v1.md): interfaces, límites de laboratorio, evidencia y matriz T01–T24. Hay 145 pruebas nuevas y 175 regresiones seleccionadas aprobadas; no son evidencia live Graph. El paquete no está conectado a rutas, verificadores IAM, protocolos o herramientas LangGraph. Delegated y gates C/D permanecen denegados; A/B son sintéticos. Caché transitoria opt-in revalida permisos locales y del proveedor simulado; no representa frescura ACL real.
+
+La revisión final corrigió ascendencia inválida por encima de la raíz del grant y revalidación externa sintética de recurso/hijos antes/después de la auditoría de entrega, también en caché. Evidencia y límites en el runbook; no cambian contratos TASK 001. Se autoriza staging/commit/push de exactamente las trece rutas propias tras validar; no PR, merge ni TASK 003. No registrar apps Entra, solicitar credenciales/consentimiento, llamar Graph, descargar documentos reales, crear endpoints/vault ni iniciar servicios, Docker o cloud. El siguiente paso es revisión del PO antes de PR; onboarding/custodia/persistencia reales requieren una autorización nueva.
 
 ## Dependencias y riesgos
 
@@ -59,7 +61,7 @@ La autorización vigente permite refinamiento, staging explícito de los nueve d
 - El diseño IAM debe admitir Keycloak de laboratorio y proveedores corporativos OIDC sin acoplar agentes/protocolos al proveedor. TASK 001 es solo documental; no cambia los métodos de autenticación existentes ni habilita OIDC en endpoints.
 - No tocar `local-hapi` sin autorización explícita.
 - No hacer commit ni push sin autorización. Staging, cuando se solicite, debe ser por rutas explícitas y después de revisar el diff.
-- Identity & Access Foundation V1 TASK 001–006 están integradas. Enterprise Connector Authorization V1 TASK 001 y ADR-097 tienen dirección arquitectónica aceptada; controles pendientes, sin implementación ni autoridad sobre recursos Microsoft. El PO autoriza refinamiento y commit/push de exactamente nueve documentos; PR/merge y TASK 002–007 requieren decisión nueva. No acceso cloud, cambios productivos ni nuevas capacidades por esta aceptación.
+- Identity & Access Foundation V1 TASK 001–006 y Enterprise Connector Authorization V1 TASK 001 están integradas. ADR-097 acepta dirección arquitectónica, no recursos Microsoft. TASK 002 fue aceptada solo como fixture sintético; el PO autoriza revisión final, correcciones bloqueantes acotadas y commit/push exclusivo de trece rutas tras validar. No PR, merge ni TASK 003; esperar revisión del PO. No cambiar autenticación/rutas/grafos existentes; custodia, administración corporativa, acceso cloud y conectores reales requieren decisión nueva.
 
 ## Documentos que deben consultarse
 
@@ -79,6 +81,7 @@ La autorización vigente permite refinamiento, staging explícito de los nueve d
 - [`design/identity-access-foundation-v1-final-validation.md`](design/identity-access-foundation-v1-final-validation.md): TASK 006, capacidades comparadas, harness simultáneo, trazabilidad, resultados reales y propuesta de cierre pendiente de aprobación.
 
 - [`design/enterprise-connector-authorization-v1.md`](design/enterprise-connector-authorization-v1.md), [`contracts/enterprise-connector-authorization-v1.md`](contracts/enterprise-connector-authorization-v1.md), [`contracts/microsoft-graph-connector-permissions-v1.md`](contracts/microsoft-graph-connector-permissions-v1.md), [`design/enterprise-connector-threat-model-v1.md`](design/enterprise-connector-threat-model-v1.md), [`design/enterprise-connector-authorization-implementation-plan-v1.md`](design/enterprise-connector-authorization-implementation-plan-v1.md) y [`adr/ADR-097-enterprise-connector-authorization-boundaries.md`](adr/ADR-097-enterprise-connector-authorization-boundaries.md): TASK 001, dirección arquitectónica aceptada, plan de siete tareas y gates A/B/C/D; no runtime, consentimiento, credenciales ni Graph real.
+- [`design/enterprise-connector-synthetic-fixture-v1.md`](design/enterprise-connector-synthetic-fixture-v1.md): TASK 002, único incremento ejecutable sintético, identidad solo de test, grants/broker/proveedor/auditoría en memoria, resultados clasificados, correcciones finales y límites pendientes; aceptada para laboratorio, no integrada todavía.
 
 ## Procedimiento de cambio entre Codex y Cursor
 
