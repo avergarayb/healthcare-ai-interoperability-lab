@@ -15,7 +15,7 @@ IMPORTS = {
     "gateway.py": frozenset({"time", "uuid", ".execution_types", ".fake_model", ".models", ".policy",
                              "..enterprise_connectors.models", "..enterprise_connectors.registry"}),
     "fake_model.py": frozenset({".execution_types"}),
-    "sqlite_ledger.py": frozenset({"contextlib", "dataclasses", "hashlib", "os", "pathlib", "sqlite3", "stat", "threading",
+    "sqlite_ledger.py": frozenset({"contextlib", "dataclasses", "datetime", "hashlib", "os", "pathlib", "sqlite3", "stat", "threading",
                                   "uuid", "msvcrt", ".execution_types", ".models", "..enterprise_connectors.models"}),
 }
 FILESYSTEM_CALLS = frozenset({"open", "read_text", "read_bytes", "write_text", "write_bytes", "mkdir", "unlink",
