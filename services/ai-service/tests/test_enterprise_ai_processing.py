@@ -537,21 +537,36 @@ def test_subclasses_cannot_add_authority_or_hidden_payload(lab, name):
     assert lab.evaluate(**{key:forged}).outcome is O.DENY
 
 
+def _assert_c01_pure_ast(tree):
+    """Shared by the original purity test and inert negative architecture cases."""
+    allowed = {"dataclasses", "datetime", "enum", "typing", "uuid"}
+    forbidden_calls = {"execute", "executemany", "executescript", "read", "write", "open", "connect", "acquire",
+                       "generate_summary", "invoke", "ainvoke", "stream", "astream", "_validate_delivery", "_event"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import): assert all(alias.name.split(".")[0] in allowed for alias in node.names)
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                assert node.module in {"models", "enterprise_connectors.models", "enterprise_connectors.policy", "enterprise_connectors.registry"}
+            else:
+                assert node.module.split(".")[0] in allowed
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute): assert node.func.attr not in forbidden_calls
+            if isinstance(node.func, ast.Name): assert node.func.id not in {"open", "eval", "exec", "__import__"}
+        if isinstance(node, ast.Name): assert node.id != "__builtins__"
+        if isinstance(node, ast.Constant) and type(node.value) is str and node.value.strip():
+            assert node.value.lstrip().split(None, 1)[0].upper() not in {
+                "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "PRAGMA", "ATTACH", "COMMIT", "ROLLBACK"}
+
+
 def test_package_is_not_wired_to_runtime_and_has_no_execution_primitives():
     root = Path(__file__).resolve().parents[1]
     package = root / "app" / "enterprise_ai_processing"
-    allowed = {"dataclasses", "datetime", "enum", "typing", "uuid"}
-    for path in package.glob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import): assert all(alias.name.split(".")[0] in allowed for alias in node.names)
-            if isinstance(node, ast.ImportFrom):
-                if node.level:
-                    assert node.module in {"models", "enterprise_connectors.models", "enterprise_connectors.policy", "enterprise_connectors.registry"}
-                else:
-                    assert node.module.split(".")[0] in allowed
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                assert node.func.attr not in {"execute", "read", "write", "connect", "acquire", "generate_summary", "invoke"}
+    # C01's pure surface is explicit. The authorized C02 modules have their own
+    # closed inventory/import/effect guards; no unexpected module is ignored.
+    for name in ("__init__.py", "models.py", "policy.py"):
+        path = package / name
+        assert path.is_file()
+        _assert_c01_pure_ast(ast.parse(path.read_text(encoding="utf-8")))
     for path in (root / "app").glob("*.py"):
         assert "enterprise_ai_processing" not in path.read_text(encoding="utf-8")
     assert {f.name for f in fields(AIProcessingDecision)} == {
