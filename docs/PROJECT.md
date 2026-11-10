@@ -41,6 +41,18 @@ Currently implemented:
 - `AI_ASSISTED_REVIEW_V1`, an on-demand explanation for an open review case. It does not store the model output and does not choose the human outcome.
 - `CONTROLLED_ACTION_V1`, one internal follow-up coordination request after a closed case whose outcome is follow-up coordination planned. Closing the case does not create it. Gemini does not authorize it.
 
+### Enterprise laboratory path
+
+This path is integrated for offline laboratory use. It does not share clinical authority, and it is not production Microsoft 365, a real LLM, RAG, MCP, or Gate D.
+
+- Enterprise Connector Authorization V1 TASK 001–005 and DEMO-001 are integrated (PR #109–#114). A four-node LangGraph workflow reads registered synthetic documents through an offline Graph adapter. Connector gates A and B are read and delivery. The adapter is not a live Microsoft Graph connection.
+- Enterprise AI Processing Authorization V1 DESIGN-001, TASK-C01, and TASK-C02 are integrated (PR #115–#117). C01 evaluates Gate C only: a complete grant and recognized synthetic evidence may return `ALLOW_PROCESSING`, which is not executable. C02 adds a Windows-only offline fake gateway, a separate SQLite ledger, one-time leases, reservations, phases T1–T4, durable audit, and `UNKNOWN`/`UNCERTAIN`. It does not deliver an answer to a user. The older connector workflow still denies its Gate C. Gate D stays disabled. C02 does not open that older path.
+- Codex completed the integrated work through C02. Cursor is the laboratory executor from this documentation baseline. TASK-C03 is the next candidate and is not authorized. DEMO-002, TASK-C04, and a later PostgreSQL evaluation are also not authorized.
+
+Codex recorded, before the C02 merge and not re-run for this documentation change: C02 224 passed, C01 192 passed, and connector TASK 002–005 plus DEMO-001 617 passed with 1 skipped. The historical total is 1,033 passed and one inherited skip.
+
+The enterprise limits that remain are Windows offline only, POSIX unsupported, a pending Windows file symlink, uncoordinated writers outside the admission barrier, two SQLite stores without a distributed transaction, no guaranteed external revocation, no enterprise IAM, no Microsoft credentials, no real LLM, no final grounding, no human delivery, no enterprise RAG, embeddings, or MCP, no production readiness, and no guaranteed cryptographic erasure. M01, M02, and the C02 P2 findings remain.
+
 Healthcare AI does not have arbitrary FHIR access. Current follow-up reads are case-bound, GET-only, resource-constrained, bounded, completeness-aware and fail-closed. See [ADR-085](adr/ADR-085-python-follow-up-fhir-and-model-authority-boundary.md) and the [V1 contract](contracts/post-consultation-result-review-v1.md).
 
 ## Composition

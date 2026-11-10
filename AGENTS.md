@@ -1,6 +1,6 @@
 # Instrucciones compartidas para agentes
 
-Estas reglas rigen cualquier trabajo realizado con Codex, Cursor u otro agente en este repositorio. El historial de una herramienta no es autoridad: antes de actuar, leer este archivo, `docs/agent-handoff.md` y la documentación enlazada allí.
+Estas reglas rigen cualquier trabajo realizado con Codex, Cursor u otro agente en este repositorio. El historial de una herramienta no es autoridad: antes de actuar, leer este archivo, `docs/agent-handoff.md` y la documentación enlazada allí. Cursor es el ejecutor vigente del laboratorio. Codex construyó las tareas integradas hasta TASK-C02 y no continúa este repositorio en esta etapa. La publicación sigue exigiendo autorización expresa del Product Owner.
 
 ## Arquitectura y responsabilidades
 
@@ -12,7 +12,7 @@ Estas reglas rigen cualquier trabajo realizado con Codex, Cursor u otro agente e
 ## Modalidades e independencia de agentes
 
 - **Clínico:** usa los contratos de interoperabilidad correspondientes para obtener contexto clínico autorizado y normalizado, con protocolos deterministas y Human Review. Es la modalidad con flujos implementados actualmente.
-- **Empresarial:** puede ejecutar workflows con fuentes y reglas operativas no clínicas sin depender de Java/FHIR. Es una modalidad planificada; no asumir que existe una implementación genérica.
+- **Empresarial:** puede ejecutar workflows con fuentes y reglas operativas no clínicas sin depender de Java/FHIR. El laboratorio tiene un camino offline de lectura y entrega A/B y un gateway fake de Gate C, solo en Windows y sin ruta HTTP. No es un framework genérico, no comparte autoridad con los flujos clínicos y no habilita Graph live, un modelo real, Gate D, RAG ni MCP.
 - **Híbrido:** combina fuentes clínicas y empresariales solo mediante autorizaciones, contratos, procedencia y políticas explícitas. No hereda automáticamente la unión de permisos de ambas modalidades y también es planificado.
 - Cada modalidad debe declarar fuentes, herramientas, allowlists, autorización, auditoría, minimización de datos y criterio de intervención humana. MCP es una capacidad planificada, no implementada; no crear servidores, clientes ni herramientas MCP sin una TASK autorizada.
 
