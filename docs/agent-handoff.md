@@ -17,7 +17,7 @@ Las modalidades de agentes son: clínico (flujos acotados ya implementados), emp
 
 Cursor es el ejecutor del laboratorio desde TRANSITION-002. Codex construyó las tareas integradas hasta TASK-C02 y no continúa este repositorio en esta etapa; pasa a otros proyectos, en particular CNL. No hay handoff entre personas. El mismo repositorio y workspace se conservan. Cada sesión lee `AGENTS.md`, este handoff, [la transición](agent-transition-codex-to-cursor.md) y los contratos aplicables, verifica Git y reporta paso a paso. Commit, push y PR siguen exigiendo autorización expresa del Product Owner.
 
-Última TASK integrada en `origin/main`: Enterprise AI Processing Authorization V1 — TASK-C02, PR #117, commit funcional `36b8a75d867de69871a99ac37d175e88c8bff088`, merge `3c3fc67df9a1da647046595395b084c2aca12e62`. Verificar Git en vivo; `main` local puede estar detrás.
+Última TASK integrada en `origin/main`: TASK-C03 Phase B1, PR #119, merge `c6dd2124713a4aad193dc9ddf7d66129c16d38d7`. TASK-C02 permanece integrada por el PR #117. Verificar Git en vivo; `main` local puede estar detrás.
 
 Integrado y limitado a laboratorio:
 
@@ -26,6 +26,7 @@ Integrado y limitado a laboratorio:
 - DESIGN-001, PR #115, solo arquitectura.
 - TASK-C01, PR #116: evaluación pura de Gate C, grants completos y evidencia sintética reconocida. `ALLOW_PROCESSING` no es ejecutable.
 - TASK-C02, PR #117: gateway fake offline, ledger SQLite separado, leases de un uso, reservas, T1–T4, auditoría durable C y `UNKNOWN`/`UNCERTAIN`. Solo Windows offline. No entrega al usuario.
+- TASK-C03 Phase B1, PR #119: migración explícita V1 a V2, revisión derivada por organización y permiso sintético `grounded_extractive_answer`. `assess_derived_delivery` devuelve `DerivedGrantMatch` y no autoriza A/B/C ni entrega.
 
 Gates, por separado: A autoriza la lectura; B autoriza la entrega del conector; el Gate C del workflow antiguo permanece DENY; el Gate C del gateway C02 es una ejecución fake controlada, offline y aislada del workflow antiguo; Gate D permanece DISABLED. C02 no habilita el workflow antiguo.
 
@@ -33,7 +34,7 @@ Límites que siguen vigentes: POSIX no soportado; symlink físico de archivo Win
 
 Evidencia histórica de Codex, anterior al merge: C02 224 PASS, C01 192 PASS, TASK 002–005/DEMO-001 617 PASS y 1 SKIPPED. Total histórico 1.033 PASS y una omisión heredada. El detalle de Codex está en el [runbook C02](design/enterprise-ai-processing-gateway-audit-task-c02.md). Cursor repitió esas tres suites en Phase B1 y obtuvo el mismo recuento; esa repetición está en el [runbook B1](design/enterprise-grounded-answer-task-c03-b1.md).
 
-Siguiente trabajo, no autorizado: TASK-C03 Phase B2. Phase A está en la propuesta. Phase B1 está implementada en `feature/enterprise-ai-processing-authorization-task-c03` y no está integrada en `main`: migración explícita V1 a V2, revisión derivada por organización, administración sintética del permiso `grounded_extractive_answer` y auditoría de denegaciones atribuibles. `assess_derived_delivery` solo acredita el permiso sintético y devuelve `DerivedGrantMatch`; no es autorización A/B/C ni entrega. No hay observador, grounding, LangGraph nuevo ni entrega. C03 completa no está terminada. El detalle está en el [runbook B1](design/enterprise-grounded-answer-task-c03-b1.md).
+B2-SRC está en `feature/enterprise-ai-processing-authorization-task-c03-b2`. El emisor es de prueba y permanece en `tests/`. `prepare_once` consume el recibo externo; `_seal` vuelve a reconocer la evidencia de la operación admitida. No se ejecuta el modelo. No hay PR ni merge, ni observador, grounding, LangGraph nuevo o entrega. El detalle está en el [runbook B2-SRC](design/enterprise-grounded-answer-task-c03-b2-src.md) y en la [propuesta B2](design/enterprise-grounded-answer-task-c03-b2-source-evidence-proposal.md).
 
 La composición posterior usaría el reader público, C01 y el gateway C02, con evidencia de una sola lectura, `GroundedAnswer`, citas comprobadas contra los bytes originales, revalidación B/C final y puerto público de entrega derivada. El contenido permanecería en un owner por invocación. No se duplican el gateway ni el evaluador. No se llama a helpers privados de `ConnectorService` sin autorización. Después, y tampoco autorizados: DEMO-002, TASK-C04 (evaluación de un proveedor LLM real) y PG-EVAL/MIGRATION.
 
