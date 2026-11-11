@@ -9,8 +9,14 @@ from tests.test_enterprise_ai_processing import _assert_c01_pure_ast
 
 ROOT = Path(__file__).resolve().parents[1] / "app"
 C01 = frozenset({"__init__.py", "models.py", "policy.py"})
-C02 = frozenset({"execution_types.py", "gateway.py", "fake_model.py", "sqlite_ledger.py"})
+C02 = frozenset({"execution_types.py", "gateway.py", "fake_model.py", "sqlite_ledger.py", "source_boundary.py"})
 IMPORTS = {
+    "source_boundary.py": frozenset({
+        "asyncio", "contextvars", "dataclasses", "datetime", "threading", "uuid",
+        ".execution_types", ".gateway", ".models", ".sqlite_ledger",
+        "..enterprise_connectors.models", "..enterprise_connectors.policy",
+        "..enterprise_connectors.registry", "..enterprise_connectors.service",
+        "..enterprise_connectors.synthetic"}),
     "execution_types.py": frozenset({"dataclasses", "datetime", "typing", "types", "uuid", ".models", "..enterprise_connectors.registry"}),
     "gateway.py": frozenset({"time", "uuid", ".execution_types", ".fake_model", ".models", ".policy",
                              "..enterprise_connectors.models", "..enterprise_connectors.registry"}),
@@ -38,7 +44,10 @@ def assert_module(name, source):
             assert call not in {"__import__", "eval", "exec", "_validate_delivery", "_event", "generate_summary",
                                 "add_api_route", "api_route", "include_router", "system", "popen", "clear_frames"}
             if name != "sqlite_ledger.py":
-                assert call not in FILESYSTEM_CALLS | {"connect", "execute", "executemany", "executescript", "cursor"}
+                connector_read = (name == "source_boundary.py" and call == "execute"
+                                  and ast.unparse(node.func) == "self._service.execute")
+                if not connector_read:
+                    assert call not in FILESYSTEM_CALLS | {"connect", "execute", "executemany", "executescript", "cursor"}
             if call == "invoke":
                 assert name == "gateway.py" and ast.unparse(node.func) == "self.model.invoke"
             if call == "_extract":
@@ -108,7 +117,8 @@ def test_c01_negative_controls_still_reject_original_forbidden_dependencies(sour
     ("gateway.py", "from app.institutional_knowledge import index"), ("gateway.py", "router.add_api_route()"),
     ("gateway.py", "service._event()"), ("sqlite_ledger.py", "service._validate_delivery()"),
     ("execution_types.py", "model.invoke()"), ("gateway.py", "model._extract()"),
-    ("unexpected.py", "pass"), ("gateway.py", "open('file')"), ("gateway.py", "frame.f_locals"),
+    ("unexpected.py", "pass"), ("source_boundary.py", "cursor.execute('SELECT x')"),
+    ("source_boundary.py", "service._event()"), ("gateway.py", "open('file')"), ("gateway.py", "frame.f_locals"),
     ("gateway.py", "traceback.clear_frames(tb)"), ("fake_model.py", "__builtins__['eval']('x')")])
 def test_c02_negative_architecture_controls(name, source):
     with pytest.raises(AssertionError):
