@@ -6,3 +6,4 @@ google-genai==2.24.0
 langgraph==1.2.12
 PyJWT[crypto]==2.15.1
 cryptography==50.0.2
+openai==3.49.0
