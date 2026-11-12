@@ -10,8 +10,18 @@ from tests.test_enterprise_ai_processing import _assert_c01_pure_ast
 ROOT = Path(__file__).resolve().parents[1] / "app"
 C01 = frozenset({"__init__.py", "models.py", "policy.py"})
 C02 = frozenset({"execution_types.py", "gateway.py", "fake_model.py", "sqlite_ledger.py",
-                 "source_boundary.py", "grounding.py"})
+                 "source_boundary.py", "grounding.py", "answer.py", "authorization.py",
+                 "delivery_sink.py", "orchestration.py", "composition.py"})
 IMPORTS = {
+    "answer.py": frozenset({"dataclasses", ".execution_types"}),
+    "authorization.py": frozenset({
+        ".execution_types", ".grounding", ".models", ".policy", "..enterprise_connectors.models"}),
+    "delivery_sink.py": frozenset({".execution_types"}),
+    "orchestration.py": frozenset({"asyncio", "typing", "langgraph.errors", "langgraph.graph", "langsmith"}),
+    "composition.py": frozenset({
+        "asyncio", "sys", "dataclasses", "threading", ".answer", ".authorization", ".delivery_sink",
+        ".execution_types", ".grounding", ".orchestration", ".source_boundary", ".sqlite_ledger",
+        "..enterprise_connectors.models"}),
     "grounding.py": frozenset({"dataclasses"}),
     "source_boundary.py": frozenset({
         "asyncio", "contextvars", "dataclasses", "datetime", "threading", "uuid",
@@ -51,7 +61,9 @@ def assert_module(name, source):
                 if not connector_read:
                     assert call not in FILESYSTEM_CALLS | {"connect", "execute", "executemany", "executescript", "cursor"}
             if call == "invoke":
-                assert name == "gateway.py" and ast.unparse(node.func) == "self.model.invoke"
+                rendered = ast.unparse(node.func)
+                assert ((name == "gateway.py" and rendered == "self.model.invoke")
+                        or (name == "orchestration.py" and rendered == "compiled.invoke"))
             if call == "_extract":
                 assert name == "fake_model.py" and ast.unparse(node.func) == "self._extract"
         if isinstance(node, ast.Attribute): assert node.attr not in {"f_locals", "f_globals", "gi_frame", "cr_frame"}
@@ -121,6 +133,9 @@ def test_c01_negative_controls_still_reject_original_forbidden_dependencies(sour
     ("execution_types.py", "model.invoke()"), ("gateway.py", "model._extract()"),
     ("unexpected.py", "pass"),     ("source_boundary.py", "cursor.execute('SELECT x')"),
     ("source_boundary.py", "service._event()"), ("grounding.py", "cursor.execute('SELECT x')"),
+    ("answer.py", "cursor.execute('SELECT x')"), ("authorization.py", "import socket"),
+    ("delivery_sink.py", "open('file')"), ("orchestration.py", "self.model.invoke()"),
+    ("composition.py", "service.execute()"), ("composition.py", "import openai"),
     ("gateway.py", "open('file')"), ("gateway.py", "frame.f_locals"),
     ("gateway.py", "traceback.clear_frames(tb)"), ("fake_model.py", "__builtins__['eval']('x')")])
 def test_c02_negative_architecture_controls(name, source):

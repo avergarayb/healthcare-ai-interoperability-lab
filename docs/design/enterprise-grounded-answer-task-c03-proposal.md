@@ -1,6 +1,6 @@
 # TASK-C03 Phase A — respuesta fundamentada y entrega final
 
-Estado: **propuesta enmendada**. B1, B2-SRC y B2-RUNTIME están integrados. La sección 25 registra B2-GRD: observador efímero y grounding determinista, sin LangGraph nuevo y sin entrega final. La sección 22 sigue siendo el contrato de la migración V2.
+Estado: **propuesta enmendada**. B1, B2-SRC, B2-RUNTIME y B2-GRD están integrados. La sección 26 registra el incremento E2E en el árbol de trabajo, sin commit. La sección 22 sigue siendo el contrato de la migración V2. No hay migración 003.
 
 Esta propuesta compone capacidades ya integradas. No crea un segundo evaluador de Gate C, no duplica grants, no lee tablas SQLite desde LangGraph y no llama a `ConnectorService._validate_delivery` ni a `ConnectorService._event`.
 
@@ -640,3 +640,15 @@ La observación ocurre después del commit `COMPLETED` y fuera de la transacció
 `TrustedEnterpriseSourceBoundary.run` devuelve `RuntimeExecution` con estado técnico, motivo, organización, operación, entradas y reserva. No devuelve texto, candidato ni enteros. Esos enteros, si el veredicto interno es `EVIDENCE_FOUND`, viven en `GroundingRecord` hasta `close`. El documento de laboratorio sin la cláusula queda en `EVIDENCE_INSUFFICIENT`. Dos cláusulas con números distintos también. No hay frase final, ni fila `AUTHORIZED` de entrega, ni LangGraph nuevo.
 
 `close` de una admisión `PREPARED` sin ejecución sigue cancelando esa reserva. `close` después de `COMPLETED` no emite otro `CANCELLED`. `UNCERTAIN` no se concilia. El detalle y los conteos están en el [runbook B2-GRD](enterprise-grounded-answer-task-c03-b2-grd.md).
+
+## 26. E2E con cierre de autoridad y sellado
+
+La composición vive en `EnterpriseAnswerFlow`. El grafo `enterprise_answer_delivery` tiene siete nodos y no tiene checkpointer, store ni caché. Su estado solo lleva fase, motivo, organización, operación, entradas, reserva y decisión. El documento, la pregunta, la evidencia, la lease, el `GroundingRecord`, los enteros y la frase permanecen en la composición de esa invocación.
+
+La frase permitida sale de la plantilla fija y de los enteros del grounding reconocido para `vacation-days-v1`. Si el veredicto es `EVIDENCE_INSUFFICIENT` y la conjunción A/B/C/B1 sigue vigente, la entrega es una abstención fija, sin cifras. Cualquier otro veredicto no construye frase.
+
+`commit_final_delivery` inserta `AUTHORIZED` solo si el caller ya permitió la conjunción y el ledger vuelve a comprobar el grant derivado, la ejecución `COMPLETED`/`CHARGED`, el perfil fake y `question_id`. Si no, inserta `SUPPRESSED`. No altera la fila C02. La auditoría V2 no tiene un evento de autorización positiva; la fila de `aip_delivery_decision` es el registro durable.
+
+La entrega es el `RecognizedDeliverySink` creado por `compose`. No lo aporta el caller. `LocalDelivery` no contiene la frase. `receive(context, request)` exige un contexto que la frontera de identidad reconoce, no vencido, del mismo principal y la misma organización, y una solicitud con el mismo destinatario, instancia, recurso, operación y propósito de la lectura autorizada. Conocer la cadena `recipient_id` no basta. `AUTHORIZED` es la decisión durable. `observed` es la aceptación local del sink y no demuestra que una persona haya leído la frase.
+
+`seal_release_uncertain` deja `RELEASE_UNCERTAIN` solo si una lectura posterior confirma esa fila. Si el sellado o esa lectura fallan, la vista pública no inventa el estado: conserva `AUTHORIZED` cuando esa fue la última lectura confirmada, o no afirma decisión si la lectura durable también falló. La fase queda `UNCERTAIN`, no hay segundo `accept` y la misma invocación no vuelve a autorizar. Esa prohibición vive en el proceso. Una caída o un reinicio no demuestran que la frase no haya salido ni impiden una operación nueva con un permiso vigente. El detalle está en el [runbook E2E](enterprise-grounded-answer-task-c03-e2e.md).

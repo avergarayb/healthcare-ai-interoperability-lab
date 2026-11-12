@@ -11,7 +11,7 @@ from threading import BoundedSemaphore, RLock
 from uuid import uuid4
 
 from .execution_types import EVENTS, REASONS, TERMINAL, ExecutionError, LaboratoryAccess, identifier, instant, require, utc, uuid
-from .models import AIProcessingGrant, AIProcessingPolicy, ModelProcessingProfile, ProcessingLimits, QUESTION
+from .models import AIProcessingGrant, AIProcessingPolicy, PROFILE_ID, ModelProcessingProfile, ProcessingLimits, QUESTION
 from ..enterprise_connectors.models import ConnectorOperation
 
 
@@ -24,6 +24,19 @@ DERIVED_KIND = "grounded_extractive_answer"
 DERIVED_OPERATION = "enterprise.answer.deliver"
 DERIVED_PURPOSE = "synthetic-policy-question-answering"
 DERIVED_CLASSIFICATION = "synthetic-internal"
+QUESTION_ID = "vacation-days-v1"
+
+
+def _execution_matches(row, query):
+    return (row["run_state"] == "COMPLETED" and row["reservation_state"] == "CHARGED"
+            and row["question_id"] == QUESTION_ID and row["profile_id"] == PROFILE_ID
+            and row["destination"] == "in-process-offline"
+            and row["recipient_id"] == query.recipient_id and row["resource_id"] == query.resource_id
+            and row["principal_id"] == query.principal_id and row["instance_id"] == query.instance_id
+            and row["tenant_id"] == query.tenant_id and row["grant_id"] == query.processing_grant_id
+            and row["grant_version"] == query.processing_grant_version
+            and row["registered_version"] == query.registered_version
+            and row["organization_id"] == query.organization_id)
 
 
 def schema_ddl(connection):
@@ -826,6 +839,95 @@ class SQLiteExecutionLedger:
                     processing_grant_id=row["grant_id"], processing_revision=row["processing_revision"])
         if failure is not None:
             raise failure
+
+    def commit_final_delivery(self, access, operation_id, query, *, permit, denial_reason="derived_delivery_not_granted"):
+        """Record AUTHORIZED only when permit is true and the derived grant still matches.
+
+        The V2 decision table already allows AUTHORIZED and RELEASE_UNCERTAIN.
+        The grounding audit vocabulary has no positive event, so this method
+        does not invent one. A refusal writes SUPPRESSED with an existing reason.
+        It does not change the C02 execution row.
+        """
+        if not self._recognized(access):
+            self._record_anonymous_denial()
+            raise ExecutionError("authority_unverifiable", unavailable=True)
+        self._actor(access, {"executor"})
+        uuid(operation_id)
+        self._query_fields(query)
+        if query.organization_id != access.organization_id:
+            self._record_scope_denial(access)
+            raise ExecutionError("processing_not_granted", unavailable=False)
+        if denial_reason not in {"derived_delivery_not_granted", "scope_mismatch", "authority_unverifiable",
+                                 "authorization_expired", "policy_changed", "revision_conflict", "lease_invalid",
+                                 "internal_failure"}:
+            denial_reason = "internal_failure"
+        failure = None
+        decided = None
+        public_reason = denial_reason
+        with self._transaction("derived_authorize") as c:
+            row = c.execute("SELECT * FROM aip_execution WHERE organization_id=? AND operation_id=?",
+                            (access.organization_id, operation_id)).fetchone()
+            current = self._org_derived_revision(c, access.organization_id)
+            if row is None:
+                self._ground_audit(c, "ai_derived_delivery_denied", "DENY", "lease_invalid",
+                    organization_id=access.organization_id, previous=current, revision=current,
+                    principal_id=access.principal_id, operation_id=operation_id, derived_revision=current)
+                failure = ExecutionError("lease_invalid", unavailable=False)
+            elif c.execute("SELECT 1 FROM aip_delivery_decision WHERE organization_id=? AND operation_id=?",
+                           (access.organization_id, operation_id)).fetchone() is not None:
+                failure = ExecutionError("revision_conflict", unavailable=False)
+            else:
+                reason = None
+                if permit:
+                    reason = self._derived_mismatch(c, access, query)
+                    if reason is None and not _execution_matches(row, query):
+                        reason = "lease_invalid"
+                else:
+                    reason = denial_reason
+                if reason is None:
+                    self._insert(c, "aip_delivery_decision", dict(
+                        organization_id=access.organization_id, operation_id=operation_id,
+                        decision_ref=str(uuid4()), state="AUTHORIZED", derived_grant_id=query.derived_grant_id,
+                        processing_grant_id=row["grant_id"], recipient_id=row["recipient_id"],
+                        processing_revision=row["processing_revision"], derived_revision=current,
+                        decided_at_us=instant(self.clock()), uncertainty_recorded=0))
+                    decided, public_reason = "AUTHORIZED", "accepted"
+                else:
+                    self._insert(c, "aip_delivery_decision", dict(
+                        organization_id=access.organization_id, operation_id=operation_id,
+                        decision_ref=str(uuid4()), state="SUPPRESSED", processing_grant_id=row["grant_id"],
+                        recipient_id=row["recipient_id"], processing_revision=row["processing_revision"],
+                        derived_revision=current, decided_at_us=instant(self.clock()), uncertainty_recorded=0))
+                    self._ground_audit(c, "ai_derived_delivery_suppressed", "SUPPRESSED", reason,
+                        organization_id=access.organization_id, previous=current, revision=current,
+                        principal_id=access.principal_id, operation_id=operation_id, derived_revision=current,
+                        processing_grant_id=row["grant_id"], processing_revision=row["processing_revision"],
+                        derived_grant_id=query.derived_grant_id, recipient_id=row["recipient_id"])
+                    decided, public_reason = "SUPPRESSED", reason
+        if failure is not None:
+            raise failure
+        return decided, public_reason
+
+    def seal_release_uncertain(self, access, operation_id):
+        """One-way AUTHORIZED to RELEASE_UNCERTAIN. Does not create another delivery."""
+        self._actor(access, {"executor"})
+        uuid(operation_id)
+        with self._transaction("derived_uncertain") as c:
+            changed = c.execute(
+                "UPDATE aip_delivery_decision SET state='RELEASE_UNCERTAIN', uncertainty_recorded=1 "
+                "WHERE organization_id=? AND operation_id=? AND state='AUTHORIZED' AND uncertainty_recorded=0",
+                (access.organization_id, operation_id))
+            require(changed.rowcount == 1, "revision_conflict")
+
+    def delivery_decision_state(self, access, operation_id):
+        self._fault("delivery_state")
+        self._actor(access, {"executor", "administrator"})
+        uuid(operation_id)
+        with self._transaction("derived_state", write=False) as c:
+            row = c.execute(
+                "SELECT state FROM aip_delivery_decision WHERE organization_id=? AND operation_id=?",
+                (access.organization_id, operation_id)).fetchone()
+            return None if row is None else row["state"]
 
     def read_derived_audit(self, access, *, cursor=0, limit=100):
         self._actor(access, {"administrator", "auditor"})
