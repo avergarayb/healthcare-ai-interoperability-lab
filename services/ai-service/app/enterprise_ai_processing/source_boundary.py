@@ -326,20 +326,16 @@ class TrustedEnterpriseSourceBoundary:
     def recognizes_envelope(self, envelope):
         if envelope is not self._envelope or not self._bytes_intact():
             return False
-        if self._state == "PREPARED":
-            return self._bound is not None
         if self._state == "PREPARE_CLAIMED":
             return self._context_active() and self._bound is not None
-        return False
+        return self._state in {"PREPARED", "EXECUTED"} and self._bound is not None
 
     def recognizes_source(self, evidence, envelope):
         if evidence is not self._evidence or envelope is not self._envelope or not self._bytes_intact():
             return False
-        if self._state == "PREPARED":
-            return self._bound is not None
         if self._state == "PREPARE_CLAIMED":
             return self._context_active() and self._bound is not None
-        return False
+        return self._state in {"PREPARED", "EXECUTED"} and self._bound is not None
 
     def recognizes_policy(self, connector, processing):
         try:
@@ -348,7 +344,7 @@ class TrustedEnterpriseSourceBoundary:
                     and connector.revision == current.revision
                     and self._processing_revision is not None
                     and processing.revision == self._processing_revision
-                    and self._state in {"SOURCE_RECOGNIZED", "PREPARE_CLAIMED", "PREPARED"})
+                    and self._state in {"SOURCE_RECOGNIZED", "PREPARE_CLAIMED", "PREPARED", "EXECUTED"})
         except Exception:
             return False
 
