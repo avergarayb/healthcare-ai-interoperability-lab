@@ -9,11 +9,13 @@ from tests.test_enterprise_ai_processing import _assert_c01_pure_ast
 
 ROOT = Path(__file__).resolve().parents[1] / "app"
 C01 = frozenset({"__init__.py", "models.py", "policy.py"})
-C02 = frozenset({"execution_types.py", "gateway.py", "fake_model.py", "sqlite_ledger.py", "source_boundary.py"})
+C02 = frozenset({"execution_types.py", "gateway.py", "fake_model.py", "sqlite_ledger.py",
+                 "source_boundary.py", "grounding.py"})
 IMPORTS = {
+    "grounding.py": frozenset({"dataclasses"}),
     "source_boundary.py": frozenset({
         "asyncio", "contextvars", "dataclasses", "datetime", "threading", "uuid",
-        ".execution_types", ".gateway", ".models", ".sqlite_ledger",
+        ".execution_types", ".gateway", ".grounding", ".models", ".sqlite_ledger",
         "..enterprise_connectors.models", "..enterprise_connectors.policy",
         "..enterprise_connectors.registry", "..enterprise_connectors.service",
         "..enterprise_connectors.synthetic"}),
@@ -117,8 +119,9 @@ def test_c01_negative_controls_still_reject_original_forbidden_dependencies(sour
     ("gateway.py", "from app.institutional_knowledge import index"), ("gateway.py", "router.add_api_route()"),
     ("gateway.py", "service._event()"), ("sqlite_ledger.py", "service._validate_delivery()"),
     ("execution_types.py", "model.invoke()"), ("gateway.py", "model._extract()"),
-    ("unexpected.py", "pass"), ("source_boundary.py", "cursor.execute('SELECT x')"),
-    ("source_boundary.py", "service._event()"), ("gateway.py", "open('file')"), ("gateway.py", "frame.f_locals"),
+    ("unexpected.py", "pass"),     ("source_boundary.py", "cursor.execute('SELECT x')"),
+    ("source_boundary.py", "service._event()"), ("grounding.py", "cursor.execute('SELECT x')"),
+    ("gateway.py", "open('file')"), ("gateway.py", "frame.f_locals"),
     ("gateway.py", "traceback.clear_frames(tb)"), ("fake_model.py", "__builtins__['eval']('x')")])
 def test_c02_negative_architecture_controls(name, source):
     with pytest.raises(AssertionError):

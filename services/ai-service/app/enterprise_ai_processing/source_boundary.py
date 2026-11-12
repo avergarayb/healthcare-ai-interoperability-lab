@@ -11,8 +11,9 @@ from datetime import timedelta
 from threading import Lock, get_ident
 from uuid import UUID, uuid4
 
-from .execution_types import ExecutionError, ExecutionOwner, LaboratoryAccess, ProcessingLease
+from .execution_types import ExecutionError, ExecutionOwner, ExecutionResult, LaboratoryAccess, ProcessingLease
 from .gateway import EnterpriseModelGateway
+from .grounding import DeterministicVacationGrounding, GroundingRecord
 from .models import (
     AIProcessingEnvelope, AIProcessingPolicy, PROFILE_ID, QUESTION, SourceEvidence,
 )
@@ -32,11 +33,31 @@ _TRANSITIONS = {
     "READING": {"SOURCE_RECOGNIZED", "DENIED", "CLOSED"},
     "SOURCE_RECOGNIZED": {"PREPARE_CLAIMED", "DENIED", "CLOSED"},
     "PREPARE_CLAIMED": {"PREPARED", "DENIED", "UNCERTAIN"},
-    "PREPARED": {"CLOSED"},
+    "PREPARED": {"EXECUTED", "FAILED", "UNCERTAIN", "CLOSED"},
+    "EXECUTED": {"CLOSED"},
+    "FAILED": {"CLOSED"},
     "DENIED": {"CLOSED"},
     "UNCERTAIN": {"CLOSED"},
     "CLOSED": set(),
 }
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class RuntimeExecution:
+    """Technical metadata. It carries no document text, candidate or figures."""
+
+    state: str
+    reason: str
+    organization_id: str
+    operation_id: str
+    entries: int
+    reservation: str
+
+    def __repr__(self):
+        return "RuntimeExecution(in-process)"
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("Runtime execution is not portable")
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -58,7 +79,7 @@ class TrustedEnterpriseSourceBoundary:
 
     compose wires this instance to the only gateway that may prepare it.
     read and admit do not accept evidence, results, envelopes or leases.
-    The lease stays here. This increment does not execute the model.
+    The lease stays here. run calls the fake once through invoke_once_observed.
     """
 
     def __init__(self):
@@ -87,6 +108,10 @@ class TrustedEnterpriseSourceBoundary:
         boundary._bound = None
         boundary._populated = False
         boundary._close_started = False
+        boundary._charged = False
+        boundary._observer = DeterministicVacationGrounding()
+        boundary._observer_id = id(boundary._observer)
+        boundary._grounding = None
         boundary._lease = None
         boundary._outstanding = None
         boundary._on_close = None
@@ -182,12 +207,109 @@ class TrustedEnterpriseSourceBoundary:
                 self._phase_open = False
                 self._marker = None
 
-    def close(self):
-        """Close a known, unexecuted admission through this facade's gateway.
+    def run(self):
+        """Execute the admitted fake once. The return value has no document content."""
+        with self._lock:
+            if self._state != "PREPARED" or self._phase_open or type(self._lease) is not ProcessingLease:
+                raise ExecutionError("lease_invalid", unavailable=False)
+            self._phase_open = True
+        try:
+            try:
+                result = self._gateway.invoke_once_observed(self._lease)
+            except (CancelledError, KeyboardInterrupt):
+                self._finish_run_signal()
+                raise
+            if type(result) is not ExecutionResult:
+                self._move_run("FAILED", "RELEASED")
+                raise ExecutionError("provider_result_invalid", unavailable=False)
+            return self._accept_run(result)
+        finally:
+            with self._lock:
+                self._phase_open = False
 
-        PREPARED cancels that gateway's reservation as CANCELLED and RELEASED.
-        UNCERTAIN is left untouched. A later execution tranche must seal before
-        this close; this increment does not execute the model.
+    def note_charged(self):
+        self._charged = True
+
+    def observation(self, owner):
+        watcher = self._observer
+        if (type(owner) is not ExecutionOwner or owner is not self._bound or owner.lease is not self._lease
+                or self._state != "PREPARED" or watcher is None or id(watcher) != self._observer_id
+                or type(watcher) is not DeterministicVacationGrounding or watcher.used or owner.done):
+            return None
+        if owner.envelope is not self._envelope or owner.evidence is not self._evidence:
+            return None
+        return watcher
+
+    def observe_owner(self, owner):
+        watcher = self.observation(owner)
+        if watcher is None:
+            raise ExecutionError("source_evidence_invalid", unavailable=False)
+        watcher.used = True
+        try:
+            verdict, days, months = watcher.assess(
+                owner.source_bytes, owner.candidate, owner.result_code, owner.question_bytes,
+                self._canonical, self._evidence, self._organization_id, self._question)
+        except Exception:
+            self._grounding = GroundingRecord("TECHNICAL_FAILURE")
+            raise
+        if verdict not in {"EVIDENCE_FOUND", "EVIDENCE_INSUFFICIENT", "CANDIDATE_INVALID",
+                           "AUTHORIZATION_DENIED", "AUTHORIZATION_UNVERIFIABLE", "REVOCATION_DETECTED",
+                           "TECHNICAL_FAILURE"}:
+            self._grounding = GroundingRecord("TECHNICAL_FAILURE")
+            return
+        if verdict != "EVIDENCE_FOUND":
+            days = months = None
+        self._grounding = GroundingRecord(verdict, days, months)
+
+    def _accept_run(self, result):
+        if result.state == "DENY" and result.entries == 0:
+            raise ExecutionError("lease_invalid", unavailable=False)
+        organization, operation = self._organization_id, self._operation_id
+        if self._charged or result.state == "COMPLETED":
+            self._move_run("EXECUTED", "CHARGED")
+            if result.state != "COMPLETED":
+                self._replace_grounding("TECHNICAL_FAILURE")
+                return RuntimeExecution("UNAVAILABLE", "internal_failure", organization, operation, result.entries, "CHARGED")
+            return RuntimeExecution("COMPLETED", result.reason, organization, operation, result.entries, "CHARGED")
+        if result.state in {"REVOKED", "EXPIRED"}:
+            reservation = "RELEASED" if result.entries == 0 else "UNCERTAIN"
+            self._replace_grounding("REVOCATION_DETECTED")
+            self._move_run("FAILED" if result.entries == 0 else "UNCERTAIN", reservation)
+            return RuntimeExecution(result.state, result.reason, organization, operation, result.entries, reservation)
+        if result.entries:
+            self._replace_grounding("TECHNICAL_FAILURE")
+            self._move_run("UNCERTAIN", "UNCERTAIN")
+            return RuntimeExecution(result.state, result.reason, organization, operation, result.entries, "UNCERTAIN")
+        self._move_run("FAILED", "RELEASED")
+        return RuntimeExecution(result.state, result.reason, organization, operation, result.entries, "RELEASED")
+
+    def _finish_run_signal(self):
+        if self._charged:
+            self._replace_grounding("TECHNICAL_FAILURE")
+            self._move_run("EXECUTED", "CHARGED")
+            return
+        entries = self._bound.entries if self._bound is not None else 0
+        if entries:
+            self._move_run("UNCERTAIN", "UNCERTAIN")
+        else:
+            self._move_run("FAILED", "RELEASED")
+
+    def _replace_grounding(self, verdict):
+        if self._grounding is not None:
+            self._grounding.clear()
+        self._grounding = GroundingRecord(verdict)
+
+    def _move_run(self, state, reservation):
+        with self._lock:
+            if self._state == "PREPARED":
+                self._outstanding = reservation
+                self._move(state)
+
+    def close(self):
+        """Close this facade.
+
+        An unexecuted PREPARED hold is cancelled through gateway.close.
+        A charged execution is not cancelled again. UNCERTAIN is left untouched.
         """
         hook = self._on_close
         self._on_close = None
@@ -254,14 +376,14 @@ class TrustedEnterpriseSourceBoundary:
         if owner.original_source is None:
             if self._populated or self._state != "PREPARE_CLAIMED":
                 raise ExecutionError("source_evidence_invalid", unavailable=False)
-            owner.source_bytes = self._canonical
-            owner.question_bytes = self._question
+            owner.source_bytes = _independent(self._canonical)
+            owner.question_bytes = _independent(self._question)
             self._populated = True
             return
         if owner.original_source != self._canonical or owner.original_question != self._question:
             raise ExecutionError("source_evidence_invalid", unavailable=False)
-        owner.source_bytes = self._canonical
-        owner.question_bytes = self._question
+        owner.source_bytes = _independent(self._canonical)
+        owner.question_bytes = _independent(self._question)
 
     def _context_active(self):
         """The claim token is thread-local. Copying it does not transfer the admit thread."""
@@ -326,7 +448,7 @@ class TrustedEnterpriseSourceBoundary:
         after = self._service.store.snapshot()
         try:
             read = self._service.policy.evaluate(after, context, request, Gate.READ)
-            canonical = document.text.encode("utf-8")
+            canonical = _independent(document.text.encode("utf-8"))
         except UnicodeError:
             self._abandon("DENIED")
             raise ExecutionError("source_evidence_invalid", unavailable=False) from None
@@ -366,7 +488,7 @@ class TrustedEnterpriseSourceBoundary:
                 raise ExecutionError("source_evidence_invalid", unavailable=False)
             self._context, self._request, self._result = context, request, result
             self._document, self._canonical = document, canonical
-            self._question = QUESTION.encode("utf-8")
+            self._question = _independent(QUESTION.encode("utf-8"))
             self._evidence, self._envelope = evidence, envelope
             self._operation_id = operation_id
             self._organization_id = context.organization_id
@@ -423,3 +545,13 @@ class TrustedEnterpriseSourceBoundary:
         self._document = self._canonical = self._question = None
         self._evidence = self._envelope = None
         self._populated = False
+        if self._grounding is not None:
+            self._grounding.clear()
+            self._grounding = None
+
+
+def _independent(data):
+    temporal = bytearray(data)
+    copied = bytes(temporal)
+    temporal.clear()
+    return copied
