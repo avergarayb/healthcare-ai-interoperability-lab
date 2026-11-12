@@ -40,7 +40,6 @@ APP_SOURCE = f"{PRODUCTION_SOURCE}\n{LESSON_SOURCE}"
 ALLOWED_MODEL_DEPENDENCY = "google-genai"
 
 FORBIDDEN_DEPENDENCIES = (
-    "openai",
     "anthropic",
     "langchain",
     "ollama",
@@ -69,6 +68,23 @@ def test_requirements_have_no_language_model_or_clinical_clients():
     assert "langgraph==1.2.12" in REQUIREMENTS
     assert ALLOWED_MODEL_DEPENDENCY in REQUIREMENTS
     assert "google-genai==" in REQUIREMENTS
+    assert REQUIREMENTS.count("openai") == 1
+    assert "openai==3.49.0" in REQUIREMENTS
+
+
+def test_openai_import_is_limited_to_the_sdk_transport():
+    found = []
+    for path in sorted(APP.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            modules = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            if any(name == "openai" or name.startswith("openai.") for name in modules):
+                found.append(path.relative_to(APP).as_posix())
+    assert found == ["enterprise_llm_providers/transport.py"]
 
 
 def test_app_source_does_not_call_a_language_model_or_clinical_host():

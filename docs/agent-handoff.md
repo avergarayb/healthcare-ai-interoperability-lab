@@ -17,7 +17,7 @@ Las modalidades de agentes son: clínico (flujos acotados ya implementados), emp
 
 Cursor es el ejecutor del laboratorio desde TRANSITION-002. Codex construyó las tareas integradas hasta TASK-C02 y no continúa este repositorio en esta etapa; pasa a otros proyectos, en particular CNL. No hay handoff entre personas. El mismo repositorio y workspace se conservan. Cada sesión lee `AGENTS.md`, este handoff, [la transición](agent-transition-codex-to-cursor.md) y los contratos aplicables, verifica Git y reporta paso a paso. Commit, push y PR siguen exigiendo autorización expresa del Product Owner.
 
-Última TASK integrada en `origin/main`: TASK-C03 Phase B2-GRD, PR #122, merge `d26d10c7a699bd4470f3ff08422657b641cf3b86`. El commit funcional es `158433b081cbc7548e6e7bac6cc3c626cf6370cf`. B2-RUNTIME permanece en el PR #121, B2-SRC en el PR #120 y B1 en el PR #119. Verificar Git en vivo; `main` local puede estar detrás.
+Última TASK integrada en `origin/main`: TASK-C03 E2E, PR #123, merge `47cb35a723754136bdca596ce062062422d19108`. El commit funcional es `c7b83ed2af0e0abe60b38c0dfd46a05c277a9215`. B2-GRD permanece en el PR #122, B2-RUNTIME en el PR #121, B2-SRC en el PR #120 y B1 en el PR #119. Verificar Git en vivo; `main` local puede estar detrás.
 
 Integrado y limitado a laboratorio:
 
@@ -40,7 +40,9 @@ B2-RUNTIME está integrado por el PR #121. `TrustedEnterpriseSourceBoundary.comp
 
 B2-GRD está integrado por el PR #122. `run` ejecuta una vez el fake por `invoke_once_observed`. El observador reconocido mira el candidato después de `COMPLETED` y antes de `_cleanup`. La proyección pública de una ejecución técnica exitosa no distingue cláusula válida, ausencia o contradicción. El detalle está en el [runbook B2-GRD](design/enterprise-grounded-answer-task-c03-b2-grd.md) y en la sección 25 de la [propuesta C03](design/enterprise-grounded-answer-task-c03-proposal.md).
 
-TASK-C03 E2E cierra en `feature/enterprise-ai-processing-authorization-task-c03-e2e` la autoridad del destinatario y el sellado veraz de `RELEASE_UNCERTAIN`. La cadena `recipient_id` no sustituye un contexto reconocido. Un sellado fallido no afirma esa fila. Dentro del proceso no hay segunda entrega ni una nueva autorización de la misma invocación; una caída del proceso no demuestra ausencia de replay. `AUTHORIZED` es la decisión durable, la aceptación del sink es una observación local y no prueba una lectura humana. No hay PR, merge, LLM real, RAG, MCP, Gate D ni endpoint. El detalle está en el [runbook E2E](design/enterprise-grounded-answer-task-c03-e2e.md) y en la sección 26 de la [propuesta C03](design/enterprise-grounded-answer-task-c03-proposal.md). Después siguen DEMO-002, TASK-C04 y PG-EVAL/MIGRATION, también sin autorización.
+TASK-C03 E2E está integrada por el PR #123. La cadena `recipient_id` no sustituye un contexto reconocido. Un sellado fallido no afirma `RELEASE_UNCERTAIN`. Dentro del proceso no hay segunda entrega de la misma invocación. `AUTHORIZED` es la decisión durable y la aceptación del sink es una observación local. El detalle está en el [runbook E2E](design/enterprise-grounded-answer-task-c03-e2e.md).
+
+TASK-C04 Phase A y Phase B están en `feature/enterprise-ai-processing-authorization-task-c04-provider`. El adaptador de Responses para `gpt-6-luna` sigue deshabilitado. `openai==3.49.0` solo se importa desde el transporte SDK, con `max_retries=0` y timeout de 15 segundos. `OpenAISDKTransport.send` permanece cerrado: no hay egress ni integración con C03. El detalle está en el [runbook C04](design/enterprise-ai-processing-task-c04-provider.md). DEMO-002, RAG, MCP, Gate D y PostgreSQL siguen sin autorización.
 
 Los documentos de cierre, ADR-097, DESIGN-001, contratos y amenazas conservan el estado de su momento, incluidas frases de «pendiente de PR» escritas antes de la integración. Este handoff no reescribe sus PASS, fechas ni autorizaciones.
 
