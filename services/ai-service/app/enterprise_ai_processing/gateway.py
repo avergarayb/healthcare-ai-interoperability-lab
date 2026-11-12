@@ -198,9 +198,23 @@ class EnterpriseModelGateway:
             owner = None
 
     def invoke_once(self, lease):
+        """Historical entry. It never calls the observer and never returns a candidate."""
+        return self._invoke(lease, observed=False)
+
+    def invoke_once_observed(self, lease):
+        """One recognized observation after COMPLETED and before cleanup.
+
+        The caller cannot pass an observer, a fabricated result or another model.
+        An unrecognized lease is denied before the fake runs.
+        """
+        return self._invoke(lease, observed=True)
+
+    def _invoke(self, lease, *, observed):
         owner = None
         acquired = False
         cleanup_ok = True
+        observation_failed = False
+        charged = False
         started = self.monotonic()
         try:
             self.ledger.barrier.acquire()
@@ -211,6 +225,10 @@ class EnterpriseModelGateway:
                 self.ledger.deny("lease_invalid", access=access, subject=subject)
                 return ExecutionResult("DENY", "lease_invalid")
             owner, candidate = candidate, None
+            if observed and (not hasattr(self.boundary, "observation") or self.boundary.observation(owner) is None):
+                self.ledger.deny("lease_invalid")
+                owner = None
+                return ExecutionResult("DENY", "lease_invalid")
             owner.consuming, owner.admission_held = True, True
             self._seal(owner)
             owner.attempt_version = self.ledger.consume(owner.authority, owner.metadata, owner.attempt_version)
@@ -229,6 +247,13 @@ class EnterpriseModelGateway:
                         and owner.output_units <= owner.metadata["reserved_output_units"], "provider_result_invalid")
                 self.ledger.finish(owner.authority, owner.metadata, owner.attempt_version, "COMPLETED", "accepted",
                                    "CHARGED", self._usage(owner))
+            if observed:
+                self.boundary.note_charged()
+                charged = True
+                try:
+                    self.boundary.observe_owner(owner)
+                except Exception:
+                    observation_failed = True
             result = ExecutionResult("COMPLETED", "accepted", owner.entries, owner.started, owner.input_units, owner.output_units)
         except ExecutionError as error:
             if owner is None:
@@ -244,7 +269,7 @@ class EnterpriseModelGateway:
             result = ExecutionResult("UNAVAILABLE", "provider_unavailable", 0 if owner is None else owner.entries,
                                      0 if owner is None else owner.started)
         except BaseException:
-            if owner is not None:
+            if owner is not None and not charged:
                 self._finish_failure(owner, "CANCELLED", "cancelled", uncertain=bool(owner.entries), preserve_cancel=True)
             raise
         finally:
@@ -257,7 +282,9 @@ class EnterpriseModelGateway:
             if acquired:
                 self.ledger.barrier.release()
             owner = candidate = lease = None
-        return result if cleanup_ok else ExecutionResult("UNAVAILABLE", "internal_failure", result.entries, result.processing_started)
+        if cleanup_ok and not observation_failed:
+            return result
+        return ExecutionResult("UNAVAILABLE", "internal_failure", result.entries, result.processing_started)
 
     def _cleanup(self, owner):
         ok = True

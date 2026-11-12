@@ -1,6 +1,6 @@
 # TASK-C03 Phase A — respuesta fundamentada y entrega final
 
-Estado: **propuesta enmendada; Phase B1 implementada en la rama y no integrada en main**. El Product Owner aceptó la dirección y autorizó Phase B1. La sección 22 sustituye el DDL de la sección 10.1 y es el contrato vigente de esta fase. No hay observador, grounding ejecutable, LangGraph nuevo ni entrega. Phase B2 no está autorizada y C03 completa no está terminada.
+Estado: **propuesta enmendada**. B1, B2-SRC y B2-RUNTIME están integrados. La sección 25 registra B2-GRD: observador efímero y grounding determinista, sin LangGraph nuevo y sin entrega final. La sección 22 sigue siendo el contrato de la migración V2.
 
 Esta propuesta compone capacidades ya integradas. No crea un segundo evaluador de Gate C, no duplica grants, no lee tablas SQLite desde LangGraph y no llama a `ConnectorService._validate_delivery` ni a `ConnectorService._event`.
 
@@ -630,3 +630,13 @@ Se elige la alternativa A para una fase posterior: una sola llamada pública a `
 ### Comandos de esta fase
 
 `change_derived_grant` administra el permiso. El ledger fija `content_kind`, la operación, el propósito y la clasificación; el caller no los aporta. El grant C de la misma organización tiene que existir, estar habilitado y coincidir en versión. `assess_derived_delivery` solo comprueba ese permiso sintético. Un acierto devuelve `DerivedGrantMatch` y no escribe decisión ni entrega bytes. Ese objeto no es autorización A/B/C, ni ejecución de modelo, ni entrega final. `suppress_derived_delivery` registra la supresión posterior a T1. `read_derived_audit` devuelve solo la organización del administrador o del auditor. Phase B2 no puede componer el flujo hasta que un emisor autorizado vincule una sola lectura pública con su evidencia.
+
+## 25. B2-GRD implementado
+
+`EnterpriseModelGateway.invoke_once` no cambia de contrato: no observa y no devuelve candidato. `invoke_once_observed(lease)` no acepta callback, resultado fabricado ni otro modelo. Antes de invocar exige que la frontera B2-RUNTIME reconozca al owner, la lease y el `DeterministicVacationGrounding` creado por `compose`. Si no lo reconoce, responde `DENY` y no llama al fake.
+
+La observación ocurre después del commit `COMPLETED` y fuera de la transacción SQLite, mientras el candidato sigue en el `ExecutionOwner`. Después corre el mismo `_cleanup`. Un fallo del observador o de la limpieza no reescribe `COMPLETED`, no repite la invocación y no deja cifras utilizables. Una cancelación anterior al commit sigue el camino C02. Una cancelación posterior al commit no vuelve a cerrar la fila.
+
+`TrustedEnterpriseSourceBoundary.run` devuelve `RuntimeExecution` con estado técnico, motivo, organización, operación, entradas y reserva. No devuelve texto, candidato ni enteros. Esos enteros, si el veredicto interno es `EVIDENCE_FOUND`, viven en `GroundingRecord` hasta `close`. El documento de laboratorio sin la cláusula queda en `EVIDENCE_INSUFFICIENT`. Dos cláusulas con números distintos también. No hay frase final, ni fila `AUTHORIZED` de entrega, ni LangGraph nuevo.
+
+`close` de una admisión `PREPARED` sin ejecución sigue cancelando esa reserva. `close` después de `COMPLETED` no emite otro `CANCELLED`. `UNCERTAIN` no se concilia. El detalle y los conteos están en el [runbook B2-GRD](enterprise-grounded-answer-task-c03-b2-grd.md).
