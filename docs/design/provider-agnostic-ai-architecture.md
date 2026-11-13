@@ -64,6 +64,10 @@ No hay fallback. Un fallo de OpenAI no llama a Gemini. Un consumo ambiguo, un ti
 
 El aislamiento de esta fase no es criptográfico. Otro código del mismo proceso puede construir un cliente SDK si posee la clave. El gateway impide que el agente y el caller elijan un destino; no impide una llamada directa hecha fuera de este camino.
 
+El bridge conserva el cuerpo del proveedor en una sola referencia mientras normaliza. Al terminar, en éxito o en fallo, esa referencia se suelta. No es un borrado criptográfico de la memoria del proceso ni un cache.
+
+`execute` solo devuelve `accepted` cuando el grounding pasa. Si falla, el caller recibe el código (`candidate_rejected`, `excerpt_mismatch`, `model_refusal` u otro) y no el documento ni las cifras. Con el fixture sintético fijo, ese código no revela un documento real. Antes de conectar el gateway a C03 o de admitir otro documento, hay que revisar si esos códigos pueden salir antes de la autorización de entrega.
+
 ## Conexión futura con C03 y otros agentes
 
 C03 sigue exigiendo `FakeEnterpriseModel`. Este gateway no está importado por ese flujo ni cambia Gate C, el perfil fake ni la entrega. Conectarlo después exigiría un camino distinto del perfil fake, la migración 003 para un permiso durable por despliegue y auditoría propia. Esos cambios no están hechos.
@@ -85,4 +89,5 @@ Los permisos del gateway y de los bridges viven en memoria. No se persisten y no
 | Grounding negativo, UTF-8 y contradicción | `test_shared_grounding_rejects_the_same_bad_observation`, `test_utf8_boundary_and_contradiction_stay_in_the_shared_validator` |
 | Versiones e imports | `test_requirements_have_no_language_model_or_clinical_clients`, `test_openai_import_is_limited_to_the_sdk_transport`, `test_c04_package_has_no_network_client_and_c03_fake_stays_bound` |
 | Egress y live sin ejecutar | `test_default_sdk_bridges_do_not_send`, `test_live_edges_remain_blocked` |
+| El cuerpo del proveedor no queda en el bridge | `test_provider_body_is_released_after_success_and_failure` |
 | C03 en el fake | `test_results_logs_and_c03_do_not_carry_the_fixture` |

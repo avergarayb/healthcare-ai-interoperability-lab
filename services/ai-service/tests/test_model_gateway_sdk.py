@@ -366,6 +366,76 @@ def test_credential_and_rewired_bridge_cannot_cross_the_grant(monkeypatch):
     assert CLAUSE not in rendered and OPENAI_KEY not in rendered
 
 
+def _released(bridge):
+    assert bridge._capture._body is None
+    assert not hasattr(bridge._capture, "bodies")
+
+
+@pytest.mark.parametrize("provider,deployment,bridge_type,settings,library,body_of", [
+    ("openai", "openai-sdk-a", OpenAISdkBridge, _openai_settings, httpx2, _openai_body),
+    ("gemini", "gemini-sdk-a", GeminiSdkBridge, _gemini_settings, httpx, _gemini_body),
+])
+@pytest.mark.parametrize("label,payload,reason", [
+    ("valid", "valid", "accepted"),
+    ("invalid", "invalid", "invalid_output"),
+    ("refusal", "refusal", "model_refusal"),
+    ("usage", "usage", "consumption_ambiguous"),
+    ("model", "model", "model_denied"),
+    ("grounding", "grounding", "candidate_rejected"),
+    ("timeout", "timeout", "timeout"),
+])
+def test_provider_body_is_released_after_success_and_failure(
+        provider, deployment, bridge_type, settings, library, body_of, label, payload, reason, monkeypatch):
+    monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("socket")))
+    if label == "timeout":
+        def handler(request):
+            raise library.TimeoutException("slow") if library is httpx2 else httpx.ReadTimeout("slow")
+        transport = OpenAIMock(handler) if provider == "openai" else GeminiMock(handler)
+    else:
+        if label == "valid":
+            raw = body_of(json.dumps(_observation()))
+        elif label == "invalid":
+            raw = body_of("not-json")
+        elif label == "refusal":
+            raw = body_of("", content=[{"type": "refusal", "refusal": CLAUSE}]) if provider == "openai" else body_of(CLAUSE, reason="SAFETY")
+        elif label == "usage":
+            raw = body_of(json.dumps(_observation()), usage=False)
+        elif label == "model":
+            raw = body_of(json.dumps(_observation()), model="gpt-6-sol" if provider == "openai" else "gemini-3.6-flash")
+        else:
+            raw = body_of(json.dumps(_observation(proposed_days=21)))
+        transport = (OpenAIMock if provider == "openai" else GeminiMock)(_http(library, 200, raw))
+    bridge = bridge_type(settings(), transport, lambda: NOW)
+    seen = []
+    original = bridge._capture.send
+
+    def watched(payload, timeout_seconds):
+        returned = original(payload, timeout_seconds)
+        seen.append(bridge._capture._body is returned)
+        return returned
+
+    bridge._capture.send = watched
+    gateway = _gateway(deployment, bridge)
+    other = "gemini-sdk-a" if provider == "openai" else "openai-sdk-a"
+    if label == "valid":
+        result = _run(gateway, provider, deployment)
+        assert result.accepted is True and result.reason == "accepted" and not hasattr(result, "days")
+        assert CLAUSE not in repr(result)
+    else:
+        with pytest.raises(ProviderError) as caught:
+            _run(gateway, provider, deployment)
+        assert caught.value.reason == reason
+        assert CLAUSE not in str(caught.value) and CLAUSE not in repr(caught.value)
+    with pytest.raises(ProviderError) as replay:
+        _run(gateway, provider, deployment)
+    assert replay.value.reason == "replay_denied"
+    _released(bridge)
+    assert gateway._adapters[other].calls == 0
+    assert len(transport.requests) == 1
+    if label in {"valid", "invalid", "grounding"} or (provider == "openai" and label == "usage"):
+        assert seen == [True]
+
+
 def test_concurrent_organizations_do_not_share_a_deployment():
     gateway = NeutralModelGateway()
     done = []

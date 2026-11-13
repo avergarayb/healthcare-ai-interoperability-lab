@@ -30,14 +30,25 @@ _INSTANCE = "synthetic-lab"
 
 
 class _Capture:
+    """One provider body, released when normalization ends. This is not a cache."""
+
     def __init__(self, inner):
         self.inner = inner
-        self.bodies = []
+        self._body = None
 
     def send(self, payload, timeout_seconds):
         body = self.inner.send(payload, timeout_seconds)
-        self.bodies.append(body)
+        self.release()
+        self._body = body
         return body
+
+    def take(self):
+        body = self._body
+        self._body = None
+        return body
+
+    def release(self):
+        self._body = None
 
 
 def openai_reservation():
@@ -81,17 +92,23 @@ class _SdkBridge:
         self.calls += 1
         if self._adapter.settings.enabled is not True:
             raise ProviderError("remote_disabled")
-        observed = self._adapter.observe(self._reading(request), self._permit(request))
-        if observed.accepted is not True or len(self._capture.bodies) != 1:
-            raise ProviderError("invalid_output")
-        body = self._capture.bodies[0]
-        parsed = parse_output(body)
-        reported = usage_tokens(body)
-        if reported is None:
-            raise ProviderError("consumption_ambiguous")
-        return ModelResponse(
-            deployment.deployment_id, parsed, UsageMetadata(reported[0], reported[1]),
-            self.reported_cost(reported))
+        try:
+            observed = self._adapter.observe(self._reading(request), self._permit(request))
+            body = self._capture.take()
+            try:
+                if observed.accepted is not True or type(body) is not dict:
+                    raise ProviderError("invalid_output")
+                parsed = parse_output(body)
+                reported = usage_tokens(body)
+                if reported is None:
+                    raise ProviderError("consumption_ambiguous")
+                cost = self.reported_cost(reported)
+            finally:
+                del body
+            return ModelResponse(
+                deployment.deployment_id, parsed, UsageMetadata(reported[0], reported[1]), cost)
+        finally:
+            self._capture.release()
 
     def _reading(self, request):
         return SyntheticRead(
