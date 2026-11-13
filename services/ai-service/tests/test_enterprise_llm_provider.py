@@ -254,11 +254,14 @@ def test_c04_package_has_no_network_client_and_c03_fake_stays_bound():
                 assert name not in banned
                 if name in {"openai", "httpx2"}:
                     assert path.name == "transport.py" and name in allowed["transport.py"]
+                if name == "google":
+                    assert path.name == "gemini_transport.py"
     gateway = (PACKAGE.parent / "enterprise_ai_processing" / "gateway.py").read_text(encoding="utf-8")
     assert "type(self.model) is FakeEnterpriseModel" in gateway
     assert "enterprise_llm_providers" not in gateway and "openai" not in gateway
     assert isinstance(DisabledOpenAITransport(), DisabledOpenAITransport)
     assert importlib.metadata.version("openai") == "3.49.0"
+    assert importlib.metadata.version("google-genai") == "2.24.0"
 
 
 def test_c04_published_rates_cover_the_laboratory_scenarios():

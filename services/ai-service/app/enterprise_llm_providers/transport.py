@@ -1,4 +1,5 @@
 """SDK transport. Egress stays closed; the default transport never builds a client."""
+import os
 import httpx2
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
@@ -61,6 +62,20 @@ class OpenAISDKTransport:
         if live_egress_enabled() is not True:
             raise ProviderError("egress_blocked")
         return dispatch_responses(self._client, payload, timeout_seconds)
+
+
+def open_official_client(credential):
+    """Build the closed client. Construction does not call Responses."""
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy",
+                 "all_proxy", "OPENAI_BASE_URL", "OPENAI_CUSTOM_HEADERS"):
+        if os.environ.get(name):
+            raise ProviderError("environment_redirect")
+    opened = OpenAISDKTransport(credential)
+    client = opened._client
+    if (client.max_retries != 0 or _timeout_seconds(client.timeout) != TIMEOUT_SECONDS
+            or _host(client.base_url) != OFFICIAL_HOST):
+        raise ProviderError("not_configured")
+    return client
 
 
 def dispatch_responses(client, payload, timeout_seconds):

@@ -67,7 +67,7 @@ def test_requirements_have_no_language_model_or_clinical_clients():
         assert name not in REQUIREMENTS
     assert "langgraph==1.2.12" in REQUIREMENTS
     assert ALLOWED_MODEL_DEPENDENCY in REQUIREMENTS
-    assert "google-genai==" in REQUIREMENTS
+    assert "google-genai==2.24.0" in REQUIREMENTS
     assert REQUIREMENTS.count("openai") == 1
     assert "openai==3.49.0" in REQUIREMENTS
 
