@@ -1,8 +1,8 @@
 # TASK-C04 Phase A — frontera OpenAI, sin egress
 
-Estado: Phase A y Phase B en `feature/enterprise-ai-processing-authorization-task-c04-provider`. El transporte SDK existe y su envío está cerrado. No hay llamada real.
+Estado: Phase A y Phase B integradas por el PR #124, merge `a7e6739246db37ec90e21c2903ec3f8d1f019b99`. El commit funcional es `f39199392194a997fc72ceadde328054c7add508`. Phase C está en `feature/enterprise-ai-processing-authorization-task-c04-live-smoke`. El transporte público sigue cerrado y no hubo llamada real.
 
-Base: `origin/main` `47cb35a723754136bdca596ce062062422d19108`, merge del PR #123. El commit funcional de C03 E2E es `c7b83ed2af0e0abe60b38c0dfd46a05c277a9215`.
+Base de C03: `origin/main` anterior `47cb35a723754136bdca596ce062062422d19108`, merge del PR #123. El commit funcional de C03 E2E es `c7b83ed2af0e0abe60b38c0dfd46a05c277a9215`.
 
 ## Arquitectura
 
@@ -80,7 +80,28 @@ El dry-run `dry_run_fixed_fixture` no recibe documento ni transporte. Usa solo `
 
 El tope de US$5 es un contador de proceso, no un control del proveedor. Antes de una prueba real hace falta un presupuesto y alertas en el proyecto de OpenAI. El gasto de esta fase es cero.
 
-## Pruebas de esta ejecución
+## Phase C
+
+El ejecutor aislado es `scripts/c04-openai-live-smoke/run_smoke.py`. Sin argumentos, o con `dry-run`, no abre un socket. Reutiliza el payload, el precio, `dispatch_responses` y el validador. No cambia `live_egress_enabled` ni el transporte predeterminado. `OpenAISDKTransport.send` sigue en `egress_blocked`. La llamada live, cuando el Product Owner la autorice, pasa por `open_official_client` y después por `dispatch_responses`.
+
+```text
+.\.venv\Scripts\python.exe ..\..\scripts\c04-openai-live-smoke\run_smoke.py dry-run
+.\.venv\Scripts\python.exe ..\..\scripts\c04-openai-live-smoke\run_smoke.py live-once
+```
+
+El segundo comando no está autorizado todavía. Exige una terminal interactiva y la frase exacta `CONFIRMO UNA SOLICITUD openai gpt-6-luna vacation-days-v1 MAXIMO USD 0.001 PRESUPUESTO PLANIFICADO USD 5`. No acepta otro documento, pregunta, modelo, `base_url` ni una confirmación por variable o argumento. Una clave ausente se rechaza antes del envío. La clave se lee de `OPENAI_API_KEY` en el entorno del proceso; no se escribe en el repositorio ni se imprime.
+
+Antes de construir el cliente, el proceso se detiene si existen `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `OPENAI_BASE_URL` u `OPENAI_CUSTOM_HEADERS`. El SDK usaría `OPENAI_BASE_URL` cuando no recibe `base_url`, y `httpx2` confía en el entorno de proxy. Esas variables no estaban definidas en esta sesión y `OPENAI_API_KEY` tampoco.
+
+La reserva de esta fixture fue 303 micro-USD, bajo el techo de 1.000. El tope de US$5 sigue siendo un contador de proceso. El reporte marca `project_billing=unverified` y `provider_charge=unconfirmed`. No se comprobó un proyecto OpenAI, la facturación API, la disponibilidad del modelo, un límite mensual ni las alertas.
+
+`live-once` crea `vacation-days-v1.attempt` con `O_EXCL` bajo `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-live-smoke` inmediatamente antes del envío. El archivo no guarda la clave ni el documento. Si el envío agota el tiempo, falla o devuelve una observación inválida, la marca permanece y la siguiente ejecución es `replay_denied`. Borrar la marca, usar otro directorio o llamar `dispatch_responses` desde otro código elude esa protección. No es idempotencia distribuida.
+
+Un código del mismo proceso con la clave puede invocar el SDK sin este ejecutor. La fase evita el egress accidental del camino confiable; no aísla criptográficamente un proceso hostil.
+
+El dry-run de esta sesión devolvió `PASS`, `requests_sent=0`, grounding `encontrado`, días 20 y meses 12, sin texto de la cláusula ni credencial.
+
+## Pruebas de Phase B
 
 `tests/test_enterprise_llm_provider.py`: 20 PASS en 0,69 s, basetemp `C:\Temp\c04b2`. Incluye el SDK real contra `httpx2.MockTransport`, `max_retries=0`, el dry-run fijo y el fake de C03 intacto.
 
@@ -88,8 +109,34 @@ El tope de US$5 es un contador de proceso, no un control del proveedor. Antes de
 
 No se contactó local-hapi, Docker, Keycloak, Graph ni `api.openai.com`.
 
+## Pruebas de Phase C
+
+`tests/test_enterprise_llm_provider_live_smoke.py` y la regresión C04/arquitectura: 89 PASS en 3,30 s, basetemp `C:\Temp\c04c2`. El ejecutor aporta 9 pruebas. E2E C03: 34 PASS en 27,52 s. B2-GRD: 37 PASS en 21,07 s. B2-RUNTIME: 40 PASS en 15,69 s. B2-SRC: 34 PASS en 0,91 s. C01: 192 PASS en 0,51 s. C02: 233 PASS en 67,73 s. B1: 31 PASS en 14,66 s. Las cinco suites de conectores, en `C:\Temp\c04cent`, terminaron 615 PASS, 1 SKIPPED y 2 ERROR de preparación: pytest no pudo borrar un SQLite todavía abierto (`WinError 32`). Esos dos casos, repetidos solos en `C:\Temp\c04cent2`, dieron 2 PASS en 0,52 s. No cambiaron los conectores.
+
+No se contactó local-hapi, Docker, Keycloak, Graph ni `api.openai.com`. No hubo solicitud live.
+
+## Gemini, sin egress
+
+El adaptador OpenAI permanece. Gemini es un paquete aparte dentro de `enterprise_llm_providers` y no entra en `EnterpriseModelGateway`. El transporte predeterminado es `DisabledGeminiTransport`. `GeminiSDKTransport.send` termina en `egress_blocked`. No hay modo live.
+
+Modelo verificado: `gemini-3.5-flash-lite`. La página del modelo lo admite con Structured Outputs, límite de entrada 1.048.576 y de salida 65.536. El SDK ya fijado es `google-genai==2.24.0`; está instalado, declara los campos usados y no se cambió el pin. Python del entorno: 3.13.14. Construir `genai.Client` no abre un socket. La llamada sería `client.models.generate_content`.
+
+La tarifa Standard de la página de precios es entrada US$0,30 / 1M y salida US$2,50 / 1M, incluidos los tokens de pensamiento. Batch, Flex y Priority no se seleccionan. El techo por llamada sigue en 1.000 micro-USD. Para caber, `max_output_tokens` es 128, no 256. La reserva de esta fixture fue 657 micro-USD. El dry-run simulado, con 40 tokens de entrada y 20 de salida, estima 62 micro-USD. `provider_charge` queda `unconfirmed`. El tope de US$5 no está verificado en Google.
+
+`HttpRetryOptions.attempts` vale 1. En este SDK, 0 o 1 significan cero reintentos; el default no especificado es 5. El timeout va en milisegundos: 15.000. `thinking_level` es `MINIMAL`. No se envían tools, búsqueda, mapas, caché ni `base_url`. El esquema compartido exige `additionalProperties=false`. El grounding local es el mismo validador. Solo se acepta el fixture sintético fijo.
+
+En el tier de pago, la página dice que el contenido no se usa para mejorar productos. El tier gratuito sí. Los logs de abuso siguen existiendo hasta una aprobación de Zero Data Retention. Esta fase no usa Search ni Maps, que conservarían contenido 30 días. No hubo llamada ni se leyó una clave.
+
+Diferencias con OpenAI: otro modelo y otra tarifa de salida, más alta; el SDK es `google-genai` y no `openai`; el reintento se apaga con `attempts=1` y no con `max_retries=0`; el timeout se expresa en milisegundos; el pensamiento se fija en `MINIMAL` porque su costo entra en la salida; el máximo de salida de esta prueba es 128 tokens.
+
+El dry-run `scripts/c04-gemini-dry-run/run_dry_run.py` devolvió `PASS`, `requests_sent=0`, días 20 y meses 12.
+
+## Bridges neutrales, sin egress
+
+`OpenAISdkBridge` y `GeminiSdkBridge` delegan en los adaptadores ya construidos. El catálogo añade `openai-sdk-a` y `gemini-sdk-a`, sin endpoint. La reserva del payload fijo es 303 micro-USD para OpenAI y 657 para Gemini. `GatewayResult` no devuelve días, meses ni extracto. El SDK de Gemini 2.24.0 expone `model_version`; el normalizador lo acepta junto al atributo `model` de los sustitutos de prueba. `send()` de ambos transportes sigue en `egress_blocked`. C03 no importa este gateway. El resultado público rechaza una organización distinta y no incluye la observación. El adaptador privado es una simulación en proceso, no un modelo autoalojado. El grafo clínico de seguimiento sigue acoplado al SDK de Gemini y no se modificó. La migración 003 sigue fuera. Una llamada live sigue sin estar ejecutada.
+
 ## Decisiones pendientes
 
-- Implementar la migración 003 cuando el permiso remoto deba ser durable.
-- Configurar presupuesto y alertas del proyecto OpenAI antes de cualquier envío.
-- Autorizar, en otro incremento, una sola llamada real con el fixture fijo y sin integrar C03.
+- Confirmar proyecto OpenAI, facturación API, disponibilidad de `gpt-6-luna`, límite mensual de US$5 con hard limit si existe, y alertas. Esta sesión no lo comprobó.
+- Autorizar de forma expresa una sola ejecución `live-once` del fixture fijo, después de esa confirmación.
+- La migración 003, la integración con C03, RAG, MCP, PostgreSQL y Graph live siguen fuera de esta fase.
