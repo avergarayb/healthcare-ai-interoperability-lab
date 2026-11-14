@@ -65,12 +65,15 @@ class GeminiResponsesAdapter:
             raise ProviderError("budget_exceeded")
         self._sent = True
         body = self._send(generation, settings.timeout_seconds)
-        parsed = parse_output(body)
-        checked = check_observation(reading.document, parsed)
-        reported = usage_tokens(body)
+        try:
+            parsed = parse_output(body)
+            checked = check_observation(reading.document, parsed)
+            reported = usage_tokens(body)
+        except ProviderError as error:
+            raise ProviderError(error.reason, _usage_only(body, error)) from None
         if reported is None:
-            raise ProviderError("consumption_ambiguous")
-        reported_cost = estimate_microusd(reported[0], reported[1])
+            raise ProviderError("consumption_ambiguous", _usage_only(body, ProviderError("consumption_ambiguous")))
+        reported_cost = _priced(body, reported)
         return GeminiResult(
             True, "accepted", checked.days, checked.months, reported[0], reported[1],
             reported_cost, reservation)
@@ -79,7 +82,7 @@ class GeminiResponsesAdapter:
         try:
             body = self._transport.send(generation, timeout_seconds)
         except ProviderError as error:
-            raise ProviderError(error.reason) from None
+            raise ProviderError(error.reason, getattr(error, "diagnostic", None)) from None
         except TimeoutError:
             raise ProviderError("timeout") from None
         except Exception:
@@ -87,3 +90,36 @@ class GeminiResponsesAdapter:
         if type(body) is not dict:
             raise ProviderError("invalid_output")
         return body
+
+
+def _priced(body, reported):
+    usage = body.get("usage") if type(body) is dict else None
+    if type(usage) is not dict:
+        return None
+    if "cost_exact" in usage and usage.get("cost_exact") is not True:
+        return None
+    thoughts = usage.get("thoughts_tokens")
+    billed = reported[1] + thoughts if type(thoughts) is int else reported[1]
+    return estimate_microusd(reported[0], billed)
+
+
+def _usage_only(body, error):
+    """Token counts from a closed body. The generated text is not copied."""
+    reported = usage_tokens(body)
+    usage = body.get("usage") if type(body) is dict else None
+    diagnostic = {"usage_present": reported is not None, "finish_reason": "STOP"}
+    if reported is not None:
+        diagnostic["input_tokens"] = reported[0]
+        diagnostic["output_tokens"] = reported[1]
+        diagnostic["candidate_tokens"] = reported[1]
+    if type(usage) is dict:
+        diagnostic["thoughts_tokens"] = usage.get("thoughts_tokens")
+        if type(usage.get("cost_exact")) is bool:
+            diagnostic["cost_exact"] = usage["cost_exact"]
+        for name in ("prompt_inferred", "visible_inferred", "thoughts_inferred", "tool_inferred"):
+            if type(usage.get(name)) is bool:
+                diagnostic[name] = usage[name]
+    prior = getattr(error, "diagnostic", None)
+    if type(prior) is dict:
+        diagnostic.update({key: value for key, value in prior.items() if value is not None})
+    return diagnostic

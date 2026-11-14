@@ -48,7 +48,7 @@ class NeutralModelGateway:
             with self._lock:
                 self._inflight.discard(deployment.deployment_id)
                 self._spent.add(deployment.deployment_id)
-            raise ProviderError(error.reason) from None
+            raise ProviderError(error.reason, getattr(error, "diagnostic", None)) from None
         with self._lock:
             self._inflight.discard(deployment.deployment_id)
             self._spent.add(deployment.deployment_id)
@@ -58,7 +58,9 @@ class NeutralModelGateway:
         return GatewayResult(
             True, "accepted", deployment.deployment_id, context.organization_id,
             response.usage.input_tokens, response.usage.output_tokens, reservation,
-            response.estimated_microusd)
+            response.estimated_microusd, response.thoughts_tokens, response.cost_exact,
+            response.thoughts_inferred, response.tool_inferred,
+            response.prompt_inferred, response.visible_inferred)
 
     def public_state(self, result, organization_id):
         if type(result) is not GatewayResult or result.organization_id != organization_id:

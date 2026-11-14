@@ -1,6 +1,7 @@
 """Offline tests for the C04 live-smoke executor. They do not call api.openai.com."""
 import json
 import logging
+import os
 import socket
 import subprocess
 import sys
@@ -243,6 +244,42 @@ def test_c04c_environment_marker_logs_and_c03_stay_closed(tmp_path, caplog):
     source = script.read_text(encoding="utf-8")
     assert KEY not in caplog.text and CLAUSE not in caplog.text
     assert "cli(sys.argv[1:]" in source and "base_url" not in source and "document" not in source
+
+
+def test_c04c_windows_environ_is_accepted_and_redirects_still_block(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("socket")))
+    redirects = (
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy",
+        "OPENAI_BASE_URL", "OPENAI_CUSTOM_HEADERS",
+    )
+    for name in redirects:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert type(os.environ).__name__ == "_Environ"
+    absent = _run(["live-once"], StringIO(), os.environ)
+    plain = _run(["live-once"], StringIO(), {"LOCALAPPDATA": str(tmp_path)})
+    invalid = _run(["live-once"], StringIO(), None)
+    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+    held = _run(["live-once"], StringIO(CONFIRMATION_PHRASE + "\n"), os.environ)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    for name in redirects:
+        blocked = _run(["live-once"], StringIO(), {"LOCALAPPDATA": str(tmp_path), "OPENAI_API_KEY": KEY, name: "blocked"})
+        assert blocked["reason"] == "environment_redirect" and blocked["requests_sent"] == 0
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.invalid/v1")
+    inherited = _run(["live-once"], StringIO(), {"LOCALAPPDATA": str(tmp_path), "OPENAI_API_KEY": KEY})
+    directory = default_attempt_directory(os.environ)
+    report = dry_run(_clock)
+    rendered = json.dumps(absent) + json.dumps(held) + caplog.text
+    assert absent["reason"] == plain["reason"] == "credential_absent"
+    assert invalid["reason"] == "invalid_input"
+    assert held["reason"] == "confirmation_required" and held["requests_sent"] == 0
+    assert inherited["reason"] == "environment_redirect" and live_egress_enabled() is False
+    assert report["result"] == "PASS" and report["requests_sent"] == 0
+    assert report["model"] == "gpt-6-luna" and report["reserved_microusd"] == 303
+    assert report["grounding"] == "encontrado" and directory.name == "c04-live-smoke"
+    assert KEY not in rendered and CLAUSE not in rendered
+    assert list(tmp_path.rglob("*.attempt")) == []
 
 
 def test_c04c_script_dry_run_exits_without_a_prompt():

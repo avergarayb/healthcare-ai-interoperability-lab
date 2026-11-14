@@ -7,6 +7,7 @@ is not enough to send, and the public transport stays closed.
 import json
 import os
 import sys
+from collections.abc import Mapping
 from datetime import timedelta
 from pathlib import Path
 
@@ -144,7 +145,7 @@ def ground(source, body):
 
 
 def default_attempt_directory(environ):
-    root = environ.get("LOCALAPPDATA") if type(environ) is dict else None
+    root = environ.get("LOCALAPPDATA") if isinstance(environ, Mapping) else None
     if type(root) is not str or root == "":
         raise ProviderError("not_configured")
     directory = Path(root) / "healthcare-ai-interoperability-lab" / "c04-live-smoke"
@@ -157,7 +158,9 @@ def default_attempt_directory(environ):
 
 
 def _live_once(stdin, environ, clock):
-    if type(environ) is not dict or _environment_redirect(environ) or _environment_redirect(os.environ):
+    if not isinstance(environ, Mapping):
+        raise ProviderError("invalid_input")
+    if _environment_redirect(environ) or _environment_redirect(os.environ):
         raise ProviderError("environment_redirect")
     payload, reservation = prepare_fixed(clock)
     credential = environ.get("OPENAI_API_KEY")

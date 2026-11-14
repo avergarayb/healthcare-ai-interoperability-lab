@@ -8,6 +8,7 @@ ALLOWED_MODEL = "gemini-3.5-flash-lite"
 TIMEOUT_SECONDS = 15
 TIMEOUT_MILLISECONDS = 15_000
 MAX_OUTPUT_TOKENS = 128
+ALLOWED_OUTPUT_TOKENS = frozenset({128, 256})
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -25,7 +26,7 @@ class GeminiSettings:
                 or type(self.timeout_seconds) is not int or type(self.max_output_tokens) is not int
                 or type(self.max_input_bytes) is not int or type(self.max_call_microusd) is not int
                 or self.timeout_seconds != TIMEOUT_SECONDS
-                or not 64 <= self.max_output_tokens <= MAX_OUTPUT_TOKENS
+                or self.max_output_tokens not in ALLOWED_OUTPUT_TOKENS
                 or not 1 <= self.max_input_bytes <= 2048 or self.max_call_microusd < 1
                 or (self._credential is not None and type(self._credential) is not str)):
             raise ProviderError("not_configured")

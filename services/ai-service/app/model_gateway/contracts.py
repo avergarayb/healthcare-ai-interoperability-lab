@@ -98,7 +98,13 @@ class ModelResponse:
     deployment_id: str
     observation: dict | None
     usage: UsageMetadata
-    estimated_microusd: int
+    estimated_microusd: int | None
+    thoughts_tokens: int | None = None
+    cost_exact: bool | None = None
+    thoughts_inferred: bool | None = None
+    tool_inferred: bool | None = None
+    prompt_inferred: bool | None = None
+    visible_inferred: bool | None = None
 
     def __repr__(self):
         return "ModelResponse(closed)"
@@ -127,6 +133,12 @@ class GatewayResult:
     output_tokens: int | None = None
     reserved_microusd: int | None = None
     estimated_microusd: int | None = None
+    thoughts_tokens: int | None = None
+    cost_exact: bool | None = None
+    thoughts_inferred: bool | None = None
+    tool_inferred: bool | None = None
+    prompt_inferred: bool | None = None
+    visible_inferred: bool | None = None
 
     def __repr__(self):
         return "GatewayResult(closed)"

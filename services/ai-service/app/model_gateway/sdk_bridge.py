@@ -100,13 +100,29 @@ class _SdkBridge:
                     raise ProviderError("invalid_output")
                 parsed = parse_output(body)
                 reported = usage_tokens(body)
+                usage = body.get("usage") if type(body) is dict else None
+                thoughts = usage.get("thoughts_tokens") if type(usage) is dict else None
+                exact = type(usage) is not dict or "cost_exact" not in usage or usage.get("cost_exact") is True
+                inferred = {
+                    name: usage.get(name) is True if type(usage) is dict else False
+                    for name in ("prompt_inferred", "visible_inferred", "thoughts_inferred", "tool_inferred")
+                }
                 if reported is None:
                     raise ProviderError("consumption_ambiguous")
-                cost = self.reported_cost(reported)
+                if exact and type(thoughts) is int:
+                    cost = self.reported_cost((reported[0], reported[1] + thoughts))
+                elif exact:
+                    cost = self.reported_cost(reported)
+                else:
+                    cost = None
+                    exact = False
             finally:
                 del body
             return ModelResponse(
-                deployment.deployment_id, parsed, UsageMetadata(reported[0], reported[1]), cost)
+                deployment.deployment_id, parsed, UsageMetadata(reported[0], reported[1]), cost,
+                thoughts if type(thoughts) is int else None, exact,
+                inferred["thoughts_inferred"], inferred["tool_inferred"],
+                inferred["prompt_inferred"], inferred["visible_inferred"])
         finally:
             self._capture.release()
 
@@ -154,7 +170,9 @@ class GeminiSdkBridge(_SdkBridge):
         super().__init__(adapter, capture, clock)
 
     def reservation(self):
-        return gemini_reservation()
+        settings = self._adapter.settings
+        generation = build_generation(FIXED_DOCUMENT, settings)
+        return gemini_estimate(request_bytes(generation), settings.max_output_tokens)
 
     def reported_cost(self, reported):
         return gemini_estimate(reported[0], reported[1])

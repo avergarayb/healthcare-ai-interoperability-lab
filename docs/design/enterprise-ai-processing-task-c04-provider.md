@@ -1,6 +1,6 @@
 # TASK-C04 Phase A — frontera OpenAI, sin egress
 
-Estado: Phase A y Phase B integradas por el PR #124, merge `a7e6739246db37ec90e21c2903ec3f8d1f019b99`. El commit funcional es `f39199392194a997fc72ceadde328054c7add508`. Phase C está en `feature/enterprise-ai-processing-authorization-task-c04-live-smoke`. El transporte público sigue cerrado y no hubo llamada real.
+Estado: Phase A y Phase B integradas por el PR #124, merge `a7e6739246db37ec90e21c2903ec3f8d1f019b99`. El commit funcional es `f39199392194a997fc72ceadde328054c7add508`. Phase C de OpenAI quedó en `feature/enterprise-ai-processing-authorization-task-c04-live-smoke`, fusionada por el PR #125. El transporte público de OpenAI y de Gemini sigue cerrado. Gemini consumió dos solicitudes reales; no queda autorización para una tercera.
 
 Base de C03: `origin/main` anterior `47cb35a723754136bdca596ce062062422d19108`, merge del PR #123. El commit funcional de C03 E2E es `c7b83ed2af0e0abe60b38c0dfd46a05c277a9215`.
 
@@ -117,7 +117,7 @@ No se contactó local-hapi, Docker, Keycloak, Graph ni `api.openai.com`. No hubo
 
 ## Gemini, sin egress
 
-El adaptador OpenAI permanece. Gemini es un paquete aparte dentro de `enterprise_llm_providers` y no entra en `EnterpriseModelGateway`. El transporte predeterminado es `DisabledGeminiTransport`. `GeminiSDKTransport.send` termina en `egress_blocked`. No hay modo live.
+El adaptador OpenAI permanece. Gemini es un paquete aparte dentro de `enterprise_llm_providers` y no entra en `EnterpriseModelGateway`. El transporte predeterminado es `DisabledGeminiTransport`. `GeminiSDKTransport.send` termina en `egress_blocked`. En esa fase no había modo live.
 
 Modelo verificado: `gemini-3.5-flash-lite`. La página del modelo lo admite con Structured Outputs, límite de entrada 1.048.576 y de salida 65.536. El SDK ya fijado es `google-genai==2.24.0`; está instalado, declara los campos usados y no se cambió el pin. Python del entorno: 3.13.14. Construir `genai.Client` no abre un socket. La llamada sería `client.models.generate_content`.
 
@@ -133,10 +133,55 @@ El dry-run `scripts/c04-gemini-dry-run/run_dry_run.py` devolvió `PASS`, `reques
 
 ## Bridges neutrales, sin egress
 
-`OpenAISdkBridge` y `GeminiSdkBridge` delegan en los adaptadores ya construidos. El catálogo añade `openai-sdk-a` y `gemini-sdk-a`, sin endpoint. La reserva del payload fijo es 303 micro-USD para OpenAI y 657 para Gemini. `GatewayResult` no devuelve días, meses ni extracto. El SDK de Gemini 2.24.0 expone `model_version`; el normalizador lo acepta junto al atributo `model` de los sustitutos de prueba. `send()` de ambos transportes sigue en `egress_blocked`. C03 no importa este gateway. El resultado público rechaza una organización distinta y no incluye la observación. El adaptador privado es una simulación en proceso, no un modelo autoalojado. El grafo clínico de seguimiento sigue acoplado al SDK de Gemini y no se modificó. La migración 003 sigue fuera. Una llamada live sigue sin estar ejecutada.
+`OpenAISdkBridge` y `GeminiSdkBridge` delegan en los adaptadores ya construidos. El catálogo añade `openai-sdk-a` y `gemini-sdk-a`, sin endpoint. La reserva del payload fijo es 303 micro-USD para OpenAI y 657 para Gemini. `GatewayResult` no devuelve días, meses ni extracto. El SDK de Gemini 2.24.0 expone `model_version`; el normalizador lo acepta junto al atributo `model` de los sustitutos de prueba. `send()` de ambos transportes sigue en `egress_blocked`. C03 no importa este gateway. El resultado público rechaza una organización distinta y no incluye la observación. El adaptador privado es una simulación en proceso, no un modelo autoalojado. El grafo clínico de seguimiento sigue acoplado al SDK de Gemini y no se modificó. La migración 003 sigue fuera. Las dos solicitudes reales de Gemini están en la sección siguiente y no tuvieron grounding `PASS`.
+
+## Ejecutor Gemini
+
+`scripts/c04-gemini-live-smoke/run_smoke.py` usa el gateway neutral, el puente Gemini y el grounding ya existente. El transporte predeterminado permanece cerrado. El único despacho está en `FixtureTransport`, limitado al fixture `vacation-days-v1` y al documento sintético fijo. No acepta otro documento, otro modelo ni una URL.
+
+El modo predeterminado es `dry-run`:
+
+```powershell
+.\.venv\Scripts\python.exe ..\..\scripts\c04-gemini-live-smoke\run_smoke.py
+```
+
+`run_smoke.py live-once` se ejecuta desde `services/ai-service`, después de `$env:GEMINI_API_KEY = Read-Host "GEMINI_API_KEY"`. El dry-run no pide `GEMINI_API_KEY`, no crea una marca y no envía nada. El intento 002 usa `max_output_tokens` 256 solo en este ejecutor. El catálogo sigue reservando el perfil de 128 tokens. La reserva recalculada del payload de 256 es 977 micro-USD, bajo el techo de 1.000. `attempts` es 1 y el timeout es 15.000 ms. No hay fallback.
+
+`live-once` del intento 002 exige una terminal interactiva, una frase distinta de la del primer intento, `GEMINI_API_KEY` en el entorno del proceso, el cliente oficial sobre `https://generativelanguage.googleapis.com` y la marca nueva `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-gemini-live-smoke\vacation-days-v1.attempt-002`. La marca `vacation-days-v1.attempt` del intento 001 permanece y no se reutiliza. Un timeout, un 429, un 5xx, un rechazo o un usage ambiguo no se reintenta y no borra la marca. El reporte de un fallo puede incluir `finish_reason` y conteos de tokens. No incluye el documento, el fragmento ni el pensamiento.
+
+Antes de una ejecución real, el operador debe confirmar en la consola el saldo, el proyecto, la clave de ese proyecto, la facturación API, la recarga automática apagada y la ausencia de cargos automáticos no deseados. El saldo prepago no es un tope transaccional estricto. La clave se introduce con `Read-Host` y se retira con `Remove-Item Env:GEMINI_API_KEY`.
+
+## Dos solicitudes reales
+
+Se ejecutaron dos llamadas `live-once` y no hay autorización para una tercera. Las marcas viven fuera del repositorio, en `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-gemini-live-smoke`, y no se incorporan, borran ni reinician:
+
+- `vacation-days-v1.attempt`, 76 bytes, SHA-256 `7a6ff9a563c05ce91c3f70d1f732050b9896a43d7ec2b6d5136cf8e818181638`.
+- `vacation-days-v1.attempt-002`, 89 bytes, SHA-256 `c6d09088b73183a07dddd9fe9ab6ec0a9611dc5af16bba55c33728934d7ed1eb`.
+
+El intento 001 devolvió `incomplete_output`. El reporte conservado no trae conteos de tokens. No se recuperó el cuerpo de esa respuesta.
+
+El intento 002 devolvió `finish_reason=STOP`, candidato y contenido presentes, usage presente, 92 tokens de entrada y 107 de candidatos. `thoughts_token_count` y `output_tokens` llegaron nulos. El normalizador de ese momento exigía el pensamiento como entero, así que el resultado fue `consumption_ambiguous` y el grounding quedó `FAIL`. Esa llamada real no tuvo grounding `PASS`. La reserva fue 977 micro-USD. `provider_charge` permanece `unconfirmed`: el cálculo local no es la factura de Google.
+
+Un fallo anterior, `environment_redirect`, no consumió solicitud. La causa fue tratar `os.environ` como `dict`. El ejecutor acepta un mapping y sigue rechazando proxy, `GEMINI_BASE_URL` y un host distinto de `generativelanguage.googleapis.com`.
+
+## Usage opcional
+
+La corrección es offline y no reclasifica el intento 002. `prompt_token_count` es entrada. `candidates_token_count` es la salida visible y se conserva aunque el pensamiento falte. `thoughts_token_count` ausente permanece ausente; cero explícito es cero. Un entero negativo, un booleano o una cadena invalidan el usage y no borran los conteos válidos. `tool_use_prompt_token_count`, cuando está presente, se suma a la entrada.
+
+Si `total_token_count` está presente, la suma conocida es prompt, candidatos, pensamiento y tool-use. Un único componente ausente se completa con el resto. Varios ausentes se completan con cero solo cuando el resto es cero. Un resto positivo repartible entre dos o más ausentes no se inventa. Un total menor que la suma conocida, o distinto cuando no falta ningún componente, es `consumption_ambiguous`.
+
+Cada componente inferido lleva su marca: `prompt_inferred`, `visible_inferred`, `thoughts_inferred` o `tool_inferred`. El valor inferido no se presenta como un conteo reportado por el proveedor. `cost_exact` solo es verdadero cuando el pensamiento queda determinado, sea reportado o inferido de forma unívoca. Si falta ese dato, `estimated_microusd` queda vacío y la reserva no se publica como consumo medido. `provider_charge=unconfirmed` se mantiene en todos los reportes. Un usage utilizable continúa al validador; un JSON inválido, `MAX_TOKENS`, `SAFETY` o una cifra inventada siguen en grounding `FAIL`.
+
+El mismo criterio recorre el SDK simulado, el normalizador, el adaptador, el bridge, `GatewayResult` y el ejecutor. `GatewayResult` no incluye el documento, el fragmento ni el texto del modelo. Su proyección pública solo lleva fase, motivo, organización y despliegue. C03 sigue exigiendo `FakeEnterpriseModel` y no importa este gateway.
+
+## Cierre de esta rama
+
+La simulación y la llamada real quedan separadas. El dry-run de esta revisión devolvió `PASS`, `requests_sent=0`, reserva 977 y estimado simulado 62. El dry-run de OpenAI devolvió `PASS`, `requests_sent=0` y reserva 303. Las pruebas focalizadas de Gemini, OpenAI, gateway, bridges y arquitectura dieron 164 PASS en `C:\Temp\c04close2`. Las regresiones ya reportadas de C03 E2E (34), B2-GRD (37), B2-RUNTIME/SRC (74), C01/C02/B1 (405) y conectores (617 PASS, 1 SKIPPED) no se repitieron: el cambio de esta auditoría añade marcas opcionales al contrato del gateway neutral y esas suites no lo importan.
+
+No hay una autorización pendiente para otra llamada. La migración 003 sigue siendo el permiso durable que esta fase no crea. RAG, MCP, PostgreSQL, Graph live y la integración con C03 permanecen fuera.
 
 ## Decisiones pendientes
 
 - Confirmar proyecto OpenAI, facturación API, disponibilidad de `gpt-6-luna`, límite mensual de US$5 con hard limit si existe, y alertas. Esta sesión no lo comprobó.
-- Autorizar de forma expresa una sola ejecución `live-once` del fixture fijo, después de esa confirmación.
-- La migración 003, la integración con C03, RAG, MCP, PostgreSQL y Graph live siguen fuera de esta fase.
+- Confirmar en Google el proyecto, la facturación API y el cargo real de las dos solicitudes ya consumidas. El saldo prepago no sustituye ese cargo.
+- La migración 003, la integración con C03, RAG, MCP, PostgreSQL y Graph live siguen fuera de esta fase. No hay una tercera solicitud Gemini autorizada.
