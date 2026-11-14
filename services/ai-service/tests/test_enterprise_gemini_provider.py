@@ -174,7 +174,9 @@ def test_gemini_dispatch_uses_one_closed_sdk_call():
     assert config.max_output_tokens == 128 and config.response_mime_type == "application/json"
     assert config.thinking_config.thinking_level.name == "MINIMAL"
     assert config.automatic_function_calling.disable is True
-    assert config.tools is None and body["usage"] == {"input_tokens": 40, "output_tokens": 16}
+    assert config.tools is None and body["usage"]["input_tokens"] == 40
+    assert body["usage"]["output_tokens"] == 16 and body["usage"]["thoughts_tokens"] == 0
+    assert body["usage"]["cost_exact"] is True and body["usage"]["thoughts_inferred"] is False
     parsed = json.loads(body["output"][0]["content"][0]["text"])
     assert parsed["proposed_days"] == 20 and parsed["proposed_months"] == 12
 
@@ -185,8 +187,11 @@ def test_gemini_dispatch_errors_do_not_echo_the_fixture():
         (_response(reason="MAX_TOKENS"), "incomplete_output"),
         (_response(reason="SAFETY", text=CLAUSE), "model_refusal"),
         (_response(model="gemini-3.6-flash"), "model_denied"),
-        (_response(thoughts=None), "consumption_ambiguous"),
     ]
+    visible = dispatch_generate(
+        type("Client", (), {"models": _Models(_response(thoughts=None))})(), generation)
+    assert visible["usage"]["input_tokens"] == 40 and visible["usage"]["output_tokens"] == 16
+    assert visible["usage"]["thoughts_tokens"] is None and visible["usage"]["cost_exact"] is False
     for response, reason in cases:
         models = _Models(response)
         with pytest.raises(ProviderError) as caught:
