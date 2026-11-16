@@ -8,8 +8,18 @@ _FINISH = frozenset({
 _FLAGS = (
     "candidate_present", "content_present", "usage_present", "cost_exact",
     "prompt_inferred", "visible_inferred", "thoughts_inferred", "tool_inferred",
+    "output_present",
 )
-_COUNTS = ("input_tokens", "candidate_tokens", "thoughts_tokens", "output_tokens")
+_COUNTS = (
+    "input_tokens", "candidate_tokens", "thoughts_tokens", "output_tokens",
+    "reasoning_tokens", "total_tokens",
+)
+_RESPONSE_STATUS = frozenset({
+    "completed", "failed", "in_progress", "cancelled", "queued", "incomplete", "absent",
+})
+_INCOMPLETE_REASON = frozenset({
+    "max_output_tokens", "max_messages", "content_filter", "steered", "absent",
+})
 
 
 class ProviderError(Exception):
@@ -29,7 +39,15 @@ def _diagnostic(diagnostic):
     if type(diagnostic) is not dict:
         return None
     finish = diagnostic.get("finish_reason")
-    closed = {"finish_reason": finish if finish in _FINISH else "unrecognized"}
+    status = diagnostic.get("response_status", "absent")
+    incomplete = diagnostic.get("incomplete_reason", "absent")
+    http_status = diagnostic.get("http_status")
+    closed = {
+        "finish_reason": finish if finish in _FINISH else "unrecognized",
+        "response_status": status if status in _RESPONSE_STATUS else "unrecognized",
+        "incomplete_reason": incomplete if incomplete in _INCOMPLETE_REASON else "unrecognized",
+        "http_status": http_status if type(http_status) is int and 100 <= http_status <= 599 else None,
+    }
     for name in _FLAGS:
         value = diagnostic.get(name)
         closed[name] = value if type(value) is bool else None

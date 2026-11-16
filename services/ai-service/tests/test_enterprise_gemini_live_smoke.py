@@ -174,7 +174,7 @@ def test_sdk_http_is_one_shot_and_errors_do_not_retry(tmp_path, monkeypatch):
         (_body(json.dumps(_observation()), usage=False), "consumption_ambiguous"),
         (_body(json.dumps(_observation()), model="gemini-3.6-flash"), "model_denied"),
         (_body(json.dumps(_observation(proposed_days=21))), "candidate_rejected"),
-        (_body(json.dumps(_observation(evidence_end=1))), "excerpt_mismatch"),
+        (_body(json.dumps(_observation(source_excerpt="VACACIONES: 20 dias tras 12 meses de servicio"))), "excerpt_mismatch"),
     ]
     for index, (payload, reason) in enumerate(cases):
         calls = []
@@ -207,12 +207,11 @@ def test_shared_grounding_still_rejects_utf8_and_contradictions():
     source = (CLAUSE + " café").encode("utf-8")
     split = len(CLAUSE.encode("utf-8")) + len(" caf".encode("utf-8")) + 1
     parsed = _observation(evidence_start=split, evidence_end=len(source))
-    with pytest.raises(ProviderError) as boundary:
-        check_observation(source, parsed)
+    derived = check_observation(source, parsed)
     contradictory = (CLAUSE + " VACACIONES: 9 dias tras 3 meses de servicio.").encode("utf-8")
     with pytest.raises(ProviderError) as conflict:
         check_observation(contradictory, _observation())
-    assert boundary.value.reason == "invalid_offset" and conflict.value.reason == "contradictory_source"
+    assert derived.offsets_origin == "derived" and conflict.value.reason == "contradictory_source"
 
 
 def test_incomplete_output_keeps_token_counts_and_drops_text(tmp_path, monkeypatch):

@@ -17,12 +17,12 @@ from app.enterprise_llm_providers.adapter import OpenAIResponsesAdapter
 from app.enterprise_llm_providers.errors import ProviderError
 from app.enterprise_llm_providers.pricing import estimate_microusd
 from app.enterprise_llm_providers.live_smoke import (
-    CONFIRMATION_PHRASE, cli, default_attempt_directory, dispatch_guarded, dry_run, ground,
-    prepare_fixed, reject_alternate,
+    CONFIRMATION_PHRASE, MARKER_NAME, cli, default_attempt_directory, dispatch_guarded, dry_run,
+    ground, prepare_fixed, reject_alternate,
 )
 from app.enterprise_llm_providers.smoke import FIXED_DOCUMENT
 from app.enterprise_llm_providers.transport import (
-    DisabledOpenAITransport, live_egress_enabled, open_official_client,
+    DisabledOpenAITransport, _usage_account, live_egress_enabled, open_official_client,
 )
 
 
@@ -151,7 +151,7 @@ def test_c04c_sdk_request_is_single_closed_and_not_replayed(tmp_path):
     sent = json.loads(recorder.requests[0].content.decode("utf-8"))
     with pytest.raises(ProviderError) as replay:
         dispatch_guarded(recorder.client, payload, tmp_path)
-    marker = (tmp_path / "vacation-days-v1.attempt").read_text(encoding="utf-8")
+    marker = (tmp_path / MARKER_NAME).read_text(encoding="utf-8")
     assert report["result"] == "PASS" and report["requests_sent"] == 1 and reservation <= 1000
     assert report["input_tokens"] == 32 and report["output_tokens"] == 16
     assert report["estimated_microusd"] == estimate_microusd(32, 16) and report["provider_charge"] == "unconfirmed"
@@ -215,19 +215,20 @@ def test_c04c_malformed_model_output_is_local_and_closed(tmp_path):
 
 
 def test_c04c_grounding_rejects_bad_local_observations():
-    assert ground(CLAUSE.encode("utf-8"), _body(_observation())).days == 20
+    confirmed = ground(CLAUSE.encode("utf-8"), _body(_observation()))
+    assert confirmed.days == 20 and confirmed.offsets_origin == "model"
     with pytest.raises(ProviderError) as invented:
         ground(CLAUSE.encode("utf-8"), _body(_observation(proposed_days=21)))
-    with pytest.raises(ProviderError) as offset:
-        ground(CLAUSE.encode("utf-8"), _body(_observation(evidence_end=4)))
+    with pytest.raises(ProviderError) as spacing:
+        ground(CLAUSE.encode("utf-8"), _body(_observation(source_excerpt="VACACIONES: 20 dias tras 12 meses de servicio")))
     with pytest.raises(ProviderError) as invalid:
         ground(b"\xff", _body(_observation()))
     document = ("á" + CLAUSE).encode("utf-8")
     start = document.find(CLAUSE.encode("utf-8"))
-    with pytest.raises(ProviderError) as boundary:
-        ground(document, _body(_observation(evidence_start=start - 1, evidence_end=start + len(CLAUSE.encode()))))
-    assert invented.value.reason == "candidate_rejected" and offset.value.reason == "excerpt_mismatch"
-    assert invalid.value.reason == "invalid_input" and boundary.value.reason == "invalid_offset"
+    derived = ground(document, _body(_observation(evidence_start=start - 1, evidence_end=start + len(CLAUSE.encode()))))
+    assert invented.value.reason == "candidate_rejected" and spacing.value.reason == "excerpt_mismatch"
+    assert invalid.value.reason == "invalid_input"
+    assert derived.days == 20 and derived.offsets_origin == "derived"
 
 
 def test_c04c_environment_marker_logs_and_c03_stay_closed(tmp_path, caplog):
@@ -289,3 +290,97 @@ def test_c04c_script_dry_run_exits_without_a_prompt():
     assert completed.returncode == 0 and "VACACIONES" not in completed.stdout and KEY not in completed.stdout
     assert '"result": "PASS"' in completed.stdout and '"requests_sent": 0' in completed.stdout
     assert "CONFIRMO" not in completed.stdout and completed.stderr == ""
+
+
+def _usage_json(usage):
+    body = _sdk_json(json.dumps(_observation()), usage=False)
+    body["usage"] = usage
+    return body
+
+
+def test_openai_usage_and_failures_keep_metadata_without_grounding_pass(tmp_path):
+    payload, reservation = prepare_fixed(_clock)
+    assert reservation == 303 and reservation <= 1000
+    cases = {
+        "complete": (_usage_json({
+            "input_tokens": 32, "output_tokens": 16, "total_tokens": 48,
+            "output_tokens_details": {"reasoning_tokens": 0},
+        }), "PASS", 0, True),
+        "reasoning-absent": (_sdk_json(json.dumps(_observation()), usage=False) | {
+            "usage": {"input_tokens": 32, "output_tokens": 16, "total_tokens": 48},
+        }, "PASS", None, True),
+        "reasoning-positive": (_usage_json({
+            "input_tokens": 32, "output_tokens": 16, "total_tokens": 48,
+            "output_tokens_details": {"reasoning_tokens": 4},
+        }), "PASS", 4, True),
+        "incomplete": (_sdk_json(
+            json.dumps(_observation()), status="incomplete", usage=False) | {
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "usage": {"input_tokens": 32, "output_tokens": 16, "total_tokens": 48},
+        }, "incomplete_output", None, True),
+        "refusal": (_sdk_json("", content=[{"type": "refusal", "refusal": CLAUSE}], usage=False), "model_refusal", None, False),
+        "bad-json": (_sdk_json("{"), "invalid_output", None, True),
+        "other-model": (_sdk_json(json.dumps(_observation()), model="gpt-6-sol"), "model_denied", None, True),
+        "invented": (_sdk_json(json.dumps(_observation(proposed_days=21))), "candidate_rejected", None, True),
+        "derived": (_sdk_json(json.dumps(_observation(evidence_end=4))), "PASS", 0, True),
+        "spacing": (_sdk_json(json.dumps(_observation(
+            source_excerpt="VACACIONES: 20 dias tras 12 meses de servicio"))), "excerpt_mismatch", None, True),
+        "inconsistent": (_usage_json({
+            "input_tokens": 32, "output_tokens": 16, "total_tokens": 10,
+        }), "consumption_ambiguous", None, False),
+    }
+    for name, (body, reason, reasoning, exact) in cases.items():
+        recorder = RecordingSDK(_http(200, body))
+        directory = tmp_path / name
+        if reason == "PASS":
+            report = dispatch_guarded(recorder.client, payload, directory)
+            rendered = json.dumps(report)
+            assert report["result"] == "PASS" and report["grounding"] == "encontrado", name
+            assert report["input_tokens"] == 32 and report["output_tokens"] == 16, name
+            assert report["reasoning_tokens"] == reasoning and report["cost_exact"] is exact, name
+            assert report["estimated_microusd"] == estimate_microusd(32, 16), name
+            assert report["provider_charge"] == "unconfirmed" and CLAUSE not in rendered, name
+            if name == "derived":
+                assert report["offsets_origin"] == "derived"
+            if name == "complete":
+                assert report["offsets_origin"] == "model"
+        else:
+            with pytest.raises(ProviderError) as caught:
+                dispatch_guarded(recorder.client, payload, directory)
+            diagnostic = caught.value.diagnostic
+            rendered = json.dumps(diagnostic)
+            assert caught.value.reason == reason and CLAUSE not in rendered and KEY not in rendered, name
+            assert diagnostic["cost_exact"] is exact, name
+            if name in {"incomplete", "bad-json", "invented", "spacing", "inconsistent"}:
+                assert diagnostic["input_tokens"] == 32 and diagnostic["output_tokens"] == 16, name
+            if name == "incomplete":
+                assert diagnostic["response_status"] == "incomplete"
+                assert diagnostic["incomplete_reason"] == "max_output_tokens"
+            if name == "inconsistent":
+                assert diagnostic["reasoning_tokens"] is None
+        assert len(recorder.requests) == 1
+    limited = RecordingSDK(_http(429, {"error": {"message": CLAUSE + KEY}}))
+    with pytest.raises(ProviderError) as rate:
+        dispatch_guarded(limited.client, payload, tmp_path / "rate")
+    assert rate.value.reason == "rate_limited" and rate.value.diagnostic["http_status"] == 429
+    assert CLAUSE not in json.dumps(rate.value.diagnostic) and len(limited.requests) == 1
+    absent = _usage_account(type("Usage", (), {
+        "input_tokens": 32, "output_tokens": None, "total_tokens": None, "output_tokens_details": None,
+    })())
+    boolean = _usage_account(type("Usage", (), {
+        "input_tokens": True, "output_tokens": 16, "total_tokens": None, "output_tokens_details": None,
+    })())
+    paired = (
+        "VACACIONES: 20 dias tras 12 meses de servicio. "
+        "VACACIONES: 9 dias tras 3 meses de servicio."
+    ).encode("utf-8")
+    with pytest.raises(ProviderError) as contradictory:
+        ground(paired, _body(_observation()))
+    assert contradictory.value.reason == "contradictory_source"
+    assert absent["input_tokens"] == 32 and absent["output_tokens"] is None and absent["usable"] is False
+    assert boolean["usable"] is False and boolean["input_tokens"] is None
+    source = Path(prepare_fixed.__code__.co_filename).read_text(encoding="utf-8")
+    gateway = GATEWAY.read_text(encoding="utf-8")
+    assert MARKER_NAME == "vacation-days-v1.openai.attempt"
+    assert "c04-gemini-live-smoke" not in source and "GeminiSdkBridge" not in source
+    assert "type(self.model) is FakeEnterpriseModel" in gateway

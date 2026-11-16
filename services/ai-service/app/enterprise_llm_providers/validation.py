@@ -20,6 +20,7 @@ _FIELDS = (
 class CheckedObservation:
     days: int
     months: int
+    offsets_origin: str
 
     def __repr__(self):
         return "CheckedObservation(in-process)"
@@ -69,10 +70,7 @@ def check_observation(source, parsed):
         raise ProviderError("invalid_output")
     if parsed["refusal_or_insufficient"] or not parsed["evidence_found"]:
         raise ProviderError("model_refusal")
-    start, end = parsed["evidence_start"], parsed["evidence_end"]
     days, months = parsed["proposed_days"], parsed["proposed_months"]
-    if not _offset(start) or not _offset(end):
-        raise ProviderError("invalid_offset")
     if not _whole(days) or not _whole(months):
         raise ProviderError("invalid_output")
     clauses = _clauses(source)
@@ -86,13 +84,34 @@ def check_observation(source, parsed):
         excerpt = parsed["source_excerpt"].encode("utf-8")
     except UnicodeError:
         raise ProviderError("invalid_output") from None
-    if not _boundary(source, start) or not _boundary(source, end) or start >= end or end > len(source):
-        raise ProviderError("invalid_offset")
-    if source[start:end] != excerpt or (start, end) != (clause_start, clause_end):
+    spans = _exact_spans(source, excerpt)
+    if spans == []:
+        raise ProviderError("excerpt_mismatch")
+    if len(spans) != 1:
+        raise ProviderError("ambiguous_excerpt")
+    derived_start, derived_end = spans[0]
+    if (derived_start, derived_end) != (clause_start, clause_end):
         raise ProviderError("excerpt_mismatch")
     if (days, months) != (clause_days, clause_months):
         raise ProviderError("candidate_rejected")
-    return CheckedObservation(days, months)
+    claimed_start, claimed_end = parsed["evidence_start"], parsed["evidence_end"]
+    confirmed = (_offset(claimed_start) and _offset(claimed_end)
+                 and (claimed_start, claimed_end) == (derived_start, derived_end))
+    return CheckedObservation(days, months, "model" if confirmed else "derived")
+
+
+def _exact_spans(source, excerpt):
+    """Byte spans of one exact excerpt. An empty excerpt is not evidence."""
+    if excerpt == b"":
+        return []
+    found, start = [], 0
+    while start <= len(source):
+        at = source.find(excerpt, start)
+        if at < 0:
+            break
+        found.append((at, at + len(excerpt)))
+        start = at + 1
+    return found
 
 
 def _output_text(output):
@@ -125,16 +144,6 @@ def _whole(value):
 
 def _offset(value):
     return type(value) is int and not isinstance(value, bool) and value >= 0
-
-
-def _boundary(source, offset):
-    if offset > len(source):
-        return False
-    try:
-        source[:offset].decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    return True
 
 
 def _clauses(source):
