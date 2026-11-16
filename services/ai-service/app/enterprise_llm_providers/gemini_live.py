@@ -1,8 +1,8 @@
 """Isolated Gemini smoke. dry-run does not send. live-once stays behind a TTY confirmation.
 
 The public Gemini transport remains closed. This module does not import a provider SDK.
-The one live dispatch, when later authorized, goes through the neutral gateway and the
-existing generateContent normalizer. It is not a general egress switch.
+The dry-run and the guarded live-once path use the offline harness, not
+NeutralModelGateway. A durable ALLOW does not enter this module or open send.
 """
 import json
 import os
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from app.model_gateway.adapters import lab_adapters
 from app.model_gateway.contracts import ExecutionContext, ExecutionGrant
-from app.model_gateway.gateway import NeutralModelGateway
+from app.model_gateway.simulation import OfflineModelHarness
 from app.model_gateway.policy import REQUIRED
 from app.model_gateway.registry import ProviderRegistry, lab_catalog
 from app.model_gateway.sdk_bridge import GeminiSdkBridge
@@ -214,7 +214,7 @@ def _gateway(transport, credential, clock, reservation):
     if bridge.reservation() != reservation or reservation > CALL_CEILING_MICROUSD:
         raise ProviderError("budget_exceeded")
     adapters["gemini-sdk-a"] = bridge
-    return NeutralModelGateway(registry=_attempt_registry(reservation), adapters=adapters)
+    return OfflineModelHarness(registry=_attempt_registry(reservation), adapters=adapters)
 
 
 def _attempt_registry(reservation):

@@ -70,13 +70,13 @@ El bridge conserva el cuerpo del proveedor en una sola referencia mientras norma
 
 ## Conexión futura con C03 y otros agentes
 
-C03 sigue exigiendo `FakeEnterpriseModel`. Este gateway no está importado por ese flujo ni cambia Gate C, el perfil fake ni la entrega. La migración 003 del ledger empresarial ya guarda el permiso durable y su auditoría, en un espacio distinto del 003 clínico. Conectar este gateway sigue exigiendo un camino distinto del perfil fake. Esa conexión no está hecha: el gateway sigue aceptando `ExecutionGrant` en memoria.
+C03 sigue exigiendo `FakeEnterpriseModel`. Este gateway no está importado por ese flujo ni cambia Gate C, el perfil fake ni la entrega. La migración 003 del ledger empresarial ya guarda el permiso durable y su auditoría, en un espacio distinto del 003 clínico. `NeutralModelGateway.execute` exige una instancia exacta de `LedgerDurableAuthorization` sobre un `SQLiteExecutionLedger`, y una identidad reconocida por la autoridad de laboratorio. Un nombre copiado, una subclase o un `ExecutionGrant` armado por el llamador no son esa autoridad. `VacationClauseAgent` solo acepta el gateway operativo. `OfflineModelHarness` conserva la simulación anterior y no es la ruta operativa. El inventario de arquitectura permite una sola importación fuera del paquete de procesamiento: `model_gateway/gateway.py` importa `durable_resolver`. Ningún otro módulo de la aplicación puede nombrar ese paquete, y el gateway no contiene el nombre como texto. Un reemplazo de métodos dentro del mismo proceso queda fuera de esta garantía. Conectar C03 sigue exigiendo un camino distinto del perfil fake.
 
 El grafo clínico de seguimiento todavía importa el SDK de Gemini dentro del módulo de LangGraph y en su proveedor clínico. Esta base no lo migra. En el camino empresarial, `openai` solo se importa desde `enterprise_llm_providers/transport.py` y `google` solo desde `gemini_transport.py`. Las versiones declaradas son `openai==3.49.0` y `google-genai==2.24.0`.
 
 `PrivateCustomAdapter` demuestra un protocolo distinto dentro del proceso. No abre un modelo autoalojado ni un endpoint privado.
 
-Los permisos del gateway y de los bridges viven en memoria. No se persisten y no autorizan otra organización, otro principal ni otro proveedor. El ledger durable es otra autoridad; este gateway no la consulta y una fila `active` no abre egress. Una llamada live sigue exigiendo, aparte, confirmación de facturación, una sola ejecución y la frase interactiva del runbook C04. Este diseño no deja esa llamada hecha.
+La ruta operativa no acepta un permiso armado en memoria. El harness offline sí conserva ese contrato y no abre egress. Una fila `active` tampoco abre egress ni `live-once`. Una llamada live sigue exigiendo, aparte, confirmación de facturación, una sola ejecución y la frase interactiva del runbook C04. Este diseño no deja esa llamada hecha.
 
 ## Prueba de esta base
 

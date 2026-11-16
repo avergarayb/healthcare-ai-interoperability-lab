@@ -40,7 +40,23 @@ El número 003 de `app/migrations/` ya pertenece a la atribución clínica de se
 
 La tabla `aip_remote_execution_permit` guarda organización, despliegue, proveedor, modelo, operación `vacation-days-v1`, capacidad `structured_output+usage_report`, política `model-gateway-policy-v1`, vigencia UTC y estado `active` o `revoked`. El identificador es único. Un alcance activo no se repite. No hay comodines ni filas iniciales. Una revocación no vuelve a `active`. La auditoría propia guarda identificadores, fechas, resultado y un motivo cerrado. No guarda prompts, documentos ni claves.
 
-Un administrador sintético de la misma organización registra y revoca. Esa identidad solo existe en el laboratorio y no hay ruta HTTP que la convierta en administrador de producción. La evaluación por defecto es denegación. `ALLOW` significa que la fila está vigente; `egress_allowed`, `live_authorized` y `c03_connected` permanecen en falso. El gateway neutral sigue aceptando un `ExecutionGrant` en memoria para las simulaciones offline y no consulta esta tabla. C03 tampoco la consulta. Conectar el ledger con el gateway queda para una tarea posterior. La base es SQLite de un proceso en Windows, no una persistencia multi-réplica ni una auditoría empresarial completa. La reversión prevista es restaurar la copia del archivo tomada antes de `migrate_to_v3`; esta fase no ejecuta un borrado. La regresión de publicación dio 205 PASS en autorización, OpenAI, Gemini, gateway y arquitectura, 37 en B2-GRD, 34 en C03 E2E, 74 en B2-RUNTIME/SRC y 405 en C01/C02/B1. No hubo solicitudes reales.
+Un administrador sintético de la misma organización registra y revoca. Esa identidad solo existe en el laboratorio y no hay ruta HTTP que la convierta en administrador de producción. La evaluación por defecto es denegación. `ALLOW` significa que la fila está vigente; `egress_allowed`, `live_authorized` y `c03_connected` permanecen en falso. C03 no consulta esta tabla. La base es SQLite de un proceso en Windows, no una persistencia multi-réplica ni una auditoría empresarial completa. La reversión prevista es restaurar la copia del archivo tomada antes de `migrate_to_v3`; esta fase no ejecuta un borrado. La regresión de publicación dio 205 PASS en autorización, OpenAI, Gemini, gateway y arquitectura, 37 en B2-GRD, 34 en C03 E2E, 74 en B2-RUNTIME/SRC y 405 en C01/C02/B1. No hubo solicitudes reales.
+
+### Integración con el gateway neutral
+
+Antes de esta integración, `NeutralModelGateway.execute` aceptaba un `ExecutionGrant` construido por el llamador. Esa llamada comparaba el objeto en memoria con el catálogo y podía devolver `accepted` sin leer el ledger.
+
+La ruta operativa ahora es otra. `NeutralModelGateway.execute` recibe una identidad de laboratorio, el identificador del permiso, el presupuesto, el recurso y el despliegue pedido. No recibe un grant. El puerto `DurableAuthorizationResolver` niega por defecto. El gateway solo continúa si el objeto es exactamente `LedgerDurableAuthorization`, cuya construcción exige un `SQLiteExecutionLedger`. Esa clase llama a `evaluate_remote_authorization`. El gateway no abre SQLite ni lee tablas.
+
+El resolver por defecto niega. La ruta operativa acepta solo una instancia exacta de `LedgerDurableAuthorization`, y esa clase acepta solo un `SQLiteExecutionLedger`. Copiar un nombre de autoridad o heredar el resolver no ejecuta `resolve`. No hay variable de entorno que instale un stub. Un proceso que reemplace métodos en memoria queda fuera de esta garantía: la identidad sintética no aísla el código del mismo proceso.
+
+La organización y el principal salen del acceso que la autoridad de laboratorio reconoce. Un `LaboratoryAccess` copiado y un `ExecutionGrant` no están reconocidos. El proveedor y el modelo salen del catálogo cerrado, no del llamador. La operación distinta de `vacation-days-v1` se rechaza antes del bridge. Después de un ALLOW durable se aplican la política de ejecución, la capacidad y el presupuesto. Un presupuesto mayor no cambia la reserva del catálogo ni añade capacidades. El recurso no sustituye la identidad. Cualquiera de esas denegaciones no llama al bridge. No hay fallback a otro proveedor. `VacationClauseAgent` rechaza el harness.
+
+`OfflineModelHarness` conserva el ejercicio offline anterior, incluidos los dry-run de Gemini. `NeutralModelGateway` no lo importa. Una fila `active` no abre `send` ni `live-once`. C03 sigue en `FakeEnterpriseModel`.
+
+Cada ejecución vuelve a consultar el ledger. No hay caché positiva. Una revocación o una expiración afecta a la evaluación siguiente. Entre esa evaluación y una llamada real futura queda una ventana TOCTOU: SQLite de un proceso no ofrece un lease distribuido. Antes de habilitar egress habrá que revalidar el permiso en la misma decisión que abra el transporte. El presupuesto y el recurso que declara el llamador no están ligados a una política durable; esa vinculación también queda pendiente antes de cualquier tráfico real. Esta tarea no abre el transporte.
+
+Si el almacén está en V1 o V2, la evaluación devuelve `authority_unverifiable` y no migra. Si no se puede escribir la auditoría de un ALLOW, la transacción se revierte y el gateway no publica `accepted`. La identidad sigue siendo sintética. No hay IAM de producción. La regresión de publicación dio 218 PASS en autorización, OpenAI, Gemini, gateway y arquitectura, 37 en B2-GRD, 34 en C03 E2E, 74 en B2-RUNTIME/SRC y 405 en C01/C02/B1. Las aserciones del resolver falsificado, del harness y del presupuesto inflado están dentro de esas pruebas y no aumentan el conteo. No hubo solicitudes reales.
 
 ## Esquema y grounding
 
@@ -72,7 +88,7 @@ Los límites publicados de `gpt-6-luna` en el tier Build son 5.000 RPM y 2.000.0
 
 ## Qué impide sustituir el fake
 
-El SDK y la excepción de arquitectura ya están acotados al transporte. La migración 003 del ledger ya guarda el permiso durable y no abre el transporte. Siguen haciendo falta conectar ese permiso al gateway, un perfil distinto del fake y una autorización expresa de una sola llamada real. Un cambio de configuración no puede saltarse esos contratos.
+El SDK y la excepción de arquitectura ya están acotados al transporte. La migración 003 del ledger guarda el permiso durable y no abre el transporte. `NeutralModelGateway.execute` consulta ese permiso. Siguen haciendo falta un perfil distinto del fake, conectar C03 y una autorización expresa de una sola llamada real. Un cambio de configuración no puede saltarse esos contratos.
 
 ## Phase B
 
@@ -232,4 +248,4 @@ OpenAI Responses informa `input_tokens`, `output_tokens` y, dentro de la salida,
 
 - Confirmar proyecto OpenAI, facturación API, disponibilidad de `gpt-6-luna`, límite mensual de US$5 con hard limit si existe, y alertas. Esta sesión no lo comprobó.
 - Confirmar en Google el proyecto, la facturación API y el cargo real de las dos solicitudes ya consumidas. El saldo prepago no sustituye ese cargo.
-- La migración 003 del ledger ya guarda el permiso durable y no abre egress ni conecta C03. La integración con el gateway operativo, RAG, MCP, PostgreSQL y Graph live siguen fuera. No hay una tercera solicitud Gemini autorizada ni otra solicitud OpenAI.
+- La migración 003 del ledger guarda el permiso durable. `NeutralModelGateway.execute` ya lo consulta y un grant en memoria no autoriza esa ruta. C03, el egress, RAG, MCP, PostgreSQL y Graph live siguen fuera. No hay una tercera solicitud Gemini autorizada ni otra solicitud OpenAI.
