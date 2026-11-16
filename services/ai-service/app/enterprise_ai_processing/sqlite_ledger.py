@@ -12,14 +12,21 @@ from uuid import uuid4
 
 from .execution_types import EVENTS, REASONS, TERMINAL, ExecutionError, LaboratoryAccess, identifier, instant, require, utc, uuid
 from .models import AIProcessingGrant, AIProcessingPolicy, PROFILE_ID, ModelProcessingProfile, ProcessingLimits, QUESTION
+from .remote_authorization import (
+    CAPABILITY, DECISION_REASONS, OPERATION_ID, POLICY_REF, REVOCATION_REASONS, SCOPES,
+    RemoteAuthorization, RemoteAuthorizationDecision, classify,
+)
 from ..enterprise_connectors.models import ConnectorOperation
 
 
 MIGRATION = Path(__file__).parent / "migrations/001_processing_ledger.sql"
 MIGRATION_V2 = Path(__file__).parent / "migrations/002_processing_ledger.sql"
+MIGRATION_V3 = Path(__file__).parent / "migrations/003_remote_execution_permit.sql"
 CONTRACT = "enterprise-ai-processing-ledger-v1"
 CONTRACT_V2 = "enterprise-ai-processing-ledger-v2"
+CONTRACT_V3 = "enterprise-ai-processing-ledger-v3"
 AUDIT = "enterprise-ai-processing-audit-v1"
+REMOTE_AUDIT = "enterprise-remote-authorization-audit-v1"
 DERIVED_KIND = "grounded_extractive_answer"
 DERIVED_OPERATION = "enterprise.answer.deliver"
 DERIVED_PURPOSE = "synthetic-policy-question-answering"
@@ -106,8 +113,10 @@ class SQLiteExecutionLedger:
         require(sqlite3.sqlite_version_info >= (3, 37, 0), unavailable=True)
         self._sql = MIGRATION.read_text(encoding="utf-8").replace("\r\n", "\n")
         self._sql_v2 = MIGRATION_V2.read_text(encoding="utf-8").replace("\r\n", "\n")
+        self._sql_v3 = MIGRATION_V3.read_text(encoding="utf-8").replace("\r\n", "\n")
         self._checksum = sha256(self._sql.encode("utf-8")).hexdigest()
         self._checksum_v2 = sha256(self._sql_v2.encode("utf-8")).hexdigest()
+        self._checksum_v3 = sha256(self._sql_v3.encode("utf-8")).hexdigest()
         # Schema oracles only, not storage/fallback. No runtime state lives here.
         with closing(sqlite3.connect(":memory:")) as oracle:
             oracle.executescript(self._sql)
@@ -116,6 +125,8 @@ class SQLiteExecutionLedger:
             oracle.execute("INSERT INTO aip_store VALUES (1,1,?,?,?,1,1)", (CONTRACT, str(uuid4()), self._checksum))
             self._apply_v2(oracle)
             self._ddl_v2 = schema_ddl(oracle)
+            self._apply_v3(oracle)
+            self._ddl_v3 = schema_ddl(oracle)
         self._acquire_owner()
 
     def _safe(self, path, *, exists=False):
@@ -172,13 +183,19 @@ class SQLiteExecutionLedger:
         require(instant(access.expires_at) > instant(self.clock()), "authorization_expired")
         return access
 
-    def _apply_v2(self, connection):
-        for statement in _statements(self._sql_v2):
-            if statement.count("?") == 2:
-                connection.execute(statement, (self._checksum_v2, self._checksum))
+    def _apply_version(self, connection, sql, checksums):
+        for statement in _statements(sql):
+            if statement.count("?") == len(checksums):
+                connection.execute(statement, checksums)
             else:
                 require("?" not in statement, unavailable=True)
                 connection.execute(statement)
+
+    def _apply_v2(self, connection):
+        self._apply_version(connection, self._sql_v2, (self._checksum_v2, self._checksum))
+
+    def _apply_v3(self, connection):
+        self._apply_version(connection, self._sql_v3, (self._checksum_v3, self._checksum_v2))
 
     def _validate(self, connection):
         ddl = schema_ddl(connection)
@@ -187,6 +204,9 @@ class SQLiteExecutionLedger:
             return
         if ddl == self._ddl_v2:
             self._validate_v2(connection)
+            return
+        if ddl == self._ddl_v3:
+            self._validate_v3(connection)
             return
         require(False, unavailable=True)
 
@@ -250,6 +270,28 @@ class SQLiteExecutionLedger:
             "SELECT count(*) FROM aip_grounding_audit WHERE event='derived_delivery_grant_changed' "
             "AND organization_id NOT IN (SELECT organization_id FROM aip_derived_revision)").fetchone()[0]
         require(extra == 0, unavailable=True)
+
+    def _validate_v3(self, connection):
+        require(connection.execute("PRAGMA quick_check(1)").fetchone()[0] == "ok", unavailable=True)
+        require(connection.execute("PRAGMA foreign_key_check").fetchone() is None, unavailable=True)
+        meta = connection.execute(
+            "SELECT schema_version,contract,migration_checksum,v1_checksum,v2_checksum,next_remote_seq "
+            "FROM aip_store WHERE singleton=1").fetchone()
+        require(meta is not None and meta["schema_version"] == 3 and meta["contract"] == CONTRACT_V3, unavailable=True)
+        require(meta["migration_checksum"] == self._checksum_v3 and meta["v1_checksum"] == self._checksum, unavailable=True)
+        require(meta["v2_checksum"] == self._checksum_v2, unavailable=True)
+        count, maximum = connection.execute("SELECT count(*),coalesce(max(audit_seq),0) FROM aip_audit").fetchone()
+        require(count == maximum, unavailable=True)
+        count, maximum = connection.execute(
+            "SELECT count(*),coalesce(max(audit_seq),0) FROM aip_remote_authorization_audit").fetchone()
+        require(count == maximum and meta["next_remote_seq"] == maximum + 1, unavailable=True)
+        for table in ("aip_profile", "aip_grant", "aip_derived_delivery_grant", "aip_remote_execution_permit"):
+            require(connection.execute("SELECT count(*) FROM " + table).fetchone()[0] <= 32, unavailable=True)
+        broken = connection.execute(
+            "SELECT count(*) FROM aip_remote_execution_permit WHERE "
+            "(status='active' AND (revoked_at_us IS NOT NULL OR revocation_reason IS NOT NULL)) OR "
+            "(status='revoked' AND (revoked_at_us IS NULL OR revocation_reason IS NULL))").fetchone()[0]
+        require(broken == 0, unavailable=True)
 
     @contextmanager
     def _transaction(self, name, *, write=True):
@@ -631,6 +673,156 @@ class SQLiteExecutionLedger:
             finally:
                 if connection is not None:
                     connection.close()
+
+    def migrate_to_v3(self, access):
+        """Explicit V2 to V3. Opening a store never calls this. V2 audit checks stay unchanged."""
+        with self.barrier:
+            self._actor(access, {"administrator"})
+            self._owned()
+            require(not self._live, "lease_invalid")
+            require(self.path.exists(), unavailable=True)
+            connection = None
+            try:
+                self._safe(self.path, exists=True)
+                connection = sqlite3.connect(self.path.as_uri() + "?mode=rw", uri=True, timeout=0.1)
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute("PRAGMA trusted_schema=OFF")
+                connection.execute("PRAGMA busy_timeout=100")
+                connection.execute("BEGIN IMMEDIATE")
+                ddl = schema_ddl(connection)
+                if ddl == self._ddl_v3:
+                    raise ExecutionError("revision_conflict", unavailable=False)
+                require(ddl == self._ddl_v2, unavailable=True)
+                self._validate_v2(connection)
+                busy = connection.execute(
+                    "SELECT count(*) FROM aip_execution WHERE reservation_state IN ('HELD','UNCERTAIN') "
+                    "OR run_state IN ('INTENT','CONSUMED','ENTERED')").fetchone()[0]
+                require(busy == 0, "lease_invalid")
+                self._apply_v3(connection)
+                self._validate_v3(connection)
+                require(schema_ddl(connection) == self._ddl_v3, unavailable=True)
+                self._fault("migrate_v3_before_commit")
+                connection.commit()
+                self._fault("migrate_v3_after_commit")
+            except ExecutionError:
+                if connection is not None:
+                    connection.rollback()
+                raise
+            except (sqlite3.Error, OSError, ValueError, TypeError):
+                if connection is not None:
+                    connection.rollback()
+                raise ExecutionError() from None
+            finally:
+                if connection is not None:
+                    connection.close()
+
+    def register_remote_authorization(self, access, record):
+        """Internal administrator write. There is no HTTP route and no implicit grant."""
+        with self.barrier:
+            self._actor(access, {"administrator"})
+            self._check_record(access, record)
+            start, end = instant(record.valid_from), instant(record.expires_at)
+            require(start < end, "invalid_input")
+            with self._transaction("remote_register") as c:
+                self._require_v3(c)
+                require(c.execute(
+                    "SELECT 1 FROM aip_remote_execution_permit WHERE authorization_id=?",
+                    (record.authorization_id,)).fetchone() is None, "revision_conflict")
+                require(c.execute(
+                    "SELECT 1 FROM aip_remote_execution_permit WHERE organization_id=? AND deployment_id=? "
+                    "AND provider_id=? AND model_id=? AND operation_id=? AND status='active'",
+                    (record.organization_id, record.deployment_id, record.provider_id, record.model_id,
+                     record.operation_id)).fetchone() is None, "revision_conflict")
+                self._insert(c, "aip_remote_execution_permit", {
+                    "authorization_id": record.authorization_id, "organization_id": record.organization_id,
+                    "deployment_id": record.deployment_id, "provider_id": record.provider_id,
+                    "model_id": record.model_id, "operation_id": record.operation_id,
+                    "capability": record.capability, "policy_ref": record.policy_ref,
+                    "policy_version": record.policy_version, "status": "active",
+                    "valid_from_us": start, "expires_at_us": end, "registered_at_us": instant(self.clock()),
+                    "registered_by": access.principal_id, "revoked_at_us": None, "revoked_by": None,
+                    "revocation_reason": None,
+                })
+                self._remote_audit(c, "remote_authorization_registered", "RECORDED", "accepted", access, record)
+            return record.authorization_id
+
+    def evaluate_remote_authorization(self, access, record):
+        """Exact-scope decision. ALLOW does not enable egress, live-once, or C03."""
+        try:
+            self._actor(access, {"administrator", "executor"})
+            require(type(record) is RemoteAuthorization, "invalid_input")
+            if record.organization_id != access.organization_id:
+                with self._transaction("remote_evaluate") as c:
+                    self._require_v3(c)
+                    self._remote_audit(c, "remote_authorization_denied", "DENY", "scope_mismatch", access, record)
+                return RemoteAuthorizationDecision(False, "scope_mismatch", None)
+            self._check_record(access, record)
+            with self._transaction("remote_evaluate") as c:
+                self._require_v3(c)
+                row = c.execute(
+                    "SELECT * FROM aip_remote_execution_permit WHERE authorization_id=? AND organization_id=?",
+                    (record.authorization_id, access.organization_id)).fetchone()
+                reason = classify(row, instant(self.clock()), record)
+                event = "remote_authorization_expired" if reason == "authorization_expired" else (
+                    "remote_authorization_evaluated" if reason == "accepted" else "remote_authorization_denied")
+                outcome = "ALLOW" if reason == "accepted" else "DENY"
+                self._remote_audit(c, event, outcome, reason, access, record)
+                return RemoteAuthorizationDecision(reason == "accepted", reason, record.authorization_id)
+        except ExecutionError as error:
+            reason = "storage_unavailable" if error.unavailable else (
+                error.reason if error.reason in DECISION_REASONS else "authority_unverifiable")
+            return RemoteAuthorizationDecision(False, reason, None)
+
+    def revoke_remote_authorization(self, access, authorization_id, reason):
+        """Revocation is terminal. A later register of the same id is a conflict, not a reversal."""
+        with self.barrier:
+            self._actor(access, {"administrator"})
+            identifier(authorization_id)
+            require(reason in REVOCATION_REASONS, "invalid_input")
+            with self._transaction("remote_revoke") as c:
+                self._require_v3(c)
+                row = c.execute(
+                    "SELECT * FROM aip_remote_execution_permit WHERE authorization_id=?",
+                    (authorization_id,)).fetchone()
+                require(row is not None and row["organization_id"] == access.organization_id, "scope_mismatch")
+                require(row["status"] == "active", "revision_conflict")
+                updated = c.execute(
+                    "UPDATE aip_remote_execution_permit SET status='revoked', revoked_at_us=?, revoked_by=?, "
+                    "revocation_reason=? WHERE authorization_id=? AND organization_id=? AND status='active'",
+                    (instant(self.clock()), access.principal_id, reason, authorization_id, access.organization_id))
+                require(updated.rowcount == 1, "revision_conflict")
+                self._remote_audit(c, "remote_authorization_revoked", "RECORDED", "revoked", access, row)
+            return authorization_id
+
+    def _require_v3(self, connection):
+        version = connection.execute("SELECT schema_version FROM aip_store").fetchone()
+        require(version is not None and version[0] == 3, "authority_unverifiable")
+
+    def _check_record(self, access, record):
+        require(type(record) is RemoteAuthorization, "invalid_input")
+        identifier(record.authorization_id)
+        identifier(record.organization_id)
+        require(record.organization_id == access.organization_id, "scope_mismatch")
+        require((record.deployment_id, record.provider_id, record.model_id) in SCOPES, "invalid_input")
+        require(record.operation_id == OPERATION_ID and record.capability == CAPABILITY, "invalid_input")
+        require(record.policy_ref == POLICY_REF and record.policy_version == 1, "invalid_input")
+        require(type(record.policy_version) is int, "invalid_input")
+
+    def _remote_audit(self, connection, event, outcome, reason, access, scope):
+        require(reason in DECISION_REASONS, "invalid_input")
+        self._fault("audit_" + event)
+        sequence = connection.execute("SELECT next_remote_seq FROM aip_store").fetchone()[0]
+        field = (lambda name: getattr(scope, name)) if type(scope) is RemoteAuthorization else (lambda name: scope[name])
+        self._insert(connection, "aip_remote_authorization_audit", {
+            "event_id": str(uuid4()), "audit_seq": sequence, "contract": REMOTE_AUDIT,
+            "timestamp_us": instant(self.clock()), "event": event, "outcome": outcome, "reason": reason,
+            "organization_id": access.organization_id, "authorization_id": field("authorization_id"),
+            "deployment_id": field("deployment_id"), "provider_id": field("provider_id"),
+            "model_id": field("model_id"), "operation_id": field("operation_id"),
+            "actor_ref": access.principal_id,
+        })
+        connection.execute("UPDATE aip_store SET next_remote_seq=next_remote_seq+1")
 
     def _org_derived_revision(self, connection, organization_id):
         row = connection.execute(

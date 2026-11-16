@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1] / "app"
 C01 = frozenset({"__init__.py", "models.py", "policy.py"})
 C02 = frozenset({"execution_types.py", "gateway.py", "fake_model.py", "sqlite_ledger.py",
                  "source_boundary.py", "grounding.py", "answer.py", "authorization.py",
-                 "delivery_sink.py", "orchestration.py", "composition.py"})
+                 "delivery_sink.py", "orchestration.py", "composition.py", "remote_authorization.py"})
 IMPORTS = {
     "answer.py": frozenset({"dataclasses", ".execution_types"}),
     "authorization.py": frozenset({
@@ -34,7 +34,9 @@ IMPORTS = {
                              "..enterprise_connectors.models", "..enterprise_connectors.registry"}),
     "fake_model.py": frozenset({".execution_types"}),
     "sqlite_ledger.py": frozenset({"contextlib", "dataclasses", "datetime", "hashlib", "os", "pathlib", "sqlite3", "stat", "threading",
-                                  "uuid", "msvcrt", ".execution_types", ".models", "..enterprise_connectors.models"}),
+                                  "uuid", "msvcrt", ".execution_types", ".models", ".remote_authorization",
+                                  "..enterprise_connectors.models"}),
+    "remote_authorization.py": frozenset({"dataclasses", "datetime"}),
 }
 FILESYSTEM_CALLS = frozenset({"open", "read_text", "read_bytes", "write_text", "write_bytes", "mkdir", "unlink",
                              "rmdir", "chmod", "stat", "lstat", "resolve", "exists", "is_file", "is_dir"})

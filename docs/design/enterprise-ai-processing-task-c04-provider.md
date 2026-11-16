@@ -34,9 +34,13 @@ La lectura, el procesamiento fake, el procesamiento remoto, el grounding y la en
 
 El perfil `fake-enterprise-extractive-v1` no puede representar a OpenAI. La migración 001 fija `provider='fake'`, `model_id='fake-enterprise-extractive-v1'` y `destination='in-process-offline'`. Reutilizarlo sería eludir el esquema.
 
-### Migración 003, solo diseño
+### Migración 003
 
-Haría falta una tabla nueva, por ejemplo `aip_remote_execution_permit`, con esos campos y un destino distinto del fake. No se ampliaría el `CHECK` del perfil fake ni el de la auditoría V2. No se implementó y no se creó el archivo SQL.
+El número 003 de `app/migrations/` ya pertenece a la atribución clínica de seguimiento. No se reutiliza. La migración de este permiso es `enterprise_ai_processing/migrations/003_remote_execution_permit.sql` y sube el ledger de la versión 2 a la 3 solo mediante `migrate_to_v3`. Abrir el almacén no la aplica. No cambia el `CHECK` del perfil fake ni el de la auditoría V2.
+
+La tabla `aip_remote_execution_permit` guarda organización, despliegue, proveedor, modelo, operación `vacation-days-v1`, capacidad `structured_output+usage_report`, política `model-gateway-policy-v1`, vigencia UTC y estado `active` o `revoked`. El identificador es único. Un alcance activo no se repite. No hay comodines ni filas iniciales. Una revocación no vuelve a `active`. La auditoría propia guarda identificadores, fechas, resultado y un motivo cerrado. No guarda prompts, documentos ni claves.
+
+Un administrador sintético de la misma organización registra y revoca. Esa identidad solo existe en el laboratorio y no hay ruta HTTP que la convierta en administrador de producción. La evaluación por defecto es denegación. `ALLOW` significa que la fila está vigente; `egress_allowed`, `live_authorized` y `c03_connected` permanecen en falso. El gateway neutral sigue aceptando un `ExecutionGrant` en memoria para las simulaciones offline y no consulta esta tabla. C03 tampoco la consulta. Conectar el ledger con el gateway queda para una tarea posterior. La base es SQLite de un proceso en Windows, no una persistencia multi-réplica ni una auditoría empresarial completa. La reversión prevista es restaurar la copia del archivo tomada antes de `migrate_to_v3`; esta fase no ejecuta un borrado. La regresión de publicación dio 205 PASS en autorización, OpenAI, Gemini, gateway y arquitectura, 37 en B2-GRD, 34 en C03 E2E, 74 en B2-RUNTIME/SRC y 405 en C01/C02/B1. No hubo solicitudes reales.
 
 ## Esquema y grounding
 
@@ -68,7 +72,7 @@ Los límites publicados de `gpt-6-luna` en el tier Build son 5.000 RPM y 2.000.0
 
 ## Qué impide sustituir el fake
 
-El SDK y la excepción de arquitectura ya están acotados al transporte. Siguen haciendo falta la migración 003, un perfil nuevo, un camino de gateway distinto de `FakeEnterpriseModel` y una autorización expresa de una sola llamada real. Un cambio de configuración no puede saltarse esos contratos.
+El SDK y la excepción de arquitectura ya están acotados al transporte. La migración 003 del ledger ya guarda el permiso durable y no abre el transporte. Siguen haciendo falta conectar ese permiso al gateway, un perfil distinto del fake y una autorización expresa de una sola llamada real. Un cambio de configuración no puede saltarse esos contratos.
 
 ## Phase B
 
@@ -228,4 +232,4 @@ OpenAI Responses informa `input_tokens`, `output_tokens` y, dentro de la salida,
 
 - Confirmar proyecto OpenAI, facturación API, disponibilidad de `gpt-6-luna`, límite mensual de US$5 con hard limit si existe, y alertas. Esta sesión no lo comprobó.
 - Confirmar en Google el proyecto, la facturación API y el cargo real de las dos solicitudes ya consumidas. El saldo prepago no sustituye ese cargo.
-- La migración 003, la integración con C03, RAG, MCP, PostgreSQL y Graph live siguen fuera de esta fase. No hay una tercera solicitud Gemini autorizada.
+- La migración 003 del ledger ya guarda el permiso durable y no abre egress ni conecta C03. La integración con el gateway operativo, RAG, MCP, PostgreSQL y Graph live siguen fuera. No hay una tercera solicitud Gemini autorizada ni otra solicitud OpenAI.
