@@ -22,6 +22,7 @@ from app.enterprise_llm_providers.smoke import FIXED_DOCUMENT, dry_run_fixed_fix
 from app.enterprise_llm_providers.transport import (
     DisabledOpenAITransport, OpenAISDKTransport, dispatch_responses, live_egress_enabled,
 )
+from app.enterprise_llm_providers.validation import check_observation
 
 
 KEY = "sk-lab-not-a-real-key"
@@ -154,26 +155,61 @@ def test_c04_invented_numbers_wrong_excerpt_and_bad_offset_are_rejected():
     with pytest.raises(ProviderError) as second:
         _observe(moved)
     assert second.value.reason == "excerpt_mismatch"
-    offset = LocalTransport(_body(_observation(evidence_start=-1)))
-    with pytest.raises(ProviderError) as third:
-        _observe(offset)
-    assert third.value.reason == "invalid_offset"
+    shifted = _observe(LocalTransport(_body(_observation(evidence_start=-1))))
+    assert shifted.accepted is True and shifted.days == 20 and shifted.months == 12
 
 
 def test_c04_utf8_boundary_and_contradiction_fail_closed():
     document = "á" + CLAUSE
     encoded = document.encode("utf-8")
     start = encoded.find(CLAUSE.encode("utf-8"))
-    transport = LocalTransport(_body(_observation(
-        document, evidence_start=start - 1, evidence_end=start + len(CLAUSE.encode("utf-8")))))
-    with pytest.raises(ProviderError) as boundary:
-        _observe(transport, _read(document))
-    assert boundary.value.reason == "invalid_offset"
+    derived = check_observation(encoded, _observation(
+        document, evidence_start=start - 1, evidence_end=start + len(CLAUSE.encode("utf-8"))))
+    assert derived.days == 20 and derived.offsets_origin == "derived"
     mixed = CLAUSE + " " + OTHER
     contradiction = LocalTransport(_body(_observation(mixed)))
     with pytest.raises(ProviderError) as caught:
         _observe(contradiction, _read(mixed))
     assert caught.value.reason == "contradictory_source"
+
+
+def test_excerpt_position_comes_from_the_source_not_from_the_model():
+    source = CLAUSE.encode("utf-8")
+    exact = check_observation(source, _observation())
+    shifted = check_observation(source, _observation(evidence_start=1, evidence_end=2))
+    unicode_source = ("á" + CLAUSE).encode("utf-8")
+    byte_start = unicode_source.find(source)
+    character_claim = check_observation(unicode_source, _observation(
+        "á" + CLAUSE, evidence_start=1, evidence_end=1 + len(CLAUSE)))
+    assert exact.offsets_origin == "model" and exact.days == 20 and exact.months == 12
+    assert shifted.offsets_origin == "derived" and character_claim.offsets_origin == "derived"
+    assert character_claim.days == 20 and byte_start == 2
+    with pytest.raises(ProviderError) as spacing:
+        check_observation(source, _observation(source_excerpt="VACACIONES: 20 dias tras 12 meses de servicio "))
+    with pytest.raises(ProviderError) as missing:
+        check_observation(source, _observation(source_excerpt="VACACIONES: 21 dias tras 12 meses de servicio."))
+    duplicate = (CLAUSE + " " + CLAUSE).encode("utf-8")
+    with pytest.raises(ProviderError) as ambiguous:
+        check_observation(duplicate, _observation())
+    with pytest.raises(ProviderError) as invented:
+        check_observation(source, _observation(proposed_days=21))
+    contradictory = (CLAUSE + " " + OTHER).encode("utf-8")
+    with pytest.raises(ProviderError) as conflict:
+        check_observation(contradictory, _observation())
+    with pytest.raises(ProviderError) as absent:
+        check_observation(b"sin clausula", _observation(evidence_found=False, proposed_days=None,
+                          proposed_months=None, source_excerpt="", refusal_or_insufficient=True))
+    partial = check_observation
+    with pytest.raises(ProviderError) as fragment:
+        partial(source, _observation(source_excerpt="20 dias"))
+    assert spacing.value.reason == missing.value.reason == fragment.value.reason == "excerpt_mismatch"
+    repeated = (CLAUSE + " servicio").encode("utf-8")
+    with pytest.raises(ProviderError) as repeated_word:
+        check_observation(repeated, _observation(source_excerpt="servicio"))
+    assert ambiguous.value.reason == "candidate_rejected"
+    assert repeated_word.value.reason == "ambiguous_excerpt"
+    assert invented.value.reason == "candidate_rejected" and conflict.value.reason == "contradictory_source"
+    assert absent.value.reason == "model_refusal"
 
 
 def test_c04_refusal_incomplete_and_invalid_json_fail_closed():

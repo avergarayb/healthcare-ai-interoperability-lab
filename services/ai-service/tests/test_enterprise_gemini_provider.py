@@ -120,7 +120,7 @@ def test_gemini_budget_permit_replay_and_grounding_fail_closed():
     with pytest.raises(ProviderError) as replay:
         adapter.observe(_read(), _permit())
     assert replay.value.reason == "replay_denied" and invented.calls == 1
-    offset = Scripted(_body(_observation(evidence_end=4)))
+    offset = Scripted(_body(_observation(source_excerpt="VACACIONES: 20 dias tras 12 meses de servicio")))
     with pytest.raises(ProviderError) as mismatch:
         _observe(offset)
     assert mismatch.value.reason == "excerpt_mismatch"

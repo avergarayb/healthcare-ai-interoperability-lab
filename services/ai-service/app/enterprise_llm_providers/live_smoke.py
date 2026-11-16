@@ -28,6 +28,7 @@ from .transport import (
 from .validation import check_observation, parse_output, usage_tokens
 
 
+MARKER_NAME = "vacation-days-v1.openai.attempt"
 CONFIRMATION_PHRASE = (
     "CONFIRMO UNA SOLICITUD openai gpt-6-luna vacation-days-v1 "
     "MAXIMO USD 0.001 PRESUPUESTO PLANIFICADO USD 5"
@@ -45,7 +46,9 @@ _REPORT_FIELDS = (
     "grounding", "project_billing", "provider_charge", "store", "service_tier",
     "reasoning_effort", "max_output_tokens", "max_retries", "timeout_seconds",
     "live_egress", "default_transport", "tools", "stream", "background",
-    "observed_days", "observed_months",
+    "observed_days", "observed_months", "response_status", "http_status",
+    "incomplete_reason", "output_present", "usage_present", "reasoning_tokens",
+    "total_tokens", "cost_exact", "offsets_origin",
 )
 
 
@@ -106,7 +109,12 @@ def reject_alternate(*, document=None, model=None, base_url=None):
 
 
 def dispatch_guarded(client, payload, attempt_directory):
-    """Send the fixed payload once. The attempt file blocks a second call."""
+    """Send the fixed payload once. The neutral gateway is not used here.
+
+    OpenAI reasoning tokens are already inside output_tokens. The shared bridge
+    adds Gemini thought tokens to the billed output, so this isolated dispatch
+    keeps that addition from being applied to Luna.
+    """
     require_closed_payload(payload, TIMEOUT_SECONDS)
     _require_fixed_payload(payload)
     if getattr(client, "max_retries", None) != 0 or _host(getattr(client, "base_url", None)) != "api.openai.com":
@@ -121,7 +129,7 @@ def dispatch_guarded(client, payload, attempt_directory):
 
 def claim_attempt(directory):
     """Create the one-shot marker exclusively. Failure leaves the marker in place."""
-    path = Path(directory) / "vacation-days-v1.attempt"
+    path = Path(directory) / MARKER_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -175,11 +183,7 @@ def _live_once(stdin, environ, clock):
         body = dispatch_responses(client, payload, TIMEOUT_SECONDS)
         return _from_body(body, reservation, requests_sent=1)
     except ProviderError as error:
-        return _report(
-            result="FAIL", reason=error.reason, mode="live-once", requests_sent=1,
-            input_tokens=None, output_tokens=None, estimated_microusd=reservation,
-            reserved_microusd=reservation, grounding=_label(error.reason),
-            observed_days=None, observed_months=None)
+        return _failure_report(error, 1, reservation)
 
 
 def _require_confirmation(stdin):
@@ -197,15 +201,75 @@ def _require_confirmation(stdin):
 
 
 def _from_body(body, reservation, requests_sent):
-    parsed = parse_output(body)
-    checked = check_observation(FIXED_DOCUMENT.encode("utf-8"), parsed)
+    diagnostic = _body_diagnostic(body)
+    try:
+        parsed = parse_output(body)
+        checked = check_observation(FIXED_DOCUMENT.encode("utf-8"), parsed)
+    except ProviderError as error:
+        raise ProviderError(error.reason, diagnostic) from None
     usage = usage_tokens(body)
-    if usage is None:
-        raise ProviderError("consumption_ambiguous")
+    if usage is None or diagnostic.get("cost_exact") is not True:
+        raise ProviderError("consumption_ambiguous", diagnostic)
     cost = estimate_microusd(usage[0], usage[1], ceiling=False)
-    return _closed_report(
+    report = _closed_report(
         "PASS", "accepted", "live-once", requests_sent, reservation, "encontrado",
         checked, usage[0], usage[1], estimated=cost)
+    report.update(
+        response_status="completed", output_present=True, usage_present=True,
+        reasoning_tokens=diagnostic.get("reasoning_tokens"),
+        total_tokens=diagnostic.get("total_tokens"), cost_exact=True)
+    return {key: report[key] for key in _REPORT_FIELDS}
+
+
+def _failure_report(error, requests_sent, reservation):
+    diagnostic = getattr(error, "diagnostic", None)
+    incoming = outgoing = reasoning = total = http_status = None
+    status = incomplete = None
+    output_present = usage_present = exact = None
+    estimated = None
+    if type(diagnostic) is dict:
+        incoming = diagnostic.get("input_tokens")
+        outgoing = diagnostic.get("output_tokens")
+        reasoning = diagnostic.get("reasoning_tokens")
+        total = diagnostic.get("total_tokens")
+        http_status = diagnostic.get("http_status")
+        status = diagnostic.get("response_status")
+        incomplete = diagnostic.get("incomplete_reason")
+        output_present = diagnostic.get("output_present")
+        usage_present = diagnostic.get("usage_present")
+        exact = diagnostic.get("cost_exact")
+        if exact is True and type(incoming) is int and type(outgoing) is int:
+            estimated = estimate_microusd(incoming, outgoing, ceiling=False)
+    report = _report(
+        result="FAIL", reason=error.reason, mode="live-once", requests_sent=requests_sent,
+        input_tokens=incoming, output_tokens=outgoing, estimated_microusd=estimated,
+        reserved_microusd=reservation, grounding=_label(error.reason),
+        observed_days=None, observed_months=None, response_status=status,
+        http_status=http_status, incomplete_reason=incomplete, output_present=output_present,
+        usage_present=usage_present, reasoning_tokens=reasoning, total_tokens=total,
+        cost_exact=exact)
+    return report
+
+
+def _body_diagnostic(body):
+    usage = body.get("usage") if type(body) is dict else None
+    if type(usage) is not dict:
+        return {
+            "response_status": body.get("status") if type(body) is dict else "absent",
+            "usage_present": False, "cost_exact": False, "output_present": False,
+        }
+    return {
+        "finish_reason": "absent",
+        "response_status": body.get("status") if type(body.get("status")) is str else "absent",
+        "incomplete_reason": "absent",
+        "output_present": True,
+        "usage_present": True,
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "reasoning_tokens": usage.get("reasoning_tokens"),
+        "total_tokens": usage.get("total_tokens"),
+        "cost_exact": usage.get("cost_exact") is True,
+    }
 
 
 def _closed_report(result, reason, mode, requests_sent, reservation, grounding, checked,
@@ -220,16 +284,22 @@ def _closed_report(result, reason, mode, requests_sent, reservation, grounding, 
         estimated_microusd=reservation if estimated is None else estimated,
         reserved_microusd=reservation, grounding=grounding,
         observed_days=None if checked is None else checked.days,
-        observed_months=None if checked is None else checked.months)
+        observed_months=None if checked is None else checked.months,
+        offsets_origin=None if checked is None else checked.offsets_origin)
 
 
 def _report(**fields):
-    fields.update(
+    defaults = dict(
         provider="openai", model=ALLOWED_MODEL, question_id=QUESTION_ID,
         project_billing="unverified", provider_charge="unconfirmed", store=False,
         service_tier="default", reasoning_effort="none", max_output_tokens=256,
         max_retries=0, timeout_seconds=15, live_egress="closed",
-        default_transport="DisabledOpenAITransport", tools="absent", stream=False, background=False)
+        default_transport="DisabledOpenAITransport", tools="absent", stream=False, background=False,
+        response_status=None, http_status=None, incomplete_reason=None, output_present=None,
+        usage_present=None, reasoning_tokens=None, total_tokens=None, cost_exact=None,
+        offsets_origin=None)
+    for key, value in defaults.items():
+        fields.setdefault(key, value)
     return {key: fields.get(key) for key in _REPORT_FIELDS}
 
 

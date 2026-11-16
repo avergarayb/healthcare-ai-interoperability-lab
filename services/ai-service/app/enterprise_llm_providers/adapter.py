@@ -79,7 +79,7 @@ class OpenAIResponsesAdapter:
         try:
             body = self._transport.send(payload, timeout_seconds)
         except ProviderError as error:
-            raise ProviderError(error.reason) from None
+            raise ProviderError(error.reason, getattr(error, "diagnostic", None)) from None
         except TimeoutError:
             raise ProviderError("timeout") from None
         except Exception:

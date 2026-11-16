@@ -96,13 +96,13 @@ def dispatch_responses(client, payload, timeout_seconds):
             timeout=timeout_seconds,
         )
     except APITimeoutError:
-        raise ProviderError("timeout") from None
+        raise ProviderError("timeout", {"http_status": None, "usage_present": False, "cost_exact": False}) from None
     except APIStatusError as error:
-        if error.status_code == 429:
-            raise ProviderError("rate_limited") from None
-        raise ProviderError("remote_unavailable") from None
+        code = error.status_code if type(error.status_code) is int else None
+        reason = "rate_limited" if code == 429 else "remote_unavailable"
+        raise ProviderError(reason, {"http_status": code, "usage_present": False, "cost_exact": False}) from None
     except APIConnectionError:
-        raise ProviderError("network_unavailable") from None
+        raise ProviderError("network_unavailable", {"usage_present": False, "cost_exact": False}) from None
     except ProviderError:
         raise
     except Exception:
@@ -122,25 +122,102 @@ def require_closed_payload(payload, timeout_seconds):
 
 
 def _normalize(response):
+    diagnostic = _response_diagnostic(response)
+    account = diagnostic.pop("_account")
     if response.model != ALLOWED_MODEL:
-        raise ProviderError("model_denied")
+        raise ProviderError("model_denied", diagnostic)
+    if response.status != "completed":
+        raise ProviderError("incomplete_output", diagnostic)
+    if type(getattr(response, "output", None)) is not list:
+        raise ProviderError("invalid_output", diagnostic)
     output = []
     for item in response.output:
         if item.type != "message":
-            raise ProviderError("invalid_output")
+            raise ProviderError("invalid_output", diagnostic)
         content = []
         for part in item.content:
             if part.type == "refusal":
-                raise ProviderError("model_refusal")
+                raise ProviderError("model_refusal", diagnostic)
             if part.type != "output_text" or type(part.text) is not str:
-                raise ProviderError("invalid_output")
+                raise ProviderError("invalid_output", diagnostic)
             content.append({"type": "output_text", "text": part.text})
         output.append({"type": "message", "content": content})
-    body = {"status": response.status or "incomplete", "model": response.model, "output": output}
-    usage = response.usage
-    if usage is not None:
-        body["usage"] = {"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens}
-    return body
+    if account["usable"] is not True:
+        raise ProviderError("consumption_ambiguous", diagnostic)
+    return {
+        "status": response.status, "model": response.model, "output": output,
+        "usage": {
+            "input_tokens": account["input_tokens"],
+            "output_tokens": account["output_tokens"],
+            "reasoning_tokens": account["reasoning_tokens"],
+            "total_tokens": account["total_tokens"],
+            "cost_exact": True,
+        },
+    }
+
+
+def _response_diagnostic(response):
+    """Status and token counts only. Provider text stays out of the exception."""
+    status = getattr(response, "status", None)
+    details = getattr(response, "incomplete_details", None)
+    reason = getattr(details, "reason", None) if details is not None else None
+    output = getattr(response, "output", None)
+    account = _usage_account(getattr(response, "usage", None))
+    diagnostic = {
+        "finish_reason": "absent",
+        "response_status": status if type(status) is str else "absent",
+        "incomplete_reason": reason if type(reason) is str else "absent",
+        "output_present": type(output) is list and len(output) > 0,
+        "usage_present": account["usage_present"],
+        "input_tokens": account["input_tokens"],
+        "output_tokens": account["output_tokens"],
+        "reasoning_tokens": account["reasoning_tokens"],
+        "total_tokens": account["total_tokens"],
+        "cost_exact": account["cost_exact"],
+        "_account": account,
+    }
+    return diagnostic
+
+
+def _usage_account(usage):
+    """Keep reported counts. Absent reasoning is not zero and is not billed twice."""
+    if usage is None:
+        return {
+            "usage_present": False, "input_tokens": None, "output_tokens": None,
+            "reasoning_tokens": None, "total_tokens": None, "cost_exact": False, "usable": False,
+        }
+    input_kind, incoming = _read_count(getattr(usage, "input_tokens", None))
+    output_kind, outgoing = _read_count(getattr(usage, "output_tokens", None))
+    total_kind, total = _read_count(getattr(usage, "total_tokens", None))
+    details = getattr(usage, "output_tokens_details", None)
+    if details is None:
+        reason_kind, reasoning = "absent", None
+    else:
+        reason_kind, reasoning = _read_count(getattr(details, "reasoning_tokens", None))
+    invalid = "invalid" in {input_kind, output_kind, total_kind, reason_kind}
+    inconsistent = False
+    if invalid is not True and input_kind == "present" and output_kind == "present" and total_kind == "present":
+        inconsistent = total != incoming + outgoing
+    if invalid is not True and reason_kind == "present" and output_kind == "present" and reasoning > outgoing:
+        inconsistent = True
+    usable = invalid is not True and inconsistent is not True and input_kind == "present" and output_kind == "present"
+    return {
+        "usage_present": True,
+        "input_tokens": incoming if input_kind == "present" else None,
+        "output_tokens": outgoing if output_kind == "present" else None,
+        "reasoning_tokens": reasoning if reason_kind == "present" else None,
+        "total_tokens": total if total_kind == "present" else None,
+        "cost_exact": usable,
+        "usable": usable,
+    }
+
+
+def _read_count(value):
+    if value is None:
+        return "absent", None
+    if type(value) is int and value >= 0:
+        return "present", value
+    return "invalid", None
 
 
 def _host(url):

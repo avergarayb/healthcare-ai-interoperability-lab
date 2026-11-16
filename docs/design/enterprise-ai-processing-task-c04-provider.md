@@ -48,7 +48,7 @@ Cumplir el esquema no acredita la cifra. El validador local exige UTF-8, offsets
 
 No hay reintento automático. El envío marca la invocación como gastada antes de llamar al transporte; un segundo `observe` devuelve `replay_denied`. Un fallo local anterior al envío no consume esa marca.
 
-Códigos cerrados, sin cuerpo remoto: `remote_disabled`, `not_configured`, `credential_absent`, `model_denied`, `remote_not_authorized`, `budget_exceeded`, `invalid_input`, `timeout`, `rate_limited`, `remote_unavailable`, `incomplete_output`, `invalid_output`, `model_refusal`, `invalid_offset`, `excerpt_mismatch`, `candidate_rejected`, `contradictory_source`, `consumption_ambiguous`. Si la respuesta llega sin `input_tokens` y `output_tokens`, el resultado no se acepta.
+Códigos cerrados, sin cuerpo remoto: `remote_disabled`, `not_configured`, `credential_absent`, `model_denied`, `remote_not_authorized`, `budget_exceeded`, `invalid_input`, `timeout`, `rate_limited`, `remote_unavailable`, `incomplete_output`, `invalid_output`, `model_refusal`, `invalid_offset`, `excerpt_mismatch`, `candidate_rejected`, `contradictory_source`, `ambiguous_excerpt`, `consumption_ambiguous`. Si la respuesta llega sin `input_tokens` y `output_tokens`, el resultado no se acepta.
 
 ## Precios
 
@@ -179,6 +179,40 @@ El mismo criterio recorre el SDK simulado, el normalizador, el adaptador, el bri
 La simulación y la llamada real quedan separadas. El dry-run de esta revisión devolvió `PASS`, `requests_sent=0`, reserva 977 y estimado simulado 62. El dry-run de OpenAI devolvió `PASS`, `requests_sent=0` y reserva 303. Las pruebas focalizadas de Gemini, OpenAI, gateway, bridges y arquitectura dieron 164 PASS en `C:\Temp\c04close2`. Las regresiones ya reportadas de C03 E2E (34), B2-GRD (37), B2-RUNTIME/SRC (74), C01/C02/B1 (405) y conectores (617 PASS, 1 SKIPPED) no se repitieron: el cambio de esta auditoría añade marcas opcionales al contrato del gateway neutral y esas suites no lo importan.
 
 No hay una autorización pendiente para otra llamada. La migración 003 sigue siendo el permiso durable que esta fase no crea. RAG, MCP, PostgreSQL, Graph live y la integración con C03 permanecen fuera.
+
+## Preparación OpenAI, sin solicitud
+
+El PR #126 quedó fusionado en `42edaf2714493509a60529bd79ce5617886bda6b`. Esta preparación vive en `feature/enterprise-ai-processing-authorization-task-c04-openai-live`, sin commit. Reutiliza el payload, el esquema estricto, el precio, el validador y el ejecutor aislado. No crea un segundo gateway ni abre `OpenAISDKTransport.send`.
+
+La página del modelo, consultada para esta preparación, sigue identificando `gpt-6-luna` con Responses y Structured Outputs. La tarifa Standard de texto corto permanece en entrada US$0,10 / 1M, escritura de caché US$0,125 / 1M y salida US$0,50 / 1M. Por encima de 272.000 tokens de entrada, la misma página aplica 2× a la entrada y 1,5× a la salida. La página general de precios separa además la escritura de 12 horas a US$0,25 / 1M. Este fixture usa `store=false` y conserva el techo de escritura de US$0,125; no aplica el descuento de caché. El SDK sigue fijado en `openai==3.49.0`. El payload real reserva 303 micro-USD, bajo el techo de 1.000. Un exceso rechaza la llamada antes de crear la marca y no sube el techo.
+
+El host permitido es `https://api.openai.com`. El cliente mantiene `max_retries=0`, timeout de 15 segundos, `stream=false`, `background=false`, `service_tier=default` y `reasoning.effort=none`. No envía tools ni `previous_response_id`. Una clave presente no autoriza el envío. `OPENAI_API_KEY` se lee del entorno del proceso. Proxies, `OPENAI_BASE_URL` y `OPENAI_CUSTOM_HEADERS` siguen bloqueados. `os.environ` se acepta como mapping.
+
+La marca OpenAI es `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-live-smoke\vacation-days-v1.openai.attempt`. No existía al preparar esta rama. Es distinta de `vacation-days-v1.attempt` y de `vacation-days-v1.attempt-002`. El orden es configuración, presupuesto, credencial, terminal interactiva, frase exacta, marca exclusiva y, como máximo, una solicitud. Un timeout, un 429, un 5xx, una respuesta incompleta o un usage no usable no se reintenta y no borra la marca. No hay cambio de proveedor.
+
+El normalizador conserva `input_tokens` y `output_tokens` cuando son enteros válidos. `reasoning_tokens` ausente permanece ausente y no se suma otra vez a la salida: en esta API el razonamiento ya forma parte de `output_tokens`. Un cero explícito permanece cero. Un total distinto de entrada más salida, o un razonamiento mayor que la salida, es `consumption_ambiguous`. El costo calculado usa la tarifa estándar de los dos conteos reportados. `provider_charge` sigue `unconfirmed`. Un HTTP 200 con JSON inválido, rechazo, cifra inventada, offset incorrecto o contradicción termina en grounding distinto de una aceptación. El reporte y el diagnóstico no copian el prompt ni el texto del proveedor. El estado HTTP, `response.status` y `incomplete_details.reason` solo entran si pertenecen a la lista cerrada del SDK.
+
+El despacho live permanece en el ejecutor aislado. El bridge neutral sigue disponible para las simulaciones offline, pero su costo suma tokens de pensamiento al estilo Gemini. Usarlo para esta llamada duplicaría el razonamiento de Luna. C03 sigue exigiendo `FakeEnterpriseModel`.
+
+El dry-run de esta preparación devolvió `PASS`, `requests_sent=0`, reserva 303 y grounding `encontrado`. El dry-run Gemini devolvió `PASS`, `requests_sent=0` y reserva 977. La regresión de publicación dio 166 PASS en OpenAI, Gemini, gateway, bridges y arquitectura (`C:\Temp\c04prF`), 37 en B2-GRD, 34 en C03 E2E, 74 en B2-RUNTIME/SRC y 405 en C01/C02/B1. No se repitieron los conectores: no cambió `ModelResponse` ni `GatewayResult`. La publicación no contactó `api.openai.com`.
+
+No hay autorización para `live-once`. Antes de pedirla, el Product Owner debe confirmar crédito API, el proyecto correcto, el modelo habilitado, el límite mensual, el hard limit si existe, las alertas y que la clave pertenece a ese proyecto. Una suscripción de ChatGPT no aporta ese crédito.
+
+El comando previsto, ejecutado una sola vez después de esta preparación y sin una nueva autorización, es:
+
+```powershell
+.\.venv\Scripts\python.exe ..\..\scripts\c04-openai-live-smoke\run_smoke.py live-once
+```
+
+## Grounding por extracto exacto
+
+**A. Conectividad real.** Una solicitud autorizada a `gpt-6-luna` por Responses devolvió una respuesta completa: `requests_sent=1`, `response_status=completed`, 227 tokens de entrada, 72 de salida, `reasoning_tokens=0`, costo calculado 59 micro-USD y `cost_exact=true`.
+
+**B. Grounding real.** Esa misma respuesta terminó en `result=FAIL`, `grounding=invalido` y `reason=invalid_offset`. Ese resultado histórico no se reclasifica. El cuerpo no se conservó, así que no se puede afirmar qué posiciones envió el modelo.
+
+**C. Grounding offline.** El esquema estricto sigue teniendo ocho campos. La fuente es la única autoridad de la posición. El validador busca `source_excerpt` como bytes exactos. Cero coincidencias producen `excerpt_mismatch`. Más de una produce `ambiguous_excerpt`. Una sola coincidencia se acepta solo si ese tramo es la cláusula única y las cifras coinciden con ella. `offsets_origin=model` solo aparece cuando las posiciones declaradas son exactamente ese tramo. `offsets_origin=derived` significa que el sistema calculó el tramo y no confirma la medición del modelo. No se fabrican posiciones para un extracto ausente, ni se aceptan espacios, puntuación o cifras distintas. Dos cláusulas distintas siguen en `contradictory_source`. Dos copias de la misma cláusula siguen en `candidate_rejected`. El costo de OpenAI usa `input_tokens` y `output_tokens`; no vuelve a sumar `reasoning_tokens`.
+
+**D. Pendiente.** No hay autorización para repetir la llamada. La marca `vacation-days-v1.openai.attempt` permanece, con SHA-256 `d560bfa04e39e92466280496a12f43b0f15f13f8b2d960156b1d3d1272e3f49f`.
 
 ## Decisiones pendientes
 

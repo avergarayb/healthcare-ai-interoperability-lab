@@ -276,8 +276,8 @@ def test_gemini_sdk_errors_send_once_and_do_not_fall_back(payload, reason, monke
 @pytest.mark.parametrize("observation,reason", [
     (_observation(evidence_found=False), "model_refusal"),
     (_observation(proposed_days=21), "candidate_rejected"),
-    (_observation(evidence_end=1), "excerpt_mismatch"),
-    (_observation(evidence_start=0, evidence_end=10_000), "invalid_offset"),
+    (_observation(source_excerpt="VACACIONES: 20 dias tras 12 meses de servicio"), "excerpt_mismatch"),
+    (_observation(source_excerpt="VACACIONES:  20 dias tras 12 meses de servicio."), "excerpt_mismatch"),
 ])
 def test_shared_grounding_rejects_the_same_bad_observation(
         provider, deployment, bridge_type, settings, library, body, observation, reason, monkeypatch):
@@ -295,9 +295,8 @@ def test_utf8_boundary_and_contradiction_stay_in_the_shared_validator():
     source = (CLAUSE + " café").encode("utf-8")
     split = len(CLAUSE.encode("utf-8")) + len(" caf".encode("utf-8")) + 1
     parsed = _observation(evidence_start=split, evidence_end=len(source))
-    with pytest.raises(ProviderError) as boundary:
-        check_observation(source, parsed)
-    assert boundary.value.reason == "invalid_offset"
+    derived = check_observation(source, parsed)
+    assert derived.days == 20 and derived.offsets_origin == "derived"
     contradictory = (CLAUSE + " VACACIONES: 9 dias tras 3 meses de servicio.").encode("utf-8")
     with pytest.raises(ProviderError) as conflict:
         check_observation(contradictory, _observation())
@@ -432,8 +431,10 @@ def test_provider_body_is_released_after_success_and_failure(
     _released(bridge)
     assert gateway._adapters[other].calls == 0
     assert len(transport.requests) == 1
-    if label in {"valid", "invalid", "grounding"} or (provider == "openai" and label == "usage"):
+    if label in {"valid", "invalid", "grounding"}:
         assert seen == [True]
+    if provider == "openai" and label == "usage":
+        assert seen == []
 
 
 def test_concurrent_organizations_do_not_share_a_deployment():
