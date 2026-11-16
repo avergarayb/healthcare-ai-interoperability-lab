@@ -2,8 +2,10 @@
 
 This module does not import a provider SDK. The SDK stays in the transport
 that the adapter already owns. The default transport does not send.
+OpenAI reasoning is already inside output tokens. Gemini thoughts are not.
 """
 import json
+from dataclasses import dataclass
 from datetime import timedelta
 
 from app.enterprise_llm_providers.adapter import OpenAIResponsesAdapter
@@ -63,6 +65,30 @@ def gemini_reservation():
     return gemini_estimate(request_bytes(generation), settings.max_output_tokens)
 
 
+@dataclass(frozen=True, slots=True)
+class _Priced:
+    input_tokens: int
+    output_tokens: int
+    cost: int | None
+    thoughts_tokens: int | None
+    exact: bool
+    included_output_tokens: int | None
+
+
+def _exact_flag(usage):
+    return type(usage) is not dict or "cost_exact" not in usage or usage.get("cost_exact") is True
+
+
+def _subset(usage, name):
+    """A reported count. Absence stays absent. A boolean is not a count."""
+    if type(usage) is not dict or name not in usage or usage.get(name) is None:
+        return None
+    value = usage.get(name)
+    if type(value) is int and value >= 0:
+        return value
+    raise ProviderError("consumption_ambiguous")
+
+
 class _SdkBridge:
     provider_id = ""
 
@@ -101,28 +127,20 @@ class _SdkBridge:
                 parsed = parse_output(body)
                 reported = usage_tokens(body)
                 usage = body.get("usage") if type(body) is dict else None
-                thoughts = usage.get("thoughts_tokens") if type(usage) is dict else None
-                exact = type(usage) is not dict or "cost_exact" not in usage or usage.get("cost_exact") is True
                 inferred = {
                     name: usage.get(name) is True if type(usage) is dict else False
                     for name in ("prompt_inferred", "visible_inferred", "thoughts_inferred", "tool_inferred")
                 }
-                if reported is None:
-                    raise ProviderError("consumption_ambiguous")
-                if exact and type(thoughts) is int:
-                    cost = self.reported_cost((reported[0], reported[1] + thoughts))
-                elif exact:
-                    cost = self.reported_cost(reported)
-                else:
-                    cost = None
-                    exact = False
+                priced = self._price(usage, reported)
             finally:
                 del body
             return ModelResponse(
-                deployment.deployment_id, parsed, UsageMetadata(reported[0], reported[1]), cost,
-                thoughts if type(thoughts) is int else None, exact,
+                deployment.deployment_id, parsed,
+                UsageMetadata(priced.input_tokens, priced.output_tokens), priced.cost,
+                priced.thoughts_tokens, priced.exact,
                 inferred["thoughts_inferred"], inferred["tool_inferred"],
-                inferred["prompt_inferred"], inferred["visible_inferred"])
+                inferred["prompt_inferred"], inferred["visible_inferred"],
+                priced.included_output_tokens)
         finally:
             self._capture.release()
 
@@ -153,6 +171,19 @@ class OpenAISdkBridge(_SdkBridge):
     def reported_cost(self, reported):
         return openai_estimate(reported[0], reported[1], ceiling=False)
 
+    def _price(self, usage, reported):
+        """Bill input and output. Reasoning is already inside output."""
+        if reported is None:
+            raise ProviderError("consumption_ambiguous")
+        included = _subset(usage, "reasoning_tokens")
+        if included is not None and included > reported[1]:
+            raise ProviderError("consumption_ambiguous")
+        if _subset(usage, "thoughts_tokens") is not None:
+            raise ProviderError("consumption_ambiguous")
+        exact = _exact_flag(usage)
+        cost = self.reported_cost(reported) if exact else None
+        return _Priced(reported[0], reported[1], cost, None, bool(exact and cost is not None), included)
+
     def _permit(self, request):
         start, end = self._window()
         return RemoteExecutionPermit(
@@ -176,6 +207,23 @@ class GeminiSdkBridge(_SdkBridge):
 
     def reported_cost(self, reported):
         return gemini_estimate(reported[0], reported[1])
+
+    def _price(self, usage, reported):
+        """Bill visible output plus thoughts. Thoughts are not inside output."""
+        if reported is None:
+            raise ProviderError("consumption_ambiguous")
+        if _subset(usage, "reasoning_tokens") is not None:
+            raise ProviderError("consumption_ambiguous")
+        thoughts = _subset(usage, "thoughts_tokens")
+        exact = _exact_flag(usage)
+        if exact and thoughts is not None:
+            cost = self.reported_cost((reported[0], reported[1] + thoughts))
+        elif exact:
+            cost = self.reported_cost(reported)
+        else:
+            cost = None
+            exact = False
+        return _Priced(reported[0], reported[1], cost, thoughts, exact, None)
 
     def _permit(self, request):
         start, end = self._window()
