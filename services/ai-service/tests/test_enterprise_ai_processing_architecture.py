@@ -11,7 +11,8 @@ ROOT = Path(__file__).resolve().parents[1] / "app"
 C01 = frozenset({"__init__.py", "models.py", "policy.py"})
 C02 = frozenset({"execution_types.py", "gateway.py", "fake_model.py", "sqlite_ledger.py",
                  "source_boundary.py", "grounding.py", "answer.py", "authorization.py",
-                 "delivery_sink.py", "orchestration.py", "composition.py", "remote_authorization.py"})
+                 "delivery_sink.py", "orchestration.py", "composition.py", "remote_authorization.py",
+                 "durable_resolver.py"})
 IMPORTS = {
     "answer.py": frozenset({"dataclasses", ".execution_types"}),
     "authorization.py": frozenset({
@@ -37,6 +38,9 @@ IMPORTS = {
                                   "uuid", "msvcrt", ".execution_types", ".models", ".remote_authorization",
                                   "..enterprise_connectors.models"}),
     "remote_authorization.py": frozenset({"dataclasses", "datetime"}),
+    "durable_resolver.py": frozenset({
+        "datetime", "app.enterprise_llm_providers.errors", "app.model_gateway.authorization",
+        ".remote_authorization", ".sqlite_ledger"}),
 }
 FILESYSTEM_CALLS = frozenset({"open", "read_text", "read_bytes", "write_text", "write_bytes", "mkdir", "unlink",
                              "rmdir", "chmod", "stat", "lstat", "resolve", "exists", "is_file", "is_dir"})
@@ -88,11 +92,14 @@ def assert_acyclic(graph):
     for name in graph: visit(name)
 
 
-def assert_no_wiring(tree):
+def assert_no_wiring(tree, allowed_modules=()):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             assert all("enterprise_ai_processing" not in a.name for a in node.names)
-        if isinstance(node, ast.ImportFrom): assert "enterprise_ai_processing" not in (node.module or "")
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module not in allowed_modules:
+                assert "enterprise_ai_processing" not in module
         if isinstance(node, ast.Constant) and type(node.value) is str:
             assert "enterprise_ai_processing" not in node.value
 
@@ -110,8 +117,13 @@ def test_closed_inventory_imports_effects_and_no_cycles():
 
 def test_no_application_clinical_or_old_connector_workflow_wiring():
     for path in ROOT.rglob("*.py"):
-        if "enterprise_ai_processing" not in path.relative_to(ROOT).parts:
-            assert_no_wiring(ast.parse(path.read_text(encoding="utf-8")))
+        relative = path.relative_to(ROOT)
+        if "enterprise_ai_processing" in relative.parts:
+            continue
+        allowed = ()
+        if relative.as_posix() == "model_gateway/gateway.py":
+            allowed = ("app.enterprise_ai_processing.durable_resolver",)
+        assert_no_wiring(ast.parse(path.read_text(encoding="utf-8")), allowed)
 
 
 @pytest.mark.parametrize("source", ["import sqlite3", "import socket", "import httpx", "import openai",

@@ -7,9 +7,8 @@ import pytest
 
 from app.enterprise_llm_providers.errors import ProviderError
 from app.model_gateway.adapters import OfflineGeminiAdapter, OfflineResponsesAdapter, PrivateCustomAdapter
-from app.model_gateway.agent import VacationClauseAgent
 from app.model_gateway.contracts import ExecutionContext, ExecutionGrant, ExecutionPolicy
-from app.model_gateway.gateway import NeutralModelGateway
+from app.model_gateway.simulation import OfflineModelHarness
 from app.model_gateway.registry import ProviderRegistry, pin_resolution, reject_redirect
 from app.enterprise_llm_providers.smoke import FIXED_DOCUMENT
 
@@ -35,12 +34,11 @@ def test_two_offline_adapters_serve_the_same_use_case_without_a_sdk(monkeypatch)
     def wrapped(source, parsed):
         seen.append((parsed["proposed_days"], parsed["proposed_months"]))
         return check_observation(source, parsed)
-    monkeypatch.setattr("app.model_gateway.gateway.check_observation", wrapped)
-    gateway = NeutralModelGateway()
-    agent = VacationClauseAgent(gateway)
-    openai = agent.run(_context(), _grant("openai", "openai-offline-a"))
-    gemini = agent.run(_context(), _grant("gemini", "gemini-offline-a"))
-    private = agent.run(_context(), _grant("private-custom", "private-offline-a"))
+    monkeypatch.setattr("app.model_gateway.simulation.check_observation", wrapped)
+    gateway = OfflineModelHarness()
+    openai = gateway.execute(_context(), _grant("openai", "openai-offline-a"))
+    gemini = gateway.execute(_context(), _grant("gemini", "gemini-offline-a"))
+    private = gateway.execute(_context(), _grant("private-custom", "private-offline-a"))
     assert seen == [(20, 12), (20, 12), (20, 12)]
     assert not hasattr(openai, "days") and not hasattr(openai, "months")
     assert openai.deployment_id != gemini.deployment_id
@@ -56,7 +54,7 @@ def test_two_offline_adapters_serve_the_same_use_case_without_a_sdk(monkeypatch)
 
 
 def test_registry_capabilities_organizations_and_grants_fail_closed():
-    gateway = NeutralModelGateway()
+    gateway = OfflineModelHarness()
     with pytest.raises(ProviderError) as missing:
         gateway.execute(_context(), _grant("anthropic", "anthropic-claude"))
     assert missing.value.reason == "model_unregistered"
@@ -78,11 +76,11 @@ def test_registry_capabilities_organizations_and_grants_fail_closed():
 
 
 def test_destination_budget_replay_and_grounding_have_no_fallback():
-    adapters = NeutralModelGateway()._adapters
+    adapters = OfflineModelHarness()._adapters
     failing = OfflineResponsesAdapter()
     failing.invoke_once = _boom(failing)
     adapters["openai-offline-a"] = failing
-    gateway = NeutralModelGateway(adapters=adapters)
+    gateway = OfflineModelHarness(adapters=adapters)
     with pytest.raises(ProviderError) as failed:
         gateway.execute(_context(), _grant("openai", "openai-offline-a"))
     assert failed.value.reason == "remote_unavailable"
@@ -90,7 +88,7 @@ def test_destination_budget_replay_and_grounding_have_no_fallback():
     with pytest.raises(ProviderError) as replay:
         gateway.execute(_context(), _grant("openai", "openai-offline-a"))
     assert replay.value.reason == "replay_denied" and failing.calls == 1
-    uncertain = NeutralModelGateway(adapters={"openai-offline-a": OfflineResponsesAdapter(usage=False)})
+    uncertain = OfflineModelHarness(adapters={"openai-offline-a": OfflineResponsesAdapter(usage=False)})
     with pytest.raises(ProviderError) as ambiguous:
         uncertain.execute(_context(), _grant("openai", "openai-offline-a"))
     with pytest.raises(ProviderError) as again:
@@ -99,12 +97,12 @@ def test_destination_budget_replay_and_grounding_have_no_fallback():
     bad = {"question_id": "vacation-days-v1", "evidence_found": True, "proposed_days": 21, "proposed_months": 12,
            "source_excerpt": CLAUSE, "evidence_start": 0, "evidence_end": len(CLAUSE.encode()),
            "refusal_or_insufficient": False}
-    grounded = NeutralModelGateway(adapters={"openai-offline-a": OfflineResponsesAdapter(observation=bad)})
+    grounded = OfflineModelHarness(adapters={"openai-offline-a": OfflineResponsesAdapter(observation=bad)})
     with pytest.raises(ProviderError) as invented:
         grounded.execute(_context(), _grant("openai", "openai-offline-a"))
     assert invented.value.reason == "candidate_rejected" and CLAUSE not in str(invented.value)
     with pytest.raises(ProviderError) as url:
-        NeutralModelGateway().execute(_context(), _grant("openai", "openai-offline-a"), "http://127.0.0.1/")
+        OfflineModelHarness().execute(_context(), _grant("openai", "openai-offline-a"), "http://127.0.0.1/")
     assert url.value.reason == "destination_denied"
     with pytest.raises(ProviderError):
         pin_resolution("10.0.0.8", "10.0.0.9")
@@ -116,8 +114,8 @@ def test_destination_budget_replay_and_grounding_have_no_fallback():
 
 def test_results_logs_and_c03_do_not_carry_the_fixture(caplog):
     caplog.set_level(logging.DEBUG)
-    result = VacationClauseAgent(NeutralModelGateway()).run(_context(), _grant("private-custom", "private-offline-a"))
-    state = NeutralModelGateway().public_state(result, "ORG-A")
+    result = OfflineModelHarness().execute(_context(), _grant("private-custom", "private-offline-a"))
+    state = OfflineModelHarness().public_state(result, "ORG-A")
     rendered = repr(result) + repr(state) + caplog.text
     assert CLAUSE not in rendered and "20" not in repr(result)
     gateway = (PACKAGE.parent / "enterprise_ai_processing" / "gateway.py").read_text(encoding="utf-8")

@@ -26,9 +26,8 @@ from app.enterprise_llm_providers.smoke import FIXED_DOCUMENT
 from app.enterprise_llm_providers.transport import OpenAISDKTransport, dispatch_responses, live_egress_enabled
 from app.enterprise_llm_providers.validation import check_observation
 from app.model_gateway.adapters import lab_adapters
-from app.model_gateway.agent import VacationClauseAgent
 from app.model_gateway.contracts import ExecutionContext, ExecutionGrant
-from app.model_gateway.gateway import NeutralModelGateway
+from app.model_gateway.simulation import OfflineModelHarness
 from app.model_gateway.sdk_bridge import GeminiSdkBridge, OpenAISdkBridge, openai_reservation
 
 
@@ -135,11 +134,11 @@ def _gemini_body(text, *, model="gemini-3.5-flash-lite", reason="STOP", usage=Tr
 def _gateway(deployment_id, bridge):
     adapters = lab_adapters()
     adapters[deployment_id] = bridge
-    return NeutralModelGateway(adapters=adapters)
+    return OfflineModelHarness(adapters=adapters)
 
 
 def _run(gateway, provider, deployment, **context):
-    return VacationClauseAgent(gateway).run(_context(**context), _grant(provider, deployment, **context))
+    return gateway.execute(_context(**context), _grant(provider, deployment, **context))
 
 
 def test_both_sdk_bridges_answer_the_same_case_for_one_agent(monkeypatch):
@@ -149,17 +148,16 @@ def test_both_sdk_bridges_answer_the_same_case_for_one_agent(monkeypatch):
         seen.append(parsed["proposed_days"])
         return check_observation(source, parsed)
 
-    monkeypatch.setattr("app.model_gateway.gateway.check_observation", wrapped)
+    monkeypatch.setattr("app.model_gateway.simulation.check_observation", wrapped)
     monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("socket")))
     openai_transport = OpenAIMock(_http(httpx2, 200, _openai_body(json.dumps(_observation()))))
     gemini_transport = GeminiMock(_http(httpx, 200, _gemini_body(json.dumps(_observation()))))
     adapters = lab_adapters()
     adapters["openai-sdk-a"] = OpenAISdkBridge(_openai_settings(), openai_transport, lambda: NOW)
     adapters["gemini-sdk-a"] = GeminiSdkBridge(_gemini_settings(), gemini_transport, lambda: NOW)
-    gateway = NeutralModelGateway(adapters=adapters)
-    agent = VacationClauseAgent(gateway)
-    first = agent.run(_context(), _grant("openai", "openai-sdk-a"))
-    second = agent.run(_context(), _grant("gemini", "gemini-sdk-a"))
+    gateway = OfflineModelHarness(adapters=adapters)
+    first = gateway.execute(_context(), _grant("openai", "openai-sdk-a"))
+    second = gateway.execute(_context(), _grant("gemini", "gemini-sdk-a"))
     assert first.accepted and second.accepted and first.deployment_id != second.deployment_id
     assert seen == [20, 20] and not hasattr(first, "days")
     assert len(openai_transport.requests) == 1 and len(gemini_transport.requests) == 1
@@ -172,10 +170,10 @@ def test_both_sdk_bridges_answer_the_same_case_for_one_agent(monkeypatch):
 
 def test_default_sdk_bridges_do_not_send(monkeypatch):
     monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("socket")))
-    gateway = NeutralModelGateway()
+    gateway = OfflineModelHarness()
     with pytest.raises(ProviderError) as openai_disabled:
         gateway.execute(_context(), _grant("openai", "openai-sdk-a"))
-    fresh = NeutralModelGateway()
+    fresh = OfflineModelHarness()
     with pytest.raises(ProviderError) as gemini_disabled:
         fresh.execute(_context(), _grant("gemini", "gemini-sdk-a"))
     assert openai_disabled.value.reason == gemini_disabled.value.reason == "remote_disabled"
@@ -193,7 +191,7 @@ def test_default_sdk_bridges_do_not_send(monkeypatch):
 ])
 def test_registry_selection_fails_closed(grant, context, reason):
     with pytest.raises(ProviderError) as caught:
-        NeutralModelGateway().execute(context, grant)
+        OfflineModelHarness().execute(context, grant)
     assert caught.value.reason == reason
 
 
@@ -201,7 +199,7 @@ def test_a_shared_unapproved_purpose_is_denied():
     context = ExecutionContext("ORG-A", "principal-a", "vacation-a", "other", "synthetic-internal", 1000)
     grant = _grant("openai", "openai-sdk-a", purpose="other")
     with pytest.raises(ProviderError) as caught:
-        NeutralModelGateway().execute(context, grant)
+        OfflineModelHarness().execute(context, grant)
     assert caught.value.reason == "remote_not_authorized"
 
 
@@ -350,7 +348,7 @@ def test_credential_and_rewired_bridge_cannot_cross_the_grant(monkeypatch):
     adapters = lab_adapters()
     adapters["openai-sdk-a"] = bridge
     adapters["gemini-sdk-a"] = bridge
-    gateway = NeutralModelGateway(adapters=adapters)
+    gateway = OfflineModelHarness(adapters=adapters)
     with pytest.raises(ProviderError) as crossed:
         gateway.execute(_context(), _grant("openai", "gemini-sdk-a"))
     with pytest.raises(ProviderError) as rewired:
@@ -440,7 +438,7 @@ def test_provider_body_is_released_after_success_and_failure(
 
 
 def test_concurrent_organizations_do_not_share_a_deployment():
-    gateway = NeutralModelGateway()
+    gateway = OfflineModelHarness()
     done = []
 
     def run(organization, deployment, provider):
