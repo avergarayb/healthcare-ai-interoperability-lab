@@ -105,6 +105,7 @@ class ModelResponse:
     tool_inferred: bool | None = None
     prompt_inferred: bool | None = None
     visible_inferred: bool | None = None
+    included_output_tokens: int | None = None
 
     def __repr__(self):
         return "ModelResponse(closed)"
@@ -139,6 +140,7 @@ class GatewayResult:
     tool_inferred: bool | None = None
     prompt_inferred: bool | None = None
     visible_inferred: bool | None = None
+    included_output_tokens: int | None = None
 
     def __repr__(self):
         return "GatewayResult(closed)"

@@ -17,6 +17,8 @@ from openai import OpenAI
 from app.enterprise_llm_providers.configuration import ProviderSettings
 from app.enterprise_llm_providers.errors import ProviderError
 from app.enterprise_llm_providers.gemini_configuration import GeminiSettings
+from app.enterprise_llm_providers.gemini_pricing import estimate_microusd as gemini_estimate
+from app.enterprise_llm_providers.pricing import estimate_microusd as openai_estimate
 from app.enterprise_llm_providers.gemini_request import build_generation
 from app.enterprise_llm_providers.gemini_transport import GeminiSDKTransport, dispatch_generate
 from app.enterprise_llm_providers.request import build_payload
@@ -27,7 +29,7 @@ from app.model_gateway.adapters import lab_adapters
 from app.model_gateway.agent import VacationClauseAgent
 from app.model_gateway.contracts import ExecutionContext, ExecutionGrant
 from app.model_gateway.gateway import NeutralModelGateway
-from app.model_gateway.sdk_bridge import GeminiSdkBridge, OpenAISdkBridge
+from app.model_gateway.sdk_bridge import GeminiSdkBridge, OpenAISdkBridge, openai_reservation
 
 
 CLAUSE = FIXED_DOCUMENT
@@ -462,3 +464,172 @@ def test_concurrent_organizations_do_not_share_a_deployment():
     assert sorted(done) == ["private-offline-a", "private-offline-b", "replay_denied"]
     assert gateway._adapters["private-offline-a"].calls == 1
     assert CLAUSE not in repr(done)
+
+
+def _block_socket(monkeypatch):
+    monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("socket")))
+
+
+def _openai_with_usage(usage, monkeypatch):
+    _block_socket(monkeypatch)
+    body = _openai_body(json.dumps(_observation()))
+    body["usage"] = usage
+    transport = OpenAIMock(_http(httpx2, 200, body))
+    bridge = OpenAISdkBridge(_openai_settings(), transport, lambda: NOW)
+    gateway = _gateway("openai-sdk-a", bridge)
+    return gateway, transport, bridge
+
+
+def _gemini_with_usage(metadata, monkeypatch):
+    _block_socket(monkeypatch)
+    body = _gemini_body(json.dumps(_observation()))
+    body["usageMetadata"] = metadata
+    transport = GeminiMock(_http(httpx, 200, body))
+    bridge = GeminiSdkBridge(_gemini_settings(), transport, lambda: NOW)
+    gateway = _gateway("gemini-sdk-a", bridge)
+    return gateway, transport, bridge
+
+
+def test_openai_explicit_zero_reasoning_is_not_added(monkeypatch):
+    gateway, transport, _bridge = _openai_with_usage({
+        "input_tokens": 200, "output_tokens": 80,
+        "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 280,
+    }, monkeypatch)
+    result = _run(gateway, "openai", "openai-sdk-a")
+    assert result.input_tokens == 200 and result.output_tokens == 80
+    assert result.included_output_tokens == 0 and result.thoughts_tokens is None
+    assert result.estimated_microusd == openai_estimate(200, 80)
+    assert result.cost_exact is True and len(transport.requests) == 1
+
+
+def test_openai_reasoning_inside_output_is_not_billed_again(monkeypatch):
+    gateway, transport, _bridge = _openai_with_usage({
+        "input_tokens": 200, "output_tokens": 80,
+        "output_tokens_details": {"reasoning_tokens": 20}, "total_tokens": 280,
+    }, monkeypatch)
+    result = _run(gateway, "openai", "openai-sdk-a")
+    assert result.included_output_tokens == 20 and result.thoughts_tokens is None
+    assert result.estimated_microusd == openai_estimate(200, 80)
+    assert result.estimated_microusd != openai_estimate(200, 100)
+    assert len(transport.requests) == 1
+
+
+def test_openai_absent_reasoning_stays_absent(monkeypatch):
+    gateway, _transport, _bridge = _openai_with_usage({
+        "input_tokens": 200, "output_tokens": 80, "total_tokens": 280,
+    }, monkeypatch)
+    result = _run(gateway, "openai", "openai-sdk-a")
+    assert result.included_output_tokens is None and result.thoughts_tokens is None
+    assert result.estimated_microusd == openai_estimate(200, 80) and result.cost_exact is True
+
+
+def test_openai_price_does_not_treat_thoughts_as_extra_output():
+    bridge = OpenAISdkBridge()
+    with pytest.raises(ProviderError) as caught:
+        bridge._price(
+            {"reasoning_tokens": 20, "thoughts_tokens": 20, "cost_exact": True}, (200, 80))
+    assert caught.value.reason == "consumption_ambiguous"
+
+
+@pytest.mark.parametrize("usage", [
+    {"input_tokens": 200, "output_tokens": 80, "output_tokens_details": {"reasoning_tokens": 81}, "total_tokens": 280},
+    {"input_tokens": 200, "output_tokens": 80, "output_tokens_details": {"reasoning_tokens": 20}, "total_tokens": 100},
+    {"input_tokens": 200},
+])
+def test_openai_inconsistent_or_incomplete_usage_is_ambiguous(usage, monkeypatch):
+    gateway, transport, bridge = _openai_with_usage(usage, monkeypatch)
+    with pytest.raises(ProviderError) as caught:
+        _run(gateway, "openai", "openai-sdk-a")
+    with pytest.raises(ProviderError) as replay:
+        _run(gateway, "openai", "openai-sdk-a")
+    assert caught.value.reason == "consumption_ambiguous" and replay.value.reason == "replay_denied"
+    assert len(transport.requests) == 1 and bridge.calls == 1
+    assert gateway._adapters["gemini-sdk-a"].calls == 0
+
+
+def test_gemini_reported_thoughts_are_added_once(monkeypatch):
+    gateway, transport, _bridge = _gemini_with_usage({
+        "promptTokenCount": 40, "candidatesTokenCount": 16, "thoughtsTokenCount": 20, "totalTokenCount": 76,
+    }, monkeypatch)
+    result = _run(gateway, "gemini", "gemini-sdk-a")
+    assert result.input_tokens == 40 and result.output_tokens == 16 and result.thoughts_tokens == 20
+    assert result.included_output_tokens is None and result.thoughts_inferred is False
+    assert result.estimated_microusd == gemini_estimate(40, 36)
+    assert result.estimated_microusd != gemini_estimate(40, 16)
+    assert result.estimated_microusd != gemini_estimate(40, 56)
+    assert result.cost_exact is True and len(transport.requests) == 1
+
+
+def test_gemini_absent_thoughts_are_not_zero(monkeypatch):
+    gateway, transport, _bridge = _gemini_with_usage({
+        "promptTokenCount": 92, "candidatesTokenCount": 107,
+    }, monkeypatch)
+    result = _run(gateway, "gemini", "gemini-sdk-a")
+    assert result.output_tokens == 107 and result.thoughts_tokens is None
+    assert result.included_output_tokens is None and result.thoughts_inferred is False
+    assert result.estimated_microusd is None and result.cost_exact is False
+    assert len(transport.requests) == 1
+
+
+def test_gemini_inferred_thoughts_stay_distinct_from_reported_thoughts(monkeypatch):
+    inferred_gateway, _transport, _bridge = _gemini_with_usage({
+        "promptTokenCount": 92, "candidatesTokenCount": 107,
+        "toolUsePromptTokenCount": 0, "totalTokenCount": 219,
+    }, monkeypatch)
+    inferred = _run(inferred_gateway, "gemini", "gemini-sdk-a")
+    assert inferred.thoughts_tokens == 20 and inferred.thoughts_inferred is True
+    assert inferred.output_tokens == 107 and inferred.included_output_tokens is None
+    assert inferred.estimated_microusd == gemini_estimate(92, 127) and inferred.cost_exact is True
+
+
+def test_budget_below_reservation_does_not_send(monkeypatch):
+    _block_socket(monkeypatch)
+    transport = OpenAIMock(_http(httpx2, 200, _openai_body(json.dumps(_observation()))))
+    bridge = OpenAISdkBridge(_openai_settings(), transport, lambda: NOW)
+    gateway = _gateway("openai-sdk-a", bridge)
+    with pytest.raises(ProviderError) as caught:
+        gateway.execute(_context(budget=openai_reservation() - 1), _grant("openai", "openai-sdk-a"))
+    assert caught.value.reason == "budget_exceeded"
+    assert transport.requests == [] and bridge.calls == 0
+
+
+@pytest.mark.parametrize("status", [429, 500])
+def test_openai_http_errors_do_not_retry_or_fall_back(status, monkeypatch):
+    _block_socket(monkeypatch)
+    payload = {"error": {"message": CLAUSE, "code": "rate_limit_exceeded" if status == 429 else "server_error"}}
+    transport = OpenAIMock(_http(httpx2, status, payload))
+    bridge = OpenAISdkBridge(_openai_settings(), transport, lambda: NOW)
+    gateway = _gateway("openai-sdk-a", bridge)
+    with pytest.raises(ProviderError) as caught:
+        _run(gateway, "openai", "openai-sdk-a")
+    assert caught.value.reason == ("rate_limited" if status == 429 else "remote_unavailable")
+    assert len(transport.requests) == 1 and gateway._adapters["gemini-sdk-a"].calls == 0
+
+
+def test_openai_timeout_does_not_open_another_request(monkeypatch):
+    _block_socket(monkeypatch)
+
+    def handler(_request):
+        raise httpx2.TimeoutException("slow")
+
+    transport = OpenAIMock(handler)
+    bridge = OpenAISdkBridge(_openai_settings(), transport, lambda: NOW)
+    gateway = _gateway("openai-sdk-a", bridge)
+    with pytest.raises(ProviderError) as caught:
+        _run(gateway, "openai", "openai-sdk-a")
+    assert caught.value.reason == "timeout"
+    assert len(transport.requests) == 1 and gateway._adapters["gemini-sdk-a"].calls == 0
+
+
+def test_public_gateway_result_keeps_usage_out_of_the_projected_state(monkeypatch):
+    gateway, _transport, _bridge = _openai_with_usage({
+        "input_tokens": 200, "output_tokens": 80,
+        "output_tokens_details": {"reasoning_tokens": 20}, "total_tokens": 280,
+    }, monkeypatch)
+    result = _run(gateway, "openai", "openai-sdk-a")
+    state = gateway.public_state(result, "ORG-A")
+    rendered = repr(result) + repr(state) + repr(gateway)
+    assert set(state) == {"phase", "reason", "organization_id", "deployment_id"}
+    assert "included_output_tokens" not in state and not hasattr(result, "days")
+    assert CLAUSE not in rendered and OPENAI_KEY not in rendered
+    assert result.included_output_tokens == 20

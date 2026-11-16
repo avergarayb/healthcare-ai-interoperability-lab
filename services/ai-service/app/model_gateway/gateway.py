@@ -60,7 +60,8 @@ class NeutralModelGateway:
             response.usage.input_tokens, response.usage.output_tokens, reservation,
             response.estimated_microusd, response.thoughts_tokens, response.cost_exact,
             response.thoughts_inferred, response.tool_inferred,
-            response.prompt_inferred, response.visible_inferred)
+            response.prompt_inferred, response.visible_inferred,
+            response.included_output_tokens)
 
     def public_state(self, result, organization_id):
         if type(result) is not GatewayResult or result.organization_id != organization_id:
