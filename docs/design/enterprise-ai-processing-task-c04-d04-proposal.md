@@ -371,3 +371,15 @@ La primera llamada real no se ejecuta en las pruebas. El comando, desde `service
 `.\.venv\Scripts\python.exe -m app.enterprise_llm_providers.egress_once`
 
 Pide la frase `CONFIRMO EGRESS-001 UNA SOLICITUD openai gpt-6-luna vacation-days-v1 DATOS SINTETICOS SIN REINTENTO`. Usa el documento sintético ya fijado, `store=false`, `reasoning.effort=none` y un tope de salida de 256, que es el máximo ya tasado en la reserva de catálogo. Una salida de 16 tokens no cabe en el esquema estricto. El presupuesto no sube: el techo sigue siendo esa reserva. El marcador queda en `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-egress-001`. Un segundo intento, también de otro principal, recibe denegación. El comando histórico `live-once` se detiene antes del SDK.
+
+### EGRESS-002 — Controlled Real Gemini Execution
+
+La ruta reutiliza `NeutralModelGateway`. No hay un segundo gateway. El consentimiento es `OperationalGeminiConsent` y solo vale para `gemini-sdk-a`, el proveedor `gemini`, el modelo `gemini-3.5-flash-lite` y el permiso de esa ejecución. Un consentimiento de OpenAI no gasta un permiso Gemini. `GeminiSDKTransport.send` sigue en `egress_blocked`. El `live-once` histórico de Gemini se detiene antes del SDK. C03 no cambia.
+
+La página oficial de precios, consultada en esta tarea, mantiene `gemini-3.5-flash-lite` en el nivel gratuito y, en el nivel de pago Standard, entrada 0,30 USD por millón y salida 2,50 USD por millón, pensamiento incluido. Esas tarifas ya estaban en el código y no se modifican. La salida estructurada y el SDK `google-genai==2.24.0` siguen siendo los de este modelo. Las cuotas RPM, TPM y RPD no aparecen como una tabla fija en esa página: son cuotas del proyecto en AI Studio. El catálogo de `gemini-sdk-a` pasa de la referencia de 128 tokens (657 micro-USD) al tope de 256 tokens (977 micro-USD), que es el perfil ya usado por el intento 002 y sigue bajo el techo de 1.000. `gemini-offline-a` permanece en 470. `gemini_reservation()` conserva los 657 como referencia.
+
+La primera llamada real no se ejecuta aquí. El comando, desde `services/ai-service`, con `GEMINI_API_KEY` solo en el entorno y sin proxy, es:
+
+`.\.venv\Scripts\python.exe -m app.enterprise_llm_providers.egress_gemini_once once`
+
+La frase es `CONFIRMO EGRESS-002 UNA SOLICITUD gemini gemini-3.5-flash-lite vacation-days-v1 DATOS SINTETICOS SIN REINTENTO`. El marcador queda en `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-egress-002`. Un segundo intento queda denegado. No hay reintento automático.
