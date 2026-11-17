@@ -12,9 +12,12 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.config import Settings
-from app.human_development_auth import require_human_session
 
-from .review import ReviewError, Reviewer, decide, list_reviews, read_review
+from .iam_http import LabAccess, hmac_equal, require_lab_access
+from .review import (
+    IamReviewer, ReviewError, Reviewer, decide, list_reviews, read_review,
+    review_organization, reviews_for_organization,
+)
 
 
 _UCUM = "http://unitsofmeasure.org"
@@ -24,16 +27,22 @@ _LABELS = {"pending": "Pendiente", "approved": "Aprobado", "rejected": "Rechazad
 
 
 def render_lab_summary_queue(request: Request, settings: Settings) -> Response:
-    session = require_human_session(request, settings)
-    if isinstance(session, Response):
-        return session
+    access = require_lab_access(request, settings)
+    if isinstance(access, Response):
+        return access
     path = _path(settings)
     if path is None:
-        return _html(_page(session, "Resúmenes de laboratorio", _p("El almacén de revisión no está configurado."), "bandeja"), 503)
+        return _html(_page(access, "Resúmenes de laboratorio", _p("El almacén de revisión no está configurado."), "bandeja"), 503)
     try:
         rows = list_reviews(path)
     except ReviewError:
-        return _html(_page(session, "Resúmenes de laboratorio", _p("La revisión no está disponible."), "bandeja"), 503)
+        return _html(_page(access, "Resúmenes de laboratorio", _p("La revisión no está disponible."), "bandeja"), 503)
+    if access.mode == "iam":
+        if "read" not in access.permissions:
+            rows = []
+        else:
+            allowed = reviews_for_organization(path, access.organization_id)
+            rows = [row for row in rows if row["review_id"] in allowed]
     query, state = _filters(request)
     visible = [row for row in rows if _matches(row, query, state)]
     pending = [row for row in visible if row["decision"] is None]
@@ -46,52 +55,65 @@ def render_lab_summary_queue(request: Request, settings: Settings) -> Response:
     if state != "pending":
         body += "<h2 id=\"historial\">Historial de decisiones</h2>" + _history_table(
             decided, empty="Ningún resumen coincide con la búsqueda." if narrowed else "Todavía no hay decisiones.")
-    return _html(_page(session, "Resúmenes de laboratorio", body, "bandeja"))
+    if access.mode == "iam" and "read" not in access.permissions:
+        body = _p("Su rol no incluye la consulta de resúmenes.") + body
+    return _html(_page(access, "Resúmenes de laboratorio", body, "bandeja"))
 
 
 def render_lab_summary(request: Request, settings: Settings, review_id: str) -> Response:
-    session = require_human_session(request, settings)
-    if isinstance(session, Response):
-        return session
+    access = require_lab_access(request, settings)
+    if isinstance(access, Response):
+        return access
     path = _path(settings)
     if path is None:
-        return _html(_page(session, "Resumen", _p("El almacén de revisión no está configurado."), "bandeja"), 503)
+        return _html(_page(access, "Resumen", _p("El almacén de revisión no está configurado."), "bandeja"), 503)
+    if access.mode == "iam":
+        denied = _iam_read(access, path, review_id)
+        if denied is not None:
+            return _html(_page(access, "Resumen", denied, "detalle"), 403)
     try:
         case = read_review(path, review_id)
     except ReviewError as error:
         status = 404 if error.reason == "not_found" else 503
-        return _html(_page(session, "Resumen", _p("El resumen no está disponible."), "bandeja"), status)
-    return _html(_page(session, "Resumen de laboratorio", _detail(case), "detalle"))
+        return _html(_page(access, "Resumen", _p("El resumen no está disponible."), "bandeja"), status)
+    return _html(_page(access, "Resumen de laboratorio", _detail(case, access), "detalle"))
 
 
 def submit_lab_summary_decision(
     request: Request, settings: Settings, review_id: str, raw_body: bytes, content_type: str | None,
 ) -> Response:
-    session = require_human_session(request, settings)
-    if isinstance(session, Response):
-        return session
+    access = require_lab_access(request, settings)
+    if isinstance(access, Response):
+        return access
     path = _path(settings)
     if path is None:
-        return _html(_page(session, "Resumen", _p("El almacén de revisión no está configurado."), "bandeja"), 503)
+        return _html(_page(access, "Resumen", _p("El almacén de revisión no está configurado."), "bandeja"), 503)
     if not _same_origin(request):
-        return _html(_page(session, "Resumen", _p("La decisión no fue aceptada."), "bandeja"), 403)
-    fields = _fields(raw_body, content_type)
+        return _html(_page(access, "Resumen", _p("La decisión no fue aceptada."), "bandeja"), 403)
+    fields = _fields(raw_body, content_type, iam=access.mode == "iam")
     if fields is None:
-        return _html(_page(session, "Resumen", _p("La decisión no fue aceptada."), "bandeja"), 422)
+        return _html(_page(access, "Resumen", _p("La decisión no fue aceptada."), "bandeja"), 422)
+    if access.mode == "iam":
+        if "decide" not in access.permissions or not hmac_equal(fields["csrf"], access.csrf):
+            return _html(_page(access, "Resumen", _p("No tiene permiso para registrar esta decisión."), "detalle"), 403)
+        reviewer = IamReviewer(
+            access.principal_id, access.issuer, access.subject, access.organization_id,
+            access.role, access.session_id)
+    else:
+        reviewer = Reviewer(access.principal_id, access.authenticator_id, access.session_id)
     try:
-        reviewer = Reviewer(session.principal_id, session.authenticator_id, session.session_id)
         decide(
             path, review_id, reviewer, fields["decision"], fields["note"],
             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
     except ReviewError as error:
         if error.reason == "already_decided":
-            return _html(_page(session, "Resumen", _p("Este resumen ya tiene una decisión."), "bandeja"), 409)
-        if error.reason == "reviewer_denied":
-            return _html(_page(session, "Resumen", _p("El revisor no está autorizado."), "bandeja"), 403)
+            return _html(_page(access, "Resumen", _p("Este resumen ya tiene una decisión."), "bandeja"), 409)
+        if error.reason in {"reviewer_denied", "role_denied", "organization_denied"}:
+            return _html(_page(access, "Resumen", _p("No tiene permiso para registrar esta decisión."), "bandeja"), 403)
         if error.reason == "schema_unprepared":
-            return _html(_page(session, "Resumen", _p("Falta la preparación explícita del almacén de decisiones."), "bandeja"), 503)
+            return _html(_page(access, "Resumen", _p("Falta la preparación explícita del almacén de decisiones."), "bandeja"), 503)
         status = 404 if error.reason == "not_found" else 422
-        return _html(_page(session, "Resumen", _p("La decisión no fue aceptada."), "bandeja"), status)
+        return _html(_page(access, "Resumen", _p("La decisión no fue aceptada."), "bandeja"), status)
     return RedirectResponse("/lab-summaries/" + quote(review_id, safe=""), status_code=303)
 
 
@@ -102,7 +124,15 @@ def _path(settings):
     return value
 
 
-def _fields(raw_body, content_type):
+def _iam_read(access: LabAccess, path, review_id):
+    if "read" not in access.permissions:
+        return _p("No tiene acceso a este resumen.")
+    if review_organization(path, review_id) != access.organization_id:
+        return _p("No tiene acceso a este resumen.")
+    return None
+
+
+def _fields(raw_body, content_type, iam=False):
     if len(raw_body) > 2048 or content_type is None:
         return None
     if not content_type.startswith("application/x-www-form-urlencoded"):
@@ -113,10 +143,12 @@ def _fields(raw_body, content_type):
         return None
     fields = {}
     for key, value in pairs:
-        if key in fields or key not in {"decision", "note"}:
+        allowed = {"decision", "note", "csrf"} if iam else {"decision", "note"}
+        if key in fields or key not in allowed:
             return None
         fields[key] = value
-    if set(fields) != {"decision", "note"}:
+    expected = {"decision", "note", "csrf"} if iam else {"decision", "note"}
+    if set(fields) != expected:
         return None
     return fields
 
@@ -213,7 +245,7 @@ def _history_table(rows, empty):
     return "<div class=\"table-scroll\"><table><caption>Decisiones registradas</caption>" + "".join(items) + "</table></div>"
 
 
-def _detail(case):
+def _detail(case, access):
     summary = case["summary"]
     parts = [
         "<section class=\"panel\"><h2>Registro</h2><dl>",
@@ -247,7 +279,7 @@ def _detail(case):
         parts.append("<p class=\"statement\">" + escape(statement.get("text") or "") + "</p>")
     parts.append("</section>")
     parts.append(_observations(case["sources"]))
-    parts.append(_decision_block(case))
+    parts.append(_decision_block(case, access))
     parts.append(_audit(case))
     return "".join(parts)
 
@@ -352,18 +384,30 @@ def _verified_quantity(source):
     return {"code": code, "value": format(value, "g"), "unit": expected, "range": reference}
 
 
-def _decision_block(case):
+def _decision_block(case, access):
     decision = case["decision"]
     if decision is None:
-        return _form(case["review_id"])
-    return (
-        "<section class=\"panel\"><h2>Decisión humana</h2><dl>"
-        + _pair("Resultado", decision["decision"])
-        + _pair("Revisor", decision["reviewer_id"])
-        + _pair("Fecha", decision["decided_at"])
-        + _pair("Observación", decision["note"])
-        + "</dl></section>"
-    )
+        if access.mode == "iam" and "decide" not in access.permissions:
+            return "<section class=\"panel\"><h2>Revisión humana</h2>" + _p(
+                "Su rol no incluye aprobar ni rechazar este resumen.") + "</section>"
+        return _form(case["review_id"], access.csrf if access.mode == "iam" else "")
+    identity = case.get("identity") or {}
+    parts = [
+        "<section class=\"panel\"><h2>Decisión humana</h2><dl>",
+        _pair("Resultado", decision["decision"]),
+        _pair("Revisor", decision["reviewer_id"]),
+        _pair("Fecha", decision["decided_at"]),
+        _pair("Observación", decision["note"]),
+    ]
+    if identity:
+        parts.extend([
+            _pair("Emisor", identity["issuer"]),
+            _pair("Sujeto", identity["subject"]),
+            _pair("Organización", identity["organization_id"]),
+            _pair("Rol", identity["role"]),
+        ])
+    parts.append("</dl></section>")
+    return "".join(parts)
 
 
 def _audit(case):
@@ -382,13 +426,24 @@ def _audit(case):
     return "".join(parts)
 
 
-def _form(review_id):
+def _form(review_id, csrf=""):
     action = "/lab-summaries/" + quote(review_id, safe="") + "/decision"
+    hidden = ""
+    notice = (
+        "La identidad del revisor sale de la sesión del servidor. "
+        "Esta autenticación de desarrollo no es seguridad de producción."
+    )
+    if csrf:
+        hidden = "<input type=\"hidden\" name=\"csrf\" value=\"" + escape(csrf) + "\">"
+        notice = (
+            "La identidad del revisor sale de la sesión validada por el servidor. "
+            "Un campo del navegador no cambia el rol ni la organización."
+        )
     return (
         "<section class=\"panel\"><h2>Revisión humana</h2>"
-        "<p>La identidad del revisor sale de la sesión del servidor. "
-        "Esta autenticación de desarrollo no es seguridad de producción.</p>"
+        "<p>" + notice + "</p>"
         "<form class=\"decision\" method=\"post\" action=\"" + escape(action) + "\">"
+        + hidden +
         "<label>Observación del revisor "
         "<input name=\"note\" maxlength=\"400\" required></label>"
         "<label><input type=\"checkbox\" required> Confirmo esta decisión</label>"
@@ -416,6 +471,18 @@ def _p(message):
 def _page(session, title, body, current):
     principal = escape(getattr(session, "principal_id", ""))
     bandeja = " aria-current=\"page\"" if current == "bandeja" else ""
+    if getattr(session, "mode", "") == "iam":
+        disclaimer = "Sesión OIDC de laboratorio. No es certificación ni IAM sanitario de producción."
+        header = (
+            "<header class=\"identity\"><p>" + escape(session.display_name) + "</p>"
+            "<p>" + escape(session.organization_id) + "</p><p>" + escape(session.role) + "</p>"
+            "<form method=\"post\" action=\"/lab-review-iam/logout\">"
+            "<input type=\"hidden\" name=\"csrf\" value=\"" + escape(session.csrf) + "\">"
+            "<button type=\"submit\">Cerrar sesión</button></form></header>"
+        )
+    else:
+        disclaimer = "Sesión de desarrollo. No es autenticación clínica de producción."
+        header = "<header><p>Sesión de desarrollo</p><p>" + principal + "</p></header>"
     return (
         "<!DOCTYPE html>\n<html lang=\"es\">\n<head>\n<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
@@ -426,12 +493,12 @@ def _page(session, title, body, current):
         "<a class=\"skip\" href=\"#contenido\">Saltar al contenido</a>\n"
         "<div class=\"lab-frame\">\n"
         "<aside>\n<p class=\"brand\">Revisión de laboratorio</p>\n"
-        "<p class=\"disclaimer\">Sesión de desarrollo. No es autenticación clínica de producción.</p>\n"
+        "<p class=\"disclaimer\">" + escape(disclaimer) + "</p>\n"
         "<nav aria-label=\"Secciones\">\n"
         "<a href=\"/lab-summaries\"" + bandeja + ">Bandeja</a>\n"
         "<a href=\"/lab-summaries#historial\">Historial</a>\n"
         "</nav>\n</aside>\n<div class=\"lab-main\">\n"
-        "<header><p>Sesión de desarrollo</p><p>" + principal + "</p></header>\n"
+        + header + "\n"
         "<main id=\"contenido\">\n<h1>" + escape(title) + "</h1>\n" + body + "\n</main>\n"
         "</div>\n</div>\n</body>\n</html>\n"
     )

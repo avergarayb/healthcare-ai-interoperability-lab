@@ -64,8 +64,12 @@ def read_status(path, review_id):
 
 _REVIEW_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _PRINCIPAL_ID = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+_ORG_ID = re.compile(r"^org-[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+_IAM_ISSUER = re.compile(r"^https?://[A-Za-z0-9._:-]{1,200}/realms/[A-Za-z0-9_-]{1,64}$")
+_IAM_SUBJECT = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _DECISIONS = frozenset({"approved", "rejected"})
 _AGENT_PRINCIPALS = frozenset({"synthetic-executor", "synthetic-administrator"})
+IAM_AUTHENTICATOR_V1 = "LAB_REVIEW_IAM_V1"
 
 
 class ReviewError(Exception):
@@ -86,6 +90,32 @@ class Reviewer:
             raise ReviewError("reviewer_denied")
         self.principal_id = principal_id
         self.authenticator_id = authenticator_id
+        self.session_id = session_id
+
+
+def iam_principal_id(issuer, subject):
+    digest = hashlib.sha256((issuer + "\n" + subject).encode("utf-8")).hexdigest()
+    return "iam-" + digest[:20]
+
+
+class IamReviewer:
+    """A reviewer resolved from the server IAM binding, never from a browser field."""
+
+    def __init__(self, principal_id, issuer, subject, organization_id, role, session_id):
+        if any(type(value) is not str for value in (
+                principal_id, issuer, subject, organization_id, role, session_id)):
+            raise ReviewError("reviewer_denied")
+        if (role != "clinical-reviewer" or session_id == ""
+                or _IAM_ISSUER.fullmatch(issuer) is None or _IAM_SUBJECT.fullmatch(subject) is None
+                or _ORG_ID.fullmatch(organization_id) is None
+                or principal_id != iam_principal_id(issuer, subject)):
+            raise ReviewError("role_denied" if role != "clinical-reviewer" else "reviewer_denied")
+        self.principal_id = principal_id
+        self.authenticator_id = IAM_AUTHENTICATOR_V1
+        self.issuer = issuer
+        self.subject = subject
+        self.organization_id = organization_id
+        self.role = role
         self.session_id = session_id
 
 
@@ -139,6 +169,11 @@ def read_review(path, review_id):
         audits = connection.execute(
             "SELECT event, outcome FROM lab_summary_audit WHERE review_id=? ORDER BY audit_id",
             (review_id,)).fetchall()
+        identity = None
+        if _table_exists(connection, "lab_summary_decision_identity"):
+            identity = connection.execute(
+                "SELECT issuer, subject, organization_id, role, local_principal "
+                "FROM lab_summary_decision_identity WHERE review_id=?", (review_id,)).fetchone()
     finally:
         connection.close()
     summary = json.loads(row[4])
@@ -164,12 +199,17 @@ def read_review(path, review_id):
             {"event": item[0], "outcome": item[1], "actor_id": item[2], "decision": item[3]}
             for item in decision_audits
         ],
+        "identity": None if identity is None else {
+            "issuer": identity[0], "subject": identity[1], "organization_id": identity[2],
+            "role": identity[3], "local_principal": identity[4],
+        },
     }
 
 
 def decide(path, review_id, reviewer, decision, note, decided_at):
     """Record one human decision. The original summary row is not updated."""
-    if type(reviewer) is not Reviewer:
+    iam = type(reviewer) is IamReviewer
+    if type(reviewer) is not Reviewer and not iam:
         raise ReviewError("reviewer_denied")
     if decision not in _DECISIONS or _REVIEW_ID.fullmatch(review_id or "") is None:
         raise ReviewError("invalid_decision")
@@ -182,7 +222,11 @@ def decide(path, review_id, reviewer, decision, note, decided_at):
     connection = _open(path)
     try:
         connection.execute("BEGIN IMMEDIATE")
-        if not _has_decision_schema(connection):
+        if not _has_decision_schema(connection) or (
+                iam and not _table_exists(connection, "lab_summary_decision_identity")):
+            connection.execute("ROLLBACK")
+            raise ReviewError("schema_unprepared")
+        if iam and not _table_exists(connection, "lab_summary_organization"):
             connection.execute("ROLLBACK")
             raise ReviewError("schema_unprepared")
         row = connection.execute(
@@ -193,6 +237,13 @@ def decide(path, review_id, reviewer, decision, note, decided_at):
             raise ReviewError("not_found")
         original = row[0]
         digest = hashlib.sha256(original.encode("utf-8")).hexdigest()
+        if iam:
+            organization = connection.execute(
+                "SELECT organization_id FROM lab_summary_organization WHERE review_id=?",
+                (review_id,)).fetchone()
+            if organization is None or organization[0] != reviewer.organization_id:
+                connection.execute("ROLLBACK")
+                raise ReviewError("organization_denied")
         taken = connection.execute(
             "SELECT decision FROM lab_summary_decision WHERE review_id=?", (review_id,)).fetchone()
         if taken is not None:
@@ -208,6 +259,13 @@ def decide(path, review_id, reviewer, decision, note, decided_at):
             "INSERT INTO lab_summary_decision_audit "
             "(review_id, event, outcome, actor_id, decision) VALUES (?, 'decided', 'recorded', ?, ?)",
             (review_id, reviewer.principal_id, decision))
+        if iam:
+            connection.execute(
+                "INSERT INTO lab_summary_decision_identity "
+                "(review_id, issuer, subject, organization_id, role, local_principal) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (review_id, reviewer.issuer, reviewer.subject, reviewer.organization_id,
+                 reviewer.role, reviewer.principal_id))
         current = connection.execute(
             "SELECT summary_json, status FROM lab_summary_review WHERE review_id=?",
             (review_id,)).fetchone()
@@ -244,8 +302,12 @@ def _read_only(path):
 
 
 def _has_decision_schema(connection):
+    return _table_exists(connection, "lab_summary_decision")
+
+
+def _table_exists(connection, name):
     row = connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lab_summary_decision'"
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
     ).fetchone()
     return row is not None
 
@@ -283,6 +345,106 @@ def _ensure_decision_tables(connection):
             decision TEXT NOT NULL
         )
         """)
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lab_summary_decision_identity (
+            review_id TEXT PRIMARY KEY,
+            issuer TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            organization_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            local_principal TEXT NOT NULL,
+            FOREIGN KEY (review_id) REFERENCES lab_summary_review(review_id)
+        )
+        """)
+
+
+def prepare_organization_store(path):
+    """Create the organization association table. A queue page does not call this."""
+    connection = _open(path)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lab_summary_organization (
+                review_id TEXT PRIMARY KEY,
+                organization_id TEXT NOT NULL,
+                FOREIGN KEY (review_id) REFERENCES lab_summary_review(review_id)
+            )
+            """)
+        connection.execute("COMMIT")
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise ReviewError("review_unavailable") from None
+    finally:
+        connection.close()
+
+
+def assign_review_organization(path, review_id, organization_id):
+    """Bind one stored review to one organization. The summary row is not updated."""
+    if _REVIEW_ID.fullmatch(review_id or "") is None or _ORG_ID.fullmatch(organization_id or "") is None:
+        raise ReviewError("organization_rejected")
+    connection = _open(path)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if not _table_exists(connection, "lab_summary_organization"):
+            connection.execute("ROLLBACK")
+            raise ReviewError("schema_unprepared")
+        before = connection.execute(
+            "SELECT summary_json, status FROM lab_summary_review WHERE review_id=?", (review_id,)
+        ).fetchone()
+        if before is None:
+            connection.execute("ROLLBACK")
+            raise ReviewError("not_found")
+        current = connection.execute(
+            "SELECT organization_id FROM lab_summary_organization WHERE review_id=?", (review_id,)
+        ).fetchone()
+        if current is None:
+            connection.execute(
+                "INSERT INTO lab_summary_organization (review_id, organization_id) VALUES (?, ?)",
+                (review_id, organization_id))
+        elif current[0] != organization_id:
+            connection.execute("ROLLBACK")
+            raise ReviewError("organization_conflict")
+        after = connection.execute(
+            "SELECT summary_json, status FROM lab_summary_review WHERE review_id=?", (review_id,)
+        ).fetchone()
+        if after != before:
+            connection.execute("ROLLBACK")
+            raise ReviewError("review_unavailable")
+        connection.execute("COMMIT")
+    finally:
+        connection.close()
+
+
+def review_organization(path, review_id):
+    if _REVIEW_ID.fullmatch(review_id or "") is None:
+        return None
+    connection = _read_only(path)
+    try:
+        if not _table_exists(connection, "lab_summary_organization"):
+            return None
+        row = connection.execute(
+            "SELECT organization_id FROM lab_summary_organization WHERE review_id=?", (review_id,)
+        ).fetchone()
+    finally:
+        connection.close()
+    return None if row is None else row[0]
+
+
+def reviews_for_organization(path, organization_id):
+    if _ORG_ID.fullmatch(organization_id or "") is None:
+        return set()
+    connection = _read_only(path)
+    try:
+        if not _table_exists(connection, "lab_summary_organization"):
+            return set()
+        rows = connection.execute(
+            "SELECT review_id FROM lab_summary_organization WHERE organization_id=?",
+            (organization_id,)).fetchall()
+    finally:
+        connection.close()
+    return {row[0] for row in rows}
 
 
 def _sources(summary):
