@@ -1,8 +1,8 @@
 """Isolated Gemini smoke. dry-run does not send. live-once stays behind a TTY confirmation.
 
-The public Gemini transport remains closed. This module does not import a provider SDK.
-The dry-run and the guarded live-once path use the offline harness, not
-NeutralModelGateway. A durable ALLOW does not enter this module or open send.
+The public Gemini transport remains closed. live-once stops before the SDK.
+The operational send is the neutral gateway with one Gemini execution consent.
+This module does not import a provider SDK. The dry-run uses the offline harness.
 """
 import json
 import os
@@ -21,7 +21,7 @@ from app.model_gateway.sdk_bridge import GeminiSdkBridge
 from .errors import ProviderError
 from .gemini_configuration import ALLOWED_MODEL, GeminiSettings, TIMEOUT_MILLISECONDS
 from .gemini_pricing import CALL_CEILING_MICROUSD, estimate_microusd
-from .gemini_request import build_generation, request_bytes, require_closed_generation
+from .gemini_request import require_closed_generation
 from .gemini_transport import (
     DisabledGeminiTransport, dispatch_generate, open_official_client, require_official_client,
 )
@@ -111,11 +111,9 @@ def reject_alternate(*, document=None, model=None, base_url=None):
 
 
 def attempt_reservation():
-    """Price the fixed 256-token payload. The catalog reservation stays at 128."""
-    settings = GeminiSettings(
-        False, ALLOWED_MODEL, 15, LIVE_OUTPUT_TOKENS, 2048, CALL_CEILING_MICROUSD, None)
-    generation = build_generation(FIXED_DOCUMENT, settings)
-    return estimate_microusd(request_bytes(generation), LIVE_OUTPUT_TOKENS)
+    """Price the fixed 256-token payload. This is the gemini-sdk-a catalog ceiling."""
+    from app.model_gateway.sdk_bridge import gemini_operational_reservation
+    return gemini_operational_reservation()
 
 
 def claim_attempt(directory):
@@ -185,14 +183,12 @@ def _live_once(stdin, environ, clock):
         raise ProviderError("invalid_input")
     if _redirect(environ) or _redirect(os.environ):
         raise ProviderError("environment_redirect")
-    reservation = require_ceiling(attempt_reservation())
+    require_ceiling(attempt_reservation())
     credential = environ.get("GEMINI_API_KEY")
     if type(credential) is not str or credential == "":
         raise ProviderError("credential_absent")
     _require_confirmation(stdin)
-    client = open_official_client(credential)
-    directory = default_attempt_directory(environ)
-    return _assigned(client, directory, clock, reservation)
+    raise ProviderError("egress_blocked")
 
 
 def _assigned(client, directory, clock, reservation):

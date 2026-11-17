@@ -60,9 +60,17 @@ def openai_reservation():
 
 
 def gemini_reservation():
+    """128-token reference. The operational catalog uses the 256-token ceiling."""
     settings = GeminiSettings.disabled()
     generation = build_generation(FIXED_DOCUMENT, settings)
     return gemini_estimate(request_bytes(generation), settings.max_output_tokens)
+
+
+def gemini_operational_reservation():
+    """Ceiling for one gemini-sdk-a call at the closed 256-token output cap."""
+    settings = GeminiSettings(False, "gemini-3.5-flash-lite", 15, 256, 2048, 1_000, None)
+    generation = build_generation(FIXED_DOCUMENT, settings)
+    return gemini_estimate(request_bytes(generation), 256)
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,9 +215,7 @@ class GeminiSdkBridge(_SdkBridge):
         super().__init__(adapter, capture, clock)
 
     def reservation(self):
-        settings = self._adapter.settings
-        generation = build_generation(FIXED_DOCUMENT, settings)
-        return gemini_estimate(request_bytes(generation), settings.max_output_tokens)
+        return gemini_operational_reservation()
 
     def reported_cost(self, reported):
         return gemini_estimate(reported[0], reported[1])

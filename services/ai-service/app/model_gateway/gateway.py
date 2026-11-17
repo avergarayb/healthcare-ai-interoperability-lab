@@ -10,7 +10,8 @@ from app.enterprise_llm_providers.validation import check_observation
 from app.enterprise_ai_processing.durable_resolver import LedgerDurableAuthorization
 
 from .adapters import lab_adapters
-from .egress import arm_openai_adapter, bind_consent
+from .egress import OperationalEgressConsent, arm_openai_adapter, bind_consent
+from .egress_gemini import OperationalGeminiConsent, arm_gemini_adapter, bind_gemini_consent
 from .authorization import DurableAuthorizationResolver
 from .contracts import ExecutionContext, ExecutionGrant, ExecutionPolicy, GatewayResult, ModelRequest
 from .policy import REQUIRED, authorize, default_policy
@@ -42,7 +43,13 @@ class NeutralModelGateway:
             raise ProviderError("remote_not_authorized")
         deployment = self._registry.get(deployment_id)
         if egress_consent is not None:
-            bind_consent(egress_consent, access, deployment, resource_id, budget_microusd)
+            if type(egress_consent) is OperationalEgressConsent:
+                bind_consent(egress_consent, access, deployment, resource_id, budget_microusd)
+            elif type(egress_consent) is OperationalGeminiConsent:
+                bind_gemini_consent(
+                    egress_consent, access, deployment, resource_id, budget_microusd, authorization_id)
+            else:
+                raise ProviderError("egress_blocked")
         decision = self._resolver.resolve(
             access, authorization_id, deployment, resource_id, budget_microusd)
         if decision.allowed is not True or decision.reason != "accepted":
@@ -68,9 +75,15 @@ class NeutralModelGateway:
             authorize(context, grant, deployment)
             if egress_consent is None:
                 adapter = self._adapters.get(deployment.deployment_id)
-            else:
+            elif type(egress_consent) is OperationalEgressConsent:
                 adapter = arm_openai_adapter(
                     self._resolver.clock(), egress_consent, access, deployment, resource_id)
+            elif type(egress_consent) is OperationalGeminiConsent:
+                adapter = arm_gemini_adapter(
+                    self._resolver.clock(), egress_consent, access, deployment, resource_id,
+                    authorization_id)
+            else:
+                raise ProviderError("egress_blocked")
             if adapter is None:
                 raise ProviderError("model_unregistered")
             request = ModelRequest(

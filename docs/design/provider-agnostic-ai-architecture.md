@@ -54,7 +54,7 @@ Anthropic, otros proveedores de nube y un endpoint compatible con OpenAI no est�
 
 ## Aislamiento y costo
 
-Los despliegues offline reservan una cota de planificación: 191 micro-USD para OpenAI y 470 para Gemini. Los despliegues SDK reservan el payload fijo: 303 micro-USD para OpenAI y 657 para Gemini, ambos bajo el techo de 1.000. El protocolo privado reserva 1 micro-USD de contabilidad, no una factura de proveedor. El presupuesto del contexto tiene que cubrir la reserva del despliegue elegido. Por debajo, `budget_exceeded` ocurre antes de la invocación.
+Los despliegues offline reservan una cota de planificación: 191 micro-USD para OpenAI y 470 para Gemini. Los despliegues SDK reservan el payload fijo: 303 micro-USD para OpenAI y 977 para Gemini. 977 es el techo de 256 tokens de salida de `gemini-3.5-flash-lite`; la referencia de 128 tokens sigue en 657. Ambos quedan bajo el techo de 1.000. El protocolo privado reserva 1 micro-USD de contabilidad, no una factura de proveedor. El presupuesto del contexto tiene que cubrir la reserva del despliegue elegido. Por debajo, `budget_exceeded` ocurre antes de la invocación.
 
 El costo estimado de la respuesta no se presenta como cargo confirmado. Si falta el usage, el resultado es `consumption_ambiguous` y el despliegue queda gastado: no hay segundo intento ni otro proveedor.
 

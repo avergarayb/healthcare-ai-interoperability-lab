@@ -1,5 +1,6 @@
 """Gemini SDK transport. The default does not build a client, and send() does not call the API."""
 import os
+import re
 
 from google import genai
 from google.genai import types
@@ -93,6 +94,77 @@ def _official(client):
         return False
     host = base[len("https://"):].split("/", 1)[0]
     return host == "generativelanguage.googleapis.com"
+
+
+class DispatchGrant:
+    """One pass into the authorized generate call. A bare call does not obtain it."""
+
+    def __init__(self):
+        self._open = True
+
+    def consume(self):
+        if self._open is not True:
+            return False
+        self._open = False
+        return True
+
+
+def open_authorized_client(credential, http_client=None):
+    """Official client for one consented send. Construction does not call generateContent."""
+    for name in _REDIRECT_ENV:
+        if os.environ.get(name):
+            raise ProviderError("environment_redirect")
+    if type(credential) is not str or credential == "":
+        raise ProviderError("credential_absent")
+    options = {
+        "timeout": TIMEOUT_MILLISECONDS,
+        "retry_options": types.HttpRetryOptions(attempts=1),
+    }
+    if http_client is not None:
+        options["httpx_client"] = http_client
+    client = genai.Client(api_key=credential, http_options=types.HttpOptions(**options))
+    if not _official(client):
+        raise ProviderError("not_configured")
+    return client
+
+
+def dispatch_authorized(client, generation, grant=None):
+    """One generateContent call after the release was spent. No retry."""
+    if type(grant) is not DispatchGrant or grant.consume() is not True:
+        raise ProviderError("egress_blocked")
+    require_closed_generation(generation, FIXED_DOCUMENT)
+    if generation.get("max_output_tokens") != 256:
+        raise ProviderError("not_configured")
+    require_official_client(client)
+    config = types.GenerateContentConfig(
+        system_instruction=generation["system_instruction"],
+        response_mime_type="application/json",
+        response_json_schema=generation["response_json_schema"],
+        max_output_tokens=generation["max_output_tokens"],
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
+    )
+    try:
+        response = client.models.generate_content(
+            model=generation["model"], contents=generation["contents"], config=config)
+    except ProviderError:
+        raise
+    except Exception as error:
+        raise ProviderError(_authorized_error(error)) from None
+    body = normalize_response(response)
+    reported = getattr(response, "response_id", None)
+    if type(reported) is str and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", reported):
+        body["provider_request_id"] = reported
+    return body
+
+
+def _authorized_error(error):
+    code = getattr(error, "code", None)
+    if code in (401, 403):
+        return "credential_rejected"
+    if code == 404:
+        return "model_denied"
+    return _error_reason(error)
 
 
 def dispatch_generate(client, generation):

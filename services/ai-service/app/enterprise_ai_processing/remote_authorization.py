@@ -18,7 +18,7 @@ RESERVATION_MICROUSD = {
     "openai-offline-a": 191,
     "gemini-offline-a": 470,
     "openai-sdk-a": 303,
-    "gemini-sdk-a": 657,
+    "gemini-sdk-a": 977,
 }
 BUDGET_CEILING_MAX_MICROUSD = 5_000_000
 REVOCATION_REASONS = frozenset({"operator_revoked", "scope_withdrawn"})

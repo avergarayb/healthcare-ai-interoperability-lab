@@ -4,7 +4,7 @@ from app.enterprise_llm_providers.gemini_pricing import estimate_microusd as gem
 from app.enterprise_llm_providers.pricing import estimate_microusd as openai_estimate
 
 from .contracts import ModelDeployment, ModelIdentity
-from .sdk_bridge import gemini_reservation, openai_reservation
+from .sdk_bridge import gemini_operational_reservation, openai_reservation
 
 
 _ORGS_A = frozenset({"ORG-A"})
@@ -38,7 +38,7 @@ def lab_catalog():
                     openai_reservation(), _ORGS_A),
         _deployment("gemini-sdk-a", "gemini", "gemini-3.5-flash-lite", "external-blocked",
                     ("text", "structured_output", "usage_report", "reasoning_control", "token_accounting"),
-                    gemini_reservation(), _ORGS_A),
+                    gemini_operational_reservation(), _ORGS_A),
     )
 
 

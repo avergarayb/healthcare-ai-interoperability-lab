@@ -107,6 +107,8 @@ def test_live_once_rejects_noninteractive_input_and_a_wrong_phrase(tmp_path, mon
     wrong = cli(["live-once"], _TTY("no\n"), environ, lambda: NOW)
     assert blocked["reason"] == wrong["reason"] == "confirmation_required"
     assert blocked["requests_sent"] == wrong["requests_sent"] == 0
+    confirmed = cli(["live-once"], _TTY(CONFIRMATION_PHRASE + "\n"), environ, lambda: NOW)
+    assert confirmed["reason"] == "egress_blocked" and confirmed["requests_sent"] == 0
     assert not list(Path(tmp_path).rglob("*attempt*"))
 
 
