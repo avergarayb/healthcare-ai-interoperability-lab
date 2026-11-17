@@ -1091,6 +1091,55 @@ class SQLiteExecutionLedger:
                 self._remote_audit(c, "remote_authorization_revoked", "RECORDED", "revoked", access, row)
             return authorization_id
 
+    def read_operational_hold(self, access, authorization_id, deployment_id, provider_id, model_id,
+                              resource_id, budget_microusd):
+        """Re-read the committed hold. This does not send and does not release a row."""
+        try:
+            self._actor(access, {"administrator", "executor"})
+            identifier(authorization_id)
+            now = self.clock()
+            record = RemoteAuthorization(
+                authorization_id, access.organization_id, deployment_id, provider_id, model_id,
+                now, now, principal_id=access.principal_id, resource_id=resource_id)
+        except Exception:
+            return "invalid_input"
+        try:
+            with self._transaction("remote_hold_read", write=False) as connection:
+                version = self._require_remote(connection)
+                if version != 5 or schema_ddl(connection) != self._ddl_v5:
+                    return "authority_unverifiable"
+                row = connection.execute(
+                    "SELECT * FROM aip_remote_execution_permit WHERE authorization_id=? AND organization_id=?",
+                    (authorization_id, access.organization_id)).fetchone()
+                reason = classify(row, instant(self.clock()), record)
+                if reason != "accepted":
+                    return reason
+                ceiling = row["budget_ceiling_microusd"]
+                minimum = RESERVATION_MICROUSD.get(deployment_id)
+                if (type(budget_microusd) is not int or minimum is None or type(ceiling) is not int
+                        or budget_microusd < minimum or budget_microusd > ceiling
+                        or budget_microusd > BUDGET_CEILING_MAX_MICROUSD):
+                    return "budget_exceeded"
+                reservations = connection.execute(
+                    "SELECT status FROM aip_remote_execution_reservation WHERE authorization_id=?",
+                    (authorization_id,)).fetchall()
+                if len(reservations) != 1 or reservations[0]["status"] != "held":
+                    return "replay_denied"
+                audit = connection.execute(
+                    "SELECT count(*) FROM aip_remote_authorization_audit "
+                    "WHERE authorization_id=? AND organization_id=? AND contract=? "
+                    "AND event='remote_authorization_evaluated' AND outcome='ALLOW' AND reason='accepted'",
+                    (authorization_id, access.organization_id, REMOTE_AUDIT_V3)).fetchone()[0]
+                if audit != 1:
+                    return "authority_unverifiable"
+                return "accepted"
+        except ExecutionError as error:
+            if error.unavailable:
+                return "storage_unavailable"
+            return error.reason if error.reason in DECISION_REASONS else "authority_unverifiable"
+        except Exception:
+            return "storage_unavailable"
+
     def consume_remote_reservation(self, access, authorization_id):
         """Terminal mark after a confirmed hold. A failure leaves the row held."""
         self._actor(access, {"administrator", "executor"})

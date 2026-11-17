@@ -1,5 +1,6 @@
 """SDK transport. Egress stays closed; the default transport never builds a client."""
 import os
+import re
 import httpx2
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
@@ -64,6 +65,26 @@ class OpenAISDKTransport:
         return dispatch_responses(self._client, payload, timeout_seconds)
 
 
+def open_authorized_client(credential, timeout_seconds, http_client=None):
+    """One official client for a spent release. Construction does not call Responses."""
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy",
+                 "all_proxy", "OPENAI_BASE_URL", "OPENAI_CUSTOM_HEADERS"):
+        if os.environ.get(name):
+            raise ProviderError("environment_redirect")
+    if type(credential) is not str or credential == "":
+        raise ProviderError("credential_absent")
+    if type(timeout_seconds) not in (int, float) or isinstance(timeout_seconds, bool):
+        raise ProviderError("not_configured")
+    client = OpenAI(
+        api_key=credential, max_retries=0, timeout=httpx2.Timeout(float(timeout_seconds)),
+        http_client=http_client)
+    if client.max_retries != 0 or _host(client.base_url) != OFFICIAL_HOST:
+        raise ProviderError("not_configured")
+    if getattr(client.base_url, "scheme", "") != "https":
+        raise ProviderError("not_configured")
+    return client
+
+
 def open_official_client(credential):
     """Build the closed client. Construction does not call Responses."""
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy",
@@ -111,14 +132,79 @@ def dispatch_responses(client, payload, timeout_seconds):
 
 
 def require_closed_payload(payload, timeout_seconds):
-    if (type(payload) is not dict or timeout_seconds != TIMEOUT_SECONDS
-            or payload.get("model") != ALLOWED_MODEL or payload.get("store") is not False
-            or payload.get("service_tier") != "default" or payload.get("reasoning") != {"effort": "none"}
-            or payload.get("stream") is not False or payload.get("background") is not False
-            or "tools" in payload or "previous_response_id" in payload or "base_url" in payload
-            or type(payload.get("max_output_tokens")) is not int
-            or not 16 <= payload["max_output_tokens"] <= 256):
+    if timeout_seconds != TIMEOUT_SECONDS or _payload_closed(payload) is not True:
         raise ProviderError("invalid_input")
+
+
+def require_authorized_payload(payload, timeout_seconds):
+    """Same closed payload. The timeout is the one bound to this execution."""
+    if (type(timeout_seconds) not in (int, float) or isinstance(timeout_seconds, bool)
+            or not 0 < float(timeout_seconds) <= 60 or _payload_closed(payload) is not True):
+        raise ProviderError("invalid_input")
+
+
+def _payload_closed(payload):
+    return (type(payload) is dict and payload.get("model") == ALLOWED_MODEL
+            and payload.get("store") is False and payload.get("service_tier") == "default"
+            and payload.get("reasoning") == {"effort": "none"} and payload.get("stream") is False
+            and payload.get("background") is False and "tools" not in payload
+            and "previous_response_id" not in payload and "base_url" not in payload
+            and type(payload.get("max_output_tokens")) is int
+            and 16 <= payload["max_output_tokens"] <= 256)
+
+
+_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,80}")
+
+
+class DispatchGrant:
+    """One pass into dispatch_authorized. A bare call does not obtain it."""
+
+    def __init__(self):
+        self._open = True
+
+    def consume(self):
+        if self._open is not True:
+            return False
+        self._open = False
+        return True
+
+
+def dispatch_authorized(client, payload, timeout_seconds, grant=None):
+    """One Responses call for a release that was already spent. No retry."""
+    if type(grant) is not DispatchGrant or grant.consume() is not True:
+        raise ProviderError("egress_blocked")
+    require_authorized_payload(payload, timeout_seconds)
+    try:
+        response = client.responses.create(
+            model=payload["model"],
+            instructions=payload["instructions"],
+            input=payload["input"],
+            store=False,
+            service_tier="default",
+            max_output_tokens=payload["max_output_tokens"],
+            reasoning={"effort": "none"},
+            stream=False,
+            background=False,
+            text=payload["text"],
+            timeout=timeout_seconds,
+        )
+    except APITimeoutError:
+        raise ProviderError("timeout", {"http_status": None, "usage_present": False, "cost_exact": False}) from None
+    except APIStatusError as error:
+        code = error.status_code if type(error.status_code) is int else None
+        reason = "rate_limited" if code == 429 else "remote_unavailable"
+        raise ProviderError(reason, {"http_status": code, "usage_present": False, "cost_exact": False}) from None
+    except APIConnectionError:
+        raise ProviderError("network_unavailable", {"usage_present": False, "cost_exact": False}) from None
+    except ProviderError:
+        raise
+    except Exception:
+        raise ProviderError("remote_unavailable") from None
+    body = _normalize(response)
+    request_id = getattr(response, "id", None)
+    if type(request_id) is str and _REQUEST_ID.fullmatch(request_id):
+        body["provider_request_id"] = request_id
+    return body
 
 
 def _normalize(response):

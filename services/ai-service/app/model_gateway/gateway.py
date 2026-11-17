@@ -10,6 +10,7 @@ from app.enterprise_llm_providers.validation import check_observation
 from app.enterprise_ai_processing.durable_resolver import LedgerDurableAuthorization
 
 from .adapters import lab_adapters
+from .egress import arm_openai_adapter, bind_consent
 from .authorization import DurableAuthorizationResolver
 from .contracts import ExecutionContext, ExecutionGrant, ExecutionPolicy, GatewayResult, ModelRequest
 from .policy import REQUIRED, authorize, default_policy
@@ -32,14 +33,16 @@ class NeutralModelGateway:
         return "NeutralModelGateway(closed)"
 
     def execute(self, access, authorization_id, budget_microusd, resource_id, deployment_id,
-                supplied_url=None, operation_id=QUESTION_ID):
-        """Run one simulated call. The caller cannot supply the effective permission."""
+                supplied_url=None, operation_id=QUESTION_ID, egress_consent=None):
+        """Run one call. Without consent the adapter stays offline and send stays closed."""
         reject_caller_destination(supplied_url)
         if operation_id != QUESTION_ID:
             raise ProviderError("operation_denied")
         if type(self._resolver) is not LedgerDurableAuthorization:
             raise ProviderError("remote_not_authorized")
         deployment = self._registry.get(deployment_id)
+        if egress_consent is not None:
+            bind_consent(egress_consent, access, deployment, resource_id, budget_microusd)
         decision = self._resolver.resolve(
             access, authorization_id, deployment, resource_id, budget_microusd)
         if decision.allowed is not True or decision.reason != "accepted":
@@ -49,6 +52,11 @@ class NeutralModelGateway:
                 or decision.model_id != deployment.identity.model_id
                 or decision.organization_id != access.organization_id):
             raise ProviderError("remote_not_authorized")
+        if egress_consent is not None:
+            hold = self._resolver.confirm_hold(
+                access, authorization_id, deployment, resource_id, budget_microusd)
+            if hold != "accepted":
+                raise ProviderError(hold)
         context = ExecutionContext(
             access.organization_id, access.principal_id, resource_id, PURPOSE, CLASSIFICATION, budget_microusd)
         grant = ExecutionGrant(
@@ -58,7 +66,11 @@ class NeutralModelGateway:
             if deployment.deployment_id in self._spent or deployment.deployment_id in self._inflight:
                 raise ProviderError("replay_denied")
             authorize(context, grant, deployment)
-            adapter = self._adapters.get(deployment.deployment_id)
+            if egress_consent is None:
+                adapter = self._adapters.get(deployment.deployment_id)
+            else:
+                adapter = arm_openai_adapter(
+                    self._resolver.clock(), egress_consent, access, deployment, resource_id)
             if adapter is None:
                 raise ProviderError("model_unregistered")
             request = ModelRequest(
@@ -85,13 +97,19 @@ class NeutralModelGateway:
             raise ProviderError("consumption_ambiguous")
         check_observation(FIXED_DOCUMENT.encode("utf-8"), response.observation)
         self._resolver.consume(access, authorization_id)
+        cost_exact = response.cost_exact
+        cost_kind = None
+        if egress_consent is not None:
+            cost_exact = False
+            cost_kind = "estimated" if response.estimated_microusd is not None else "uncertain"
         return GatewayResult(
             True, "accepted", deployment.deployment_id, context.organization_id,
             response.usage.input_tokens, response.usage.output_tokens, reservation,
-            response.estimated_microusd, response.thoughts_tokens, response.cost_exact,
+            response.estimated_microusd, response.thoughts_tokens, cost_exact,
             response.thoughts_inferred, response.tool_inferred,
             response.prompt_inferred, response.visible_inferred,
-            response.included_output_tokens)
+            response.included_output_tokens, response.provider_request_id,
+            response.response_status, cost_kind)
 
     def public_state(self, result, organization_id):
         if type(result) is not GatewayResult or result.organization_id != organization_id:

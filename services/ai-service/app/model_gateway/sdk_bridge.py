@@ -132,6 +132,12 @@ class _SdkBridge:
                     for name in ("prompt_inferred", "visible_inferred", "thoughts_inferred", "tool_inferred")
                 }
                 priced = self._price(usage, reported)
+                request_id = body.get("provider_request_id")
+                response_status = body.get("status")
+                if type(request_id) is not str:
+                    request_id = None
+                if type(response_status) is not str:
+                    response_status = None
             finally:
                 del body
             return ModelResponse(
@@ -140,7 +146,7 @@ class _SdkBridge:
                 priced.thoughts_tokens, priced.exact,
                 inferred["thoughts_inferred"], inferred["tool_inferred"],
                 inferred["prompt_inferred"], inferred["visible_inferred"],
-                priced.included_output_tokens)
+                priced.included_output_tokens, request_id, response_status)
         finally:
             self._capture.release()
 

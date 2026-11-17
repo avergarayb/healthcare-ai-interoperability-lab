@@ -123,6 +123,13 @@ def test_no_application_clinical_or_old_connector_workflow_wiring():
         allowed = ()
         if relative.as_posix() == "model_gateway/gateway.py":
             allowed = ("app.enterprise_ai_processing.durable_resolver",)
+        if relative.as_posix() == "enterprise_llm_providers/egress_once.py":
+            allowed = (
+                "app.enterprise_ai_processing.durable_resolver",
+                "app.enterprise_ai_processing.sqlite_ledger",
+                "app.enterprise_ai_processing.execution_types",
+                "app.enterprise_ai_processing.remote_authorization",
+            )
         assert_no_wiring(ast.parse(path.read_text(encoding="utf-8")), allowed)
 
 
