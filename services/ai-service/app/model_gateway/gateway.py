@@ -29,6 +29,8 @@ class NeutralModelGateway:
         self._lock = threading.Lock()
         self._spent = set()
         self._inflight = set()
+        self._clinical_spent = set()
+        self._clinical_inflight = set()
 
     def __repr__(self):
         return "NeutralModelGateway(closed)"
@@ -121,8 +123,73 @@ class NeutralModelGateway:
             response.estimated_microusd, response.thoughts_tokens, cost_exact,
             response.thoughts_inferred, response.tool_inferred,
             response.prompt_inferred, response.visible_inferred,
-            response.included_output_tokens, response.provider_request_id,
+            response.included_output_tokens,             response.provider_request_id,
             response.response_status, cost_kind)
+
+    def execute_lab_summary(self, access, authorization_id, budget_microusd, resource_id,
+                            deployment_id, chart, consent, before_consume):
+        """One clinical summary. The vacation fixture and its consent cannot enter."""
+        from app.clinical_lab_summary.consent import OperationalClinicalConsent, bind_clinical_consent
+        from app.clinical_lab_summary.context import require_model_context
+        from app.clinical_lab_summary.model import ClinicalResult, arm_clinical_adapter, validate_summary
+        from app.clinical_lab_summary.policy import DEPLOYMENT_ID, OPERATION_ID as CLINICAL_OPERATION
+        from app.clinical_lab_summary.policy import POLICY_REF as CLINICAL_POLICY
+
+        if type(consent) is not OperationalClinicalConsent or not callable(before_consume):
+            raise ProviderError("egress_blocked")
+        if deployment_id != DEPLOYMENT_ID:
+            raise ProviderError("model_denied")
+        minimized = require_model_context(chart, resource_id)
+        deployment = self._registry.get(deployment_id)
+        bind_clinical_consent(
+            consent, access, deployment, resource_id, budget_microusd, authorization_id)
+        decision = self._resolver.resolve(
+            access, authorization_id, deployment, resource_id, budget_microusd,
+            operation_id=CLINICAL_OPERATION, policy_ref=CLINICAL_POLICY)
+        if decision.allowed is not True or decision.reason != "accepted":
+            raise ProviderError(decision.reason)
+        if (decision.deployment_id != deployment.deployment_id
+                or decision.provider_id != deployment.identity.provider_id
+                or decision.model_id != deployment.identity.model_id
+                or decision.organization_id != access.organization_id):
+            raise ProviderError("remote_not_authorized")
+        hold = self._resolver.confirm_hold(
+            access, authorization_id, deployment, resource_id, budget_microusd,
+            operation_id=CLINICAL_OPERATION, policy_ref=CLINICAL_POLICY)
+        if hold != "accepted":
+            raise ProviderError(hold)
+        adapter = arm_clinical_adapter(
+            self._resolver.clock(), consent, access, deployment, resource_id, authorization_id)
+        reservation = adapter.estimate(deployment)
+        if reservation != deployment.reservation_microusd or budget_microusd < reservation:
+            raise ProviderError("budget_exceeded")
+        with self._lock:
+            if authorization_id in self._clinical_spent or authorization_id in self._clinical_inflight:
+                raise ProviderError("replay_denied")
+            self._clinical_inflight.add(authorization_id)
+        try:
+            response = adapter.invoke_once(minimized)
+        except ProviderError as error:
+            with self._lock:
+                self._clinical_inflight.discard(authorization_id)
+                self._clinical_spent.add(authorization_id)
+            raise ProviderError(error.reason, getattr(error, "diagnostic", None)) from None
+        with self._lock:
+            self._clinical_inflight.discard(authorization_id)
+            self._clinical_spent.add(authorization_id)
+        summary = validate_summary(minimized, response.parsed)
+        try:
+            before_consume(summary)
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError("review_unavailable") from None
+        self._resolver.consume(access, authorization_id)
+        return ClinicalResult(
+            True, "accepted", deployment.deployment_id, access.organization_id,
+            response.input_tokens, response.output_tokens, reservation,
+            response.estimated_microusd, False, "estimated",
+            response.provider_request_id, response.response_status, summary)
 
     def public_state(self, result, organization_id):
         if type(result) is not GatewayResult or result.organization_id != organization_id:
