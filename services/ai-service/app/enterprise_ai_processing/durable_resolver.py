@@ -38,3 +38,9 @@ class LedgerDurableAuthorization(DurableAuthorizationResolver):
             deployment.identity.provider_id if allowed else None,
             deployment.identity.model_id if allowed else None,
             organization_id if allowed else None)
+
+    def consume(self, access, authorization_id):
+        try:
+            self._ledger.consume_remote_reservation(access, authorization_id)
+        except Exception:
+            raise ProviderError("storage_unavailable") from None

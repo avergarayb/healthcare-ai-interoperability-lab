@@ -338,4 +338,26 @@ Riesgo: crear una interfaz “apagada” que alguien active después. Por eso C1
 
 Cuando el Product Owner autorice implementación, el primer corte es **TASK-C04-D04-A1**. Es reversible por copia del archivo, no cambia el gateway y no abre egress.
 
-A1 está en `main`. A2 y la verificación de aislamiento de A3 están en `feature/enterprise-ai-processing-task-c04-d04-a2`. B y el transporte quedan para aprobaciones posteriores.
+A1, A2 y A3 están en `main` mediante los PR #131 y #132. D04-B y la nota C1 están en `feature/enterprise-ai-processing-task-c04-d04-b`. El transporte real sigue cerrado.
+
+### D04-B — Reserva de un solo uso
+
+`migrate_to_v5` es explícita. Exige el DDL de V4 con auditoría v2, copia todas las columnas de la auditoría y deja `schema_version` en 5. La migración 004 y el script de auditoría v2 no cambian. Abrir el almacén no migra. La tabla `aip_remote_execution_reservation` admite una fila por `authorization_id`, en estado `held` o `consumed`, con clave foránea al permiso. El índice parcial impide dos filas `held`. La clave única impide además una segunda fila después de `consumed`.
+
+La ruta operativa del gateway exige esa versión. Un V4 auditado, sin V5, responde `authority_unverifiable`. En una transacción `BEGIN IMMEDIATE` el ledger revalida vigencia, revocación, principal, recurso, presupuesto, organización y alcance; inserta `held`; escribe la auditoría y confirma el commit antes de construir el grant. La segunda solicitud de un permiso vigente recibe `replay_denied`. Si el permiso fue revocado o venció, la revalidación responde `revoked` o `authorization_expired` y no crea otra reserva. Un fallo antes del commit no deja fila. Un fallo del adaptador, o un fallo al marcar `consumed`, deja `held`.
+
+### Reconciliación
+
+No hay liberación automática ni reintento ciego. Si el proceso cae con una fila `held`, la siguiente ejecución sigue denegada y la auditoría del ALLOW confirmado permanece. El procedimiento de laboratorio es copiar el archivo SQLite, inspeccionar esa fila y su auditoría, y no borrarla desde la ruta operativa. Una liberación administrativa sería otra tarea. La fila local no demuestra que un proveedor externo haya ejecutado la llamada una sola vez.
+
+### D04-C1 — Punto previo al egress
+
+C1 no añade clases, interruptores ni conectividad. Un transporte futuro tendría que repetir la reserva vigente en la misma decisión que abriera `send`. Hoy ambos `send` lanzan `egress_blocked`, `live-once` sigue bloqueado y C03 sigue en `FakeEnterpriseModel`.
+
+SQLite garantiza, para este archivo y un proceso en Windows, la serialización de escritores, una sola reserva confirmada por permiso y la auditoría en la misma transacción. El bloqueo del archivo protege ese despliegue y no constituye una garantía entre réplicas distribuidas. No garantiza una llamada HTTP exactamente una vez, ni el orden entre la simulación local y un proveedor, ni la recuperación de un `held` incierto, ni un lease entre réplicas.
+
+Siguen pendientes el IAM de producción, la atribución distinta del administrador sintético y la autorización expresa para un proveedor real. Esa autorización exigiría un gate previo al egress, credenciales fuera del repositorio y una reconciliación que no reintente a ciegas una reserva `held`.
+
+### EGRESS-001 — Controlled Real OpenAI Execution
+
+El siguiente incremento planificado, todavía sin implementar, es una primera llamada HTTPS real desde `NeutralModelGateway` a OpenAI. Usaría datos sintéticos, credenciales fuera del repositorio, la reserva durable de D04-B y una autorización expresa del Product Owner. Esta nota no modifica `send`, no activa `live-once` y no realiza ninguna solicitud externa.

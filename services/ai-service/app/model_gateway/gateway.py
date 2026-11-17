@@ -84,6 +84,7 @@ class NeutralModelGateway:
                 or response.included_output_tokens > response.usage.output_tokens):
             raise ProviderError("consumption_ambiguous")
         check_observation(FIXED_DOCUMENT.encode("utf-8"), response.observation)
+        self._resolver.consume(access, authorization_id)
         return GatewayResult(
             True, "accepted", deployment.deployment_id, context.organization_id,
             response.usage.input_tokens, response.usage.output_tokens, reservation,

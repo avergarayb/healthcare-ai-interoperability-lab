@@ -20,17 +20,20 @@ def test_matching_principal_resource_and_budget_keep_the_catalog_reservation(tmp
     _register(lab)
     gateway = _gateway(lab)
     reservation = gateway._registry.get(DEPLOYMENT).reservation_microusd
-    floor = _run(gateway, lab, budget=reservation)
-    assert floor.accepted is True and floor.reserved_microusd == reservation
-    within = _gateway(lab)
-    covered = _run(within, lab, budget=BUDGET)
+    covered = _run(gateway, lab, budget=BUDGET)
     assert covered.accepted is True and covered.reserved_microusd == reservation
     assert covered.reserved_microusd != BUDGET
+    again = _gateway(lab)
+    with pytest.raises(ProviderError) as replay:
+        _run(again, lab, budget=reservation)
+    assert replay.value.reason == "replay_denied" and again._adapters[DEPLOYMENT].calls == 0
     with sqlite3.connect(lab.ledger.path) as connection:
         allow = connection.execute(
             "SELECT contract,reason FROM aip_remote_authorization_audit "
             "WHERE outcome='ALLOW' ORDER BY audit_seq DESC").fetchone()
-    assert allow == ("enterprise-remote-authorization-audit-v2", "accepted")
+        held = connection.execute(
+            "SELECT count(*) FROM aip_remote_execution_reservation").fetchone()[0]
+    assert allow == ("enterprise-remote-authorization-audit-v3", "accepted") and held == 1
     lab.close()
 
 
@@ -55,7 +58,7 @@ def test_principal_resource_and_budget_cannot_be_widened(tmp_path):
     with sqlite3.connect(lab.ledger.path) as connection:
         reasons = {row[0] for row in connection.execute(
             "SELECT reason FROM aip_remote_authorization_audit WHERE contract=?",
-            ("enterprise-remote-authorization-audit-v2",))}
+            ("enterprise-remote-authorization-audit-v3",))}
     assert "budget_exceeded" in reasons
     assert gateway._registry.get(DEPLOYMENT).reservation_microusd == 191
     lab.close()
