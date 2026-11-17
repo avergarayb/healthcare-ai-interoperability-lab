@@ -33,6 +33,8 @@ class NeutralModelGateway:
         self._clinical_inflight = set()
         self._external_spent = set()
         self._external_inflight = set()
+        self._jurisdiction_spent = set()
+        self._jurisdiction_inflight = set()
 
     def __repr__(self):
         return "NeutralModelGateway(closed)"
@@ -254,6 +256,73 @@ class NeutralModelGateway:
             raise ProviderError("review_unavailable") from None
         self._resolver.consume(access, authorization_id)
         return ExternalResult(
+            True, "accepted", deployment.deployment_id, access.organization_id,
+            response.input_tokens, response.output_tokens, reservation,
+            response.estimated_microusd, False, "estimated",
+            response.provider_request_id, response.response_status, summary)
+
+    def execute_jurisdiction_summary(self, access, authorization_id, budget_microusd, resource_id,
+                                     deployment_id, chart, consent, profile, before_consume):
+        """One jurisdiction summary. External, clinical, and vacation consents cannot enter."""
+        from app.jurisdiction_lab.consent import OperationalJurisdictionConsent, bind_jurisdiction_consent
+        from app.jurisdiction_lab.context import require_model_context, validate_summary
+        from app.jurisdiction_lab.model import JurisdictionResult, arm_jurisdiction_adapter
+        from app.jurisdiction_lab.policy import DEPLOYMENT_ID
+        from app.jurisdiction_lab.profile import OPERATION_ID as JURISDICTION_OPERATION
+
+        if type(consent) is not OperationalJurisdictionConsent or not callable(before_consume):
+            raise ProviderError("egress_blocked")
+        if deployment_id != DEPLOYMENT_ID or consent._policy_ref != profile.policy_ref:
+            raise ProviderError("model_denied")
+        minimized = require_model_context(chart, profile)
+        deployment = self._registry.get(deployment_id)
+        bind_jurisdiction_consent(
+            consent, access, deployment, resource_id, budget_microusd, authorization_id)
+        decision = self._resolver.resolve(
+            access, authorization_id, deployment, resource_id, budget_microusd,
+            operation_id=JURISDICTION_OPERATION, policy_ref=profile.policy_ref)
+        if decision.allowed is not True or decision.reason != "accepted":
+            raise ProviderError(decision.reason)
+        if (decision.deployment_id != deployment.deployment_id
+                or decision.provider_id != deployment.identity.provider_id
+                or decision.model_id != deployment.identity.model_id
+                or decision.organization_id != access.organization_id):
+            raise ProviderError("remote_not_authorized")
+        hold = self._resolver.confirm_hold(
+            access, authorization_id, deployment, resource_id, budget_microusd,
+            operation_id=JURISDICTION_OPERATION, policy_ref=profile.policy_ref)
+        if hold != "accepted":
+            raise ProviderError(hold)
+        adapter = arm_jurisdiction_adapter(
+            consent, access, deployment, resource_id, authorization_id, profile)
+        reservation = adapter.estimate(deployment)
+        if reservation != deployment.reservation_microusd or budget_microusd < reservation:
+            raise ProviderError("budget_exceeded")
+        with self._lock:
+            if authorization_id in self._jurisdiction_spent or authorization_id in self._jurisdiction_inflight:
+                raise ProviderError("replay_denied")
+            if authorization_id in self._external_spent or authorization_id in self._clinical_spent or authorization_id in self._spent:
+                raise ProviderError("replay_denied")
+            self._jurisdiction_inflight.add(authorization_id)
+        try:
+            response = adapter.invoke_once(minimized)
+        except ProviderError as error:
+            with self._lock:
+                self._jurisdiction_inflight.discard(authorization_id)
+                self._jurisdiction_spent.add(authorization_id)
+            raise ProviderError(error.reason, getattr(error, "diagnostic", None)) from None
+        with self._lock:
+            self._jurisdiction_inflight.discard(authorization_id)
+            self._jurisdiction_spent.add(authorization_id)
+        summary = validate_summary(minimized, response.parsed, profile)
+        try:
+            before_consume(summary)
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError("review_unavailable") from None
+        self._resolver.consume(access, authorization_id)
+        return JurisdictionResult(
             True, "accepted", deployment.deployment_id, access.organization_id,
             response.input_tokens, response.output_tokens, reservation,
             response.estimated_microusd, False, "estimated",

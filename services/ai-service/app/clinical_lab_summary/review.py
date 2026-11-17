@@ -184,6 +184,7 @@ def read_review(path, review_id):
         "status": row[3],
         "summary": summary,
         "sources": _sources(summary),
+        "clinical_evidence": _load_clinical_evidence(path, review_id),
         "summary_sha256": hashlib.sha256(row[4].encode("utf-8")).hexdigest(),
         "receipt": _receipt(path, row[1]),
         "decision": None if decision is None else {
@@ -447,6 +448,78 @@ def reviews_for_organization(path, organization_id):
     return {row[0] for row in rows}
 
 
+def record_clinical_evidence(path, review_id, chart, summary, profile):
+    """Store cited observations from the validated chart. The model text is not a source."""
+    known = {(fact["source"], fact["id"]): fact for fact in chart["facts"]}
+    rows = []
+    seen = set()
+    for statement in summary.get("statements") or []:
+        for source in statement.get("sources") or []:
+            fact = known.get((source.get("source"), source.get("id")))
+            if fact is None or fact["id"] in seen:
+                raise ProviderError("invalid_output")
+            seen.add(fact["id"])
+            rows.append(fact)
+    if seen != {item.resource_id for item in profile.observations}:
+        raise ProviderError("invalid_output")
+    database = Path(path)
+    try:
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS lab_summary_clinical_evidence (
+                    review_id TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    code TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    ucum_system TEXT NOT NULL,
+                    ucum_code TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    provenance_ref TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    profile_version TEXT NOT NULL,
+                    validation_class TEXT NOT NULL,
+                    PRIMARY KEY (review_id, source, resource_id)
+                )
+                """)
+            for fact in rows:
+                connection.execute(
+                    "INSERT INTO lab_summary_clinical_evidence ("
+                    "review_id, source, resource_id, code, value, ucum_system, ucum_code, status, "
+                    "provenance_ref, profile_id, profile_version, validation_class) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (review_id, fact["source"], fact["id"], fact["code"], fact["value"],
+                     fact["ucum_system"], fact["unit"], fact["status"], fact["provenance_ref"],
+                     profile.profile_id, profile.version, "internal-demo-rules"))
+            connection.commit()
+    except (OSError, sqlite3.Error, TypeError, ValueError, KeyError):
+        raise ProviderError("review_unavailable") from None
+
+
+def _load_clinical_evidence(path, review_id):
+    connection = _read_only(path)
+    try:
+        if not _table_exists(connection, "lab_summary_clinical_evidence"):
+            return []
+        rows = connection.execute(
+            "SELECT source, resource_id, code, value, ucum_system, ucum_code, status, "
+            "provenance_ref, profile_id, profile_version, validation_class "
+            "FROM lab_summary_clinical_evidence WHERE review_id=? ORDER BY resource_id",
+            (review_id,)).fetchall()
+    finally:
+        connection.close()
+    return [
+        {
+            "source": row[0], "resource_id": row[1], "code": row[2], "value": row[3],
+            "ucum_system": row[4], "ucum_code": row[5], "status": row[6],
+            "provenance_ref": row[7], "profile_id": row[8], "profile_version": row[9],
+            "validation_class": row[10],
+        }
+        for row in rows
+    ]
+
+
 def _sources(summary):
     found = []
     for statement in summary.get("statements") or []:
@@ -482,6 +555,11 @@ def _receipt(path, authorization_id):
             return None
     elif operation == "external-fhir-lab-summary-v1":
         if authorization_id != "external-fhir-001" or receipt.get("phase") != "intercepted":
+            return None
+    elif operation == "jurisdiction-lab-summary-v1":
+        if authorization_id not in {"pe-lab-demo-001", "es-lab-demo-001"} or receipt.get("phase") != "intercepted":
+            return None
+        if receipt.get("validation_class") != "internal-demo-rules" or receipt.get("official_conformance") is not False:
             return None
     else:
         return None

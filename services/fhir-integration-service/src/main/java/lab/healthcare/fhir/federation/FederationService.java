@@ -61,6 +61,7 @@ public class FederationService {
     private final FederationSecurityAudit securityAudit;
     private final lab.healthcare.fhir.externalfhir.ExternalPatientLinkStore externalLinks;
     private final Set<String> explicitSources;
+    private final Map<String, JurisdictionBinding> jurisdictionIdentities;
 
     public FederationService(
             SourceRegistry registry,
@@ -81,6 +82,19 @@ public class FederationService {
             FederationSecurityAudit securityAudit,
             lab.healthcare.fhir.externalfhir.ExternalPatientLinkStore externalLinks,
             Set<String> explicitSources) {
+        this(registry, store, connectors, properties, json, securityAudit, externalLinks, explicitSources, Map.of());
+    }
+
+    public FederationService(
+            SourceRegistry registry,
+            ExchangeStore store,
+            List<ClinicalConnector> connectors,
+            FederationProperties properties,
+            ObjectMapper json,
+            FederationSecurityAudit securityAudit,
+            lab.healthcare.fhir.externalfhir.ExternalPatientLinkStore externalLinks,
+            Set<String> explicitSources,
+            Map<String, JurisdictionBinding> jurisdictionIdentities) {
         this.registry = registry;
         this.store = store;
         this.connectors = new LinkedHashMap<>();
@@ -92,6 +106,7 @@ public class FederationService {
         this.securityAudit = securityAudit;
         this.externalLinks = externalLinks;
         this.explicitSources = explicitSources == null ? Set.of() : Set.copyOf(explicitSources);
+        this.jurisdictionIdentities = jurisdictionIdentities == null ? Map.of() : Map.copyOf(jurisdictionIdentities);
     }
 
     public JsonNode query(String callerSystem, JsonNode request) {
@@ -298,6 +313,14 @@ public class FederationService {
         if (sourceKey.equals(requested.patientSystemKey())) {
             return connector.resolvePatient(requested.identifierSystem(), requested.identifierValue());
         }
+        JurisdictionBinding binding = jurisdictionIdentities.get(sourceKey);
+        if (binding != null) {
+            if (binding.identifierSystem().equals(requested.identifierSystem())
+                    && binding.identifierValue().equals(requested.identifierValue())) {
+                return binding.logicalId();
+            }
+            return null;
+        }
         if (externalLinks != null && externalLinks.owns(sourceKey)) {
             return externalLinks.find(
                     requested.patientSystemKey(),
@@ -394,10 +417,17 @@ public class FederationService {
                 throw FederationException.invalidRequest();
             }
         }
+        int jurisdictions = 0;
         for (String source : unique) {
             if (!granted.contains(source)) {
                 throw FederationException.forbidden("source_not_authorized");
             }
+            if (jurisdictionIdentities.containsKey(source)) {
+                jurisdictions++;
+            }
+        }
+        if (jurisdictions > 1) {
+            throw FederationException.forbidden("cross_border_denied");
         }
         return List.copyOf(unique);
     }
