@@ -12,6 +12,15 @@ SCOPES = {
     ("gemini-sdk-a", "gemini", "gemini-3.5-flash-lite"),
     ("gemini-offline-a", "gemini", "gemini-3.5-flash-lite"),
 }
+# Closed catalog reservations, in integer micro-USD. A stored ceiling below
+# the reservation cannot be active. The maximum matches the laboratory cap.
+RESERVATION_MICROUSD = {
+    "openai-offline-a": 191,
+    "gemini-offline-a": 470,
+    "openai-sdk-a": 303,
+    "gemini-sdk-a": 657,
+}
+BUDGET_CEILING_MAX_MICROUSD = 5_000_000
 REVOCATION_REASONS = frozenset({"operator_revoked", "scope_withdrawn"})
 DECISION_REASONS = frozenset({
     "accepted", "not_granted", "scope_mismatch", "not_yet_effective", "authorization_expired",
@@ -33,6 +42,9 @@ class RemoteAuthorization:
     capability: str = CAPABILITY
     policy_ref: str = POLICY_REF
     policy_version: int = 1
+    principal_id: str | None = None
+    resource_id: str | None = None
+    budget_ceiling_microusd: int | None = None
 
     def __repr__(self):
         return "RemoteAuthorization(closed)"

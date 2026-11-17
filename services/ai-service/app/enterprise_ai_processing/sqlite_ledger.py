@@ -13,7 +13,8 @@ from uuid import uuid4
 from .execution_types import EVENTS, REASONS, TERMINAL, ExecutionError, LaboratoryAccess, identifier, instant, require, utc, uuid
 from .models import AIProcessingGrant, AIProcessingPolicy, PROFILE_ID, ModelProcessingProfile, ProcessingLimits, QUESTION
 from .remote_authorization import (
-    CAPABILITY, DECISION_REASONS, OPERATION_ID, POLICY_REF, REVOCATION_REASONS, SCOPES,
+    BUDGET_CEILING_MAX_MICROUSD, CAPABILITY, DECISION_REASONS, OPERATION_ID, POLICY_REF,
+    RESERVATION_MICROUSD, REVOCATION_REASONS, SCOPES,
     RemoteAuthorization, RemoteAuthorizationDecision, classify,
 )
 from ..enterprise_connectors.models import ConnectorOperation
@@ -22,9 +23,11 @@ from ..enterprise_connectors.models import ConnectorOperation
 MIGRATION = Path(__file__).parent / "migrations/001_processing_ledger.sql"
 MIGRATION_V2 = Path(__file__).parent / "migrations/002_processing_ledger.sql"
 MIGRATION_V3 = Path(__file__).parent / "migrations/003_remote_execution_permit.sql"
+MIGRATION_V4 = Path(__file__).parent / "migrations/004_remote_authorization_binding.sql"
 CONTRACT = "enterprise-ai-processing-ledger-v1"
 CONTRACT_V2 = "enterprise-ai-processing-ledger-v2"
 CONTRACT_V3 = "enterprise-ai-processing-ledger-v3"
+CONTRACT_V4 = "enterprise-ai-processing-ledger-v4"
 AUDIT = "enterprise-ai-processing-audit-v1"
 REMOTE_AUDIT = "enterprise-remote-authorization-audit-v1"
 DERIVED_KIND = "grounded_extractive_answer"
@@ -114,9 +117,11 @@ class SQLiteExecutionLedger:
         self._sql = MIGRATION.read_text(encoding="utf-8").replace("\r\n", "\n")
         self._sql_v2 = MIGRATION_V2.read_text(encoding="utf-8").replace("\r\n", "\n")
         self._sql_v3 = MIGRATION_V3.read_text(encoding="utf-8").replace("\r\n", "\n")
+        self._sql_v4 = MIGRATION_V4.read_text(encoding="utf-8").replace("\r\n", "\n")
         self._checksum = sha256(self._sql.encode("utf-8")).hexdigest()
         self._checksum_v2 = sha256(self._sql_v2.encode("utf-8")).hexdigest()
         self._checksum_v3 = sha256(self._sql_v3.encode("utf-8")).hexdigest()
+        self._checksum_v4 = sha256(self._sql_v4.encode("utf-8")).hexdigest()
         # Schema oracles only, not storage/fallback. No runtime state lives here.
         with closing(sqlite3.connect(":memory:")) as oracle:
             oracle.executescript(self._sql)
@@ -127,6 +132,8 @@ class SQLiteExecutionLedger:
             self._ddl_v2 = schema_ddl(oracle)
             self._apply_v3(oracle)
             self._ddl_v3 = schema_ddl(oracle)
+            self._apply_v4(oracle)
+            self._ddl_v4 = schema_ddl(oracle)
         self._acquire_owner()
 
     def _safe(self, path, *, exists=False):
@@ -197,6 +204,9 @@ class SQLiteExecutionLedger:
     def _apply_v3(self, connection):
         self._apply_version(connection, self._sql_v3, (self._checksum_v3, self._checksum_v2))
 
+    def _apply_v4(self, connection):
+        self._apply_version(connection, self._sql_v4, (self._checksum_v4, self._checksum_v3))
+
     def _validate(self, connection):
         ddl = schema_ddl(connection)
         if ddl == self._ddl:
@@ -207,6 +217,9 @@ class SQLiteExecutionLedger:
             return
         if ddl == self._ddl_v3:
             self._validate_v3(connection)
+            return
+        if ddl == self._ddl_v4:
+            self._validate_v4(connection)
             return
         require(False, unavailable=True)
 
@@ -291,6 +304,31 @@ class SQLiteExecutionLedger:
             "SELECT count(*) FROM aip_remote_execution_permit WHERE "
             "(status='active' AND (revoked_at_us IS NOT NULL OR revocation_reason IS NOT NULL)) OR "
             "(status='revoked' AND (revoked_at_us IS NULL OR revocation_reason IS NULL))").fetchone()[0]
+        require(broken == 0, unavailable=True)
+
+    def _validate_v4(self, connection):
+        require(connection.execute("PRAGMA quick_check(1)").fetchone()[0] == "ok", unavailable=True)
+        require(connection.execute("PRAGMA foreign_key_check").fetchone() is None, unavailable=True)
+        meta = connection.execute(
+            "SELECT schema_version,contract,migration_checksum,v1_checksum,v2_checksum,v3_checksum,next_remote_seq "
+            "FROM aip_store WHERE singleton=1").fetchone()
+        require(meta is not None and meta["schema_version"] == 4 and meta["contract"] == CONTRACT_V4, unavailable=True)
+        require(meta["migration_checksum"] == self._checksum_v4 and meta["v1_checksum"] == self._checksum, unavailable=True)
+        require(meta["v2_checksum"] == self._checksum_v2 and meta["v3_checksum"] == self._checksum_v3, unavailable=True)
+        count, maximum = connection.execute("SELECT count(*),coalesce(max(audit_seq),0) FROM aip_audit").fetchone()
+        require(count == maximum, unavailable=True)
+        count, maximum = connection.execute(
+            "SELECT count(*),coalesce(max(audit_seq),0) FROM aip_remote_authorization_audit").fetchone()
+        require(count == maximum and meta["next_remote_seq"] == maximum + 1, unavailable=True)
+        for table in ("aip_profile", "aip_grant", "aip_derived_delivery_grant", "aip_remote_execution_permit"):
+            require(connection.execute("SELECT count(*) FROM " + table).fetchone()[0] <= 32, unavailable=True)
+        broken = connection.execute(
+            "SELECT count(*) FROM aip_remote_execution_permit WHERE principal_id IS NULL OR resource_id IS NULL "
+            "OR typeof(budget_ceiling_microusd) != 'integer' OR budget_ceiling_microusd < 1 "
+            "OR budget_ceiling_microusd > ? OR "
+            "(status='active' AND (revoked_at_us IS NOT NULL OR revocation_reason IS NOT NULL)) OR "
+            "(status='revoked' AND (revoked_at_us IS NULL OR revocation_reason IS NULL))",
+            (BUDGET_CEILING_MAX_MICROUSD,)).fetchone()[0]
         require(broken == 0, unavailable=True)
 
     @contextmanager
@@ -717,6 +755,51 @@ class SQLiteExecutionLedger:
                 if connection is not None:
                     connection.close()
 
+    def migrate_to_v4(self, access):
+        """Explicit V3 to V4. Opening a store never calls this. Existing permit rows block it."""
+        with self.barrier:
+            self._actor(access, {"administrator"})
+            self._owned()
+            require(not self._live, "lease_invalid")
+            require(self.path.exists(), unavailable=True)
+            connection = None
+            try:
+                self._safe(self.path, exists=True)
+                connection = sqlite3.connect(self.path.as_uri() + "?mode=rw", uri=True, timeout=0.1)
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute("PRAGMA trusted_schema=OFF")
+                connection.execute("PRAGMA busy_timeout=100")
+                connection.execute("BEGIN IMMEDIATE")
+                ddl = schema_ddl(connection)
+                if ddl == self._ddl_v4:
+                    raise ExecutionError("revision_conflict", unavailable=False)
+                require(ddl == self._ddl_v3, unavailable=True)
+                self._validate_v3(connection)
+                busy = connection.execute(
+                    "SELECT count(*) FROM aip_execution WHERE reservation_state IN ('HELD','UNCERTAIN') "
+                    "OR run_state IN ('INTENT','CONSUMED','ENTERED')").fetchone()[0]
+                require(busy == 0, "lease_invalid")
+                permits = connection.execute("SELECT count(*) FROM aip_remote_execution_permit").fetchone()[0]
+                require(permits == 0, "revision_conflict")
+                self._apply_v4(connection)
+                self._validate_v4(connection)
+                require(schema_ddl(connection) == self._ddl_v4, unavailable=True)
+                self._fault("migrate_v4_before_commit")
+                connection.commit()
+                self._fault("migrate_v4_after_commit")
+            except ExecutionError:
+                if connection is not None:
+                    connection.rollback()
+                raise
+            except (sqlite3.Error, OSError, ValueError, TypeError):
+                if connection is not None:
+                    connection.rollback()
+                raise ExecutionError() from None
+            finally:
+                if connection is not None:
+                    connection.close()
+
     def register_remote_authorization(self, access, record):
         """Internal administrator write. There is no HTTP route and no implicit grant."""
         with self.barrier:
@@ -725,16 +808,11 @@ class SQLiteExecutionLedger:
             start, end = instant(record.valid_from), instant(record.expires_at)
             require(start < end, "invalid_input")
             with self._transaction("remote_register") as c:
-                self._require_v3(c)
+                version = self._require_remote(c)
                 require(c.execute(
                     "SELECT 1 FROM aip_remote_execution_permit WHERE authorization_id=?",
                     (record.authorization_id,)).fetchone() is None, "revision_conflict")
-                require(c.execute(
-                    "SELECT 1 FROM aip_remote_execution_permit WHERE organization_id=? AND deployment_id=? "
-                    "AND provider_id=? AND model_id=? AND operation_id=? AND status='active'",
-                    (record.organization_id, record.deployment_id, record.provider_id, record.model_id,
-                     record.operation_id)).fetchone() is None, "revision_conflict")
-                self._insert(c, "aip_remote_execution_permit", {
+                row = {
                     "authorization_id": record.authorization_id, "organization_id": record.organization_id,
                     "deployment_id": record.deployment_id, "provider_id": record.provider_id,
                     "model_id": record.model_id, "operation_id": record.operation_id,
@@ -743,7 +821,29 @@ class SQLiteExecutionLedger:
                     "valid_from_us": start, "expires_at_us": end, "registered_at_us": instant(self.clock()),
                     "registered_by": access.principal_id, "revoked_at_us": None, "revoked_by": None,
                     "revocation_reason": None,
-                })
+                }
+                if version == 3:
+                    require(record.principal_id is None and record.resource_id is None
+                            and record.budget_ceiling_microusd is None, "invalid_input")
+                    scope = (record.organization_id, record.deployment_id, record.provider_id,
+                             record.model_id, record.operation_id)
+                    require(c.execute(
+                        "SELECT 1 FROM aip_remote_execution_permit WHERE organization_id=? AND deployment_id=? "
+                        "AND provider_id=? AND model_id=? AND operation_id=? AND status='active'",
+                        scope).fetchone() is None, "revision_conflict")
+                else:
+                    self._check_binding(record)
+                    row["principal_id"] = record.principal_id
+                    row["resource_id"] = record.resource_id
+                    row["budget_ceiling_microusd"] = record.budget_ceiling_microusd
+                    require(c.execute(
+                        "SELECT 1 FROM aip_remote_execution_permit WHERE organization_id=? AND principal_id=? "
+                        "AND resource_id=? AND deployment_id=? AND provider_id=? AND model_id=? "
+                        "AND operation_id=? AND status='active'",
+                        (record.organization_id, record.principal_id, record.resource_id, record.deployment_id,
+                         record.provider_id, record.model_id, record.operation_id)).fetchone() is None,
+                        "revision_conflict")
+                self._insert(c, "aip_remote_execution_permit", row)
                 self._remote_audit(c, "remote_authorization_registered", "RECORDED", "accepted", access, record)
             return record.authorization_id
 
@@ -754,12 +854,12 @@ class SQLiteExecutionLedger:
             require(type(record) is RemoteAuthorization, "invalid_input")
             if record.organization_id != access.organization_id:
                 with self._transaction("remote_evaluate") as c:
-                    self._require_v3(c)
+                    self._require_remote(c)
                     self._remote_audit(c, "remote_authorization_denied", "DENY", "scope_mismatch", access, record)
                 return RemoteAuthorizationDecision(False, "scope_mismatch", None)
             self._check_record(access, record)
             with self._transaction("remote_evaluate") as c:
-                self._require_v3(c)
+                self._require_remote(c)
                 row = c.execute(
                     "SELECT * FROM aip_remote_execution_permit WHERE authorization_id=? AND organization_id=?",
                     (record.authorization_id, access.organization_id)).fetchone()
@@ -781,7 +881,7 @@ class SQLiteExecutionLedger:
             identifier(authorization_id)
             require(reason in REVOCATION_REASONS, "invalid_input")
             with self._transaction("remote_revoke") as c:
-                self._require_v3(c)
+                self._require_remote(c)
                 row = c.execute(
                     "SELECT * FROM aip_remote_execution_permit WHERE authorization_id=?",
                     (authorization_id,)).fetchone()
@@ -795,9 +895,18 @@ class SQLiteExecutionLedger:
                 self._remote_audit(c, "remote_authorization_revoked", "RECORDED", "revoked", access, row)
             return authorization_id
 
-    def _require_v3(self, connection):
+    def _require_remote(self, connection):
         version = connection.execute("SELECT schema_version FROM aip_store").fetchone()
-        require(version is not None and version[0] == 3, "authority_unverifiable")
+        require(version is not None and version[0] in (3, 4), "authority_unverifiable")
+        return version[0]
+
+    def _check_binding(self, record):
+        identifier(record.principal_id)
+        identifier(record.resource_id)
+        ceiling = record.budget_ceiling_microusd
+        minimum = RESERVATION_MICROUSD.get(record.deployment_id)
+        require(type(ceiling) is int and minimum is not None
+                and minimum <= ceiling <= BUDGET_CEILING_MAX_MICROUSD, "invalid_input")
 
     def _check_record(self, access, record):
         require(type(record) is RemoteAuthorization, "invalid_input")
