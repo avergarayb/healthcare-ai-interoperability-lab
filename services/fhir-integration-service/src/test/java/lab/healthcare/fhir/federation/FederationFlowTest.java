@@ -115,7 +115,7 @@ class FederationFlowTest {
         String lisOrderId = accepted.path("destination").path("orderId").asText();
         assertThat(lisOrderId).isNotBlank();
         post(lisUrl + "/orders/" + lisOrderId + "/results", LIS_TOKEN, """
-                {"externalResultId":"EXT-RES-FED","testCode":"GLU","value":"141","unit":"mmol/L","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
+                {"externalResultId":"EXT-RES-FED","testCode":"GLU","value":"141","unit":"mg/dL","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
                 """);
 
         JsonNode federated = post(base + "/api/clinical-federation/v1/context", HIS_FEDERATION_TOKEN, context(
@@ -141,8 +141,14 @@ class FederationFlowTest {
         assertThat(hisObservation.path("fullUrl").asText()).startsWith(hisUrl + "/Observation/");
         assertThat(lisObservation.path("fullUrl").asText()).startsWith(lisUrl + "/Observation/");
         assertThat(lisObservation.path("resource").path("subject").path("reference").asText()).startsWith(lisUrl + "/Patient/");
-        assertThat(lisObservation.path("resource").path("valueQuantity").path("unit").asText()).isEqualTo("mmol/L");
-        assertThat(lisObservation.path("resource").path("valueQuantity").has("system")).isFalse();
+        assertThat(lisObservation.path("resource").path("valueQuantity").path("unit").asText()).isEqualTo("mg/dL");
+        assertThat(lisObservation.path("resource").path("valueQuantity").path("system").asText())
+                .isEqualTo("http://unitsofmeasure.org");
+        assertThat(lisObservation.path("resource").path("valueQuantity").path("code").asText()).isEqualTo("mg/dL");
+        assertThat(lisObservation.path("resource").path("referenceRange").get(0).path("low").path("value").decimalValue())
+                .isEqualByComparingTo("70");
+        assertThat(lisObservation.path("resource").path("referenceRange").get(0).path("high").path("code").asText())
+                .isEqualTo("mg/dL");
         assertThat(lisObservation.path("resource").path("code").toString()).doesNotContain("loinc");
         assertThat(hisObservation.path("resource").path("valueQuantity").path("unit").asText()).isEqualTo("g/dL");
         parseAll(federated);

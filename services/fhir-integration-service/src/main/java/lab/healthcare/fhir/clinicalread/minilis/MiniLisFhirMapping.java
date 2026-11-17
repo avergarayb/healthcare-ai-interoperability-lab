@@ -6,7 +6,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Read-side FHIR mapping for a Mini LIS order and its results. The code system
- * stays the Mini LIS test system. This class does not invent LOINC or UCUM.
+ * stays the Mini LIS test system. Quantity units use mini-lis-ucum-v1.
+ * This class does not invent LOINC and does not convert numbers.
  */
 public final class MiniLisFhirMapping {
 

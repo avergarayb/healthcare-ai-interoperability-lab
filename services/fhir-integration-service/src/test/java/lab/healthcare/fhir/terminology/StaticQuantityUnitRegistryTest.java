@@ -30,5 +30,22 @@ class StaticQuantityUnitRegistryTest {
         assertThat(registry.find(StaticQuantityUnitRegistry.MINI_HIS, "MMHG")).isEmpty();
         assertThat(registry.find("epic-sandbox", "mmHg")).isEmpty();
         assertThat(registry.find(StaticQuantityUnitRegistry.MINI_HIS, " ")).isEmpty();
+        assertThat(registry.find(StaticQuantityUnitRegistry.MINI_LIS, "g/dL")).isEmpty();
+    }
+
+    @Test
+    void codesTheMiniLisSeedUnitsWithoutConvertingThem() {
+        QuantityUnitRegistry lis = StaticQuantityUnitRegistry.miniLis();
+        QuantityUnitMapping hemoglobin = lis.find(StaticQuantityUnitRegistry.MINI_LIS, "g/dL").orElseThrow();
+        QuantityUnitMapping glucose = lis.find(StaticQuantityUnitRegistry.MINI_LIS, "mg/dL").orElseThrow();
+
+        assertThat(hemoglobin.code()).isEqualTo("g/dL");
+        assertThat(glucose.unitText()).isEqualTo("mg/dL");
+        assertThat(glucose.code()).isEqualTo("mg/dL");
+        assertThat(glucose.system()).isEqualTo(StaticQuantityUnitRegistry.UCUM_SYSTEM);
+        assertThat(glucose.mapSetVersion()).isEqualTo(StaticQuantityUnitRegistry.MINI_LIS_MAP_SET_VERSION);
+        assertThat(lis.mapSetVersion()).isEqualTo("mini-lis-ucum-v1");
+        assertThat(lis.find(StaticQuantityUnitRegistry.MINI_LIS, "mmol/L")).isEmpty();
+        assertThat(lis.find(StaticQuantityUnitRegistry.MINI_HIS, "mg/dL")).isEmpty();
     }
 }

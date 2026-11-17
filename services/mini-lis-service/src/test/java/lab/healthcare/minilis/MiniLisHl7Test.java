@@ -140,15 +140,15 @@ class MiniLisHl7Test {
                             .header("X-Service-Token", TOKEN)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"externalResultId":"EXT-RES-HL7","testCode":"GLU","value":"141","unit":"mmol/L","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
+                                    {"externalResultId":"EXT-RES-HL7","testCode":"GLU","value":"141","unit":"mg/dL","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
                                     """))
                     .andExpect(status().isCreated());
             listener.join(5000);
         }
-        assertThat(captured.get()).contains("ORU^R01").contains("141").contains("mmol/L").doesNotContain("loinc").doesNotContain("ucum");
+        assertThat(captured.get()).contains("ORU^R01").contains("141").contains("mg/dL").doesNotContain("loinc").doesNotContain("ucum");
         Hl7Messages.ParsedMessage parsed = messages.parse(captured.get());
         assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT_RESULT/ORDER_OBSERVATION/OBSERVATION/OBX-5")).isEqualTo("141");
-        assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT_RESULT/ORDER_OBSERVATION/OBSERVATION/OBX-6-1")).isEqualTo("mmol/L");
+        assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT_RESULT/ORDER_OBSERVATION/OBSERVATION/OBX-6-1")).isEqualTo("mg/dL");
         assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT_RESULT/ORDER_OBSERVATION/OBSERVATION/OBX-6-3")).isEmpty();
         assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT_RESULT/ORDER_OBSERVATION/ORC-3-1")).isEqualTo(orderId);
         assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT_RESULT/ORDER_OBSERVATION/ORC-5")).isEqualTo("IP");
@@ -176,7 +176,7 @@ class MiniLisHl7Test {
                         .header("X-Service-Token", TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"externalResultId":"EXT-RES-RETRY","testCode":"GLU","value":"141","unit":"mmol/L","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
+                                {"externalResultId":"EXT-RES-RETRY","testCode":"GLU","value":"141","unit":"mg/dL","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
                                 """))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();

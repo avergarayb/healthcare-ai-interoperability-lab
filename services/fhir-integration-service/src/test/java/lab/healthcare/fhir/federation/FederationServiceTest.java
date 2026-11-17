@@ -43,11 +43,11 @@ class FederationServiceTest {
         store.link("mini-his", "https://lab.local/mini-his/patient", "MHS-PAT-001", "mini-lis", "LIS-PAT-1");
         Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
         his.resources.put("Observation", List.of(
-                observation("mini-his", "MHS-RES-1", "GLU", "141", "mmol/L"),
-                observation("mini-his", "MHS-RES-1", "GLU", "141", "mmol/L")));
+                observation("mini-his", "MHS-RES-1", "GLU", "141", "mg/dL"),
+                observation("mini-his", "MHS-RES-1", "GLU", "141", "mg/dL")));
         Fake lis = new Fake("mini-lis");
         lis.resources.put("Patient", List.of(patient("mini-lis", "LIS-PAT-1")));
-        lis.resources.put("Observation", List.of(observation("mini-lis", "LIS-RES-1", "GLU", "141", "mmol/L")));
+        lis.resources.put("Observation", List.of(observation("mini-lis", "LIS-RES-1", "GLU", "141", "mg/dL")));
         FederationService service = service(store, List.of(his, lis), 20);
 
         JsonNode body = service.query("mini-his", request(List.of("mini-his", "mini-lis"), List.of("Patient", "Observation")));
@@ -63,7 +63,7 @@ class FederationServiceTest {
         assertThat(hisObservation.path("fullUrl").asText()).isEqualTo("http://mini-his.test/Observation/MHS-RES-1");
         assertThat(hisObservation.path("resource").path("subject").path("reference").asText())
                 .isEqualTo("http://mini-his.test/Patient/MHS-PAT-001");
-        assertThat(hisObservation.path("resource").path("valueQuantity").path("unit").asText()).isEqualTo("mmol/L");
+        assertThat(hisObservation.path("resource").path("valueQuantity").path("unit").asText()).isEqualTo("mg/dL");
         assertThat(lis.resolveCalls).isZero();
     }
 
@@ -205,10 +205,10 @@ class FederationServiceTest {
         LinkStore store = new LinkStore();
         store.link("mini-his", "https://lab.local/mini-his/patient", "MHS-PAT-001", "mini-lis", "SHARED");
         Fake his = patientSource("mini-his", "https://lab.local/mini-his", "MHS-PAT-001");
-        his.resources.put("Observation", List.of(observation("mini-his", "SHARED", "GLU", "141", "mmol/L")));
+        his.resources.put("Observation", List.of(observation("mini-his", "SHARED", "GLU", "141", "mg/dL")));
         Fake lis = new Fake("mini-lis");
         lis.resources.put("Patient", List.of(patient("mini-lis", "SHARED")));
-        lis.resources.put("Observation", List.of(observation("mini-lis", "SHARED", "GLU", "141", "mmol/L")));
+        lis.resources.put("Observation", List.of(observation("mini-lis", "SHARED", "GLU", "141", "mg/dL")));
         FederationService service = service(store, List.of(his, lis), 20);
 
         JsonNode body = service.query("mini-his", request(List.of("mini-his", "mini-lis"), List.of("Patient", "Observation")));

@@ -279,7 +279,7 @@ def _result_body(external_result_id: str, marker: str) -> dict:
         "externalResultId": external_result_id,
         "testCode": "GLU",
         "value": "141" if marker == "FINAL" else "140",
-        "unit": "mmol/L",
+        "unit": "mg/dL",
         "referenceRange": "70-110",
         "resultedAt": "2026-03-01T12:00:00Z",
         "status": "FINAL",

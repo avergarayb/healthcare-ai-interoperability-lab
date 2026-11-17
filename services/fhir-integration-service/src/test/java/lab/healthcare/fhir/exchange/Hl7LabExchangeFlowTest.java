@@ -135,7 +135,7 @@ class Hl7LabExchangeFlowTest {
         assertThat(before.path("observations")).isEmpty();
 
         send("POST", lisUrl + "/orders/" + lisOrderId + "/results", """
-                {"externalResultId":"EXT-RES-HL7-FLOW","testCode":"GLU","value":"141","unit":"mmol/L","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
+                {"externalResultId":"EXT-RES-HL7-FLOW","testCode":"GLU","value":"141","unit":"mg/dL","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
                 """, LIS_TOKEN);
         JsonNode restResult = send("GET", lisUrl + "/orders/" + lisOrderId + "/results", null, LIS_TOKEN);
         JsonNode hl7Result = send("GET", hisBase + "/lab-orders/" + orderId + "/results", null, null);
@@ -144,8 +144,10 @@ class Hl7LabExchangeFlowTest {
                 .isEqualTo("141");
         assertThat(hl7Result.path("observations").get(0).path("valueQuantity").path("unit").asText())
                 .isEqualTo(restResult.get(0).path("unit").asText())
-                .isEqualTo("mmol/L");
-        assertThat(hl7Result.path("observations").get(0).path("valueQuantity").has("system")).isFalse();
+                .isEqualTo("mg/dL");
+        assertThat(hl7Result.path("observations").get(0).path("valueQuantity").path("system").asText())
+                .isEqualTo("http://unitsofmeasure.org");
+        assertThat(hl7Result.path("observations").get(0).path("valueQuantity").path("code").asText()).isEqualTo("mg/dL");
         assertThat(hl7Result.path("observations").get(0).path("basedOn").get(0).path("reference").asText())
                 .isEqualTo("ServiceRequest/" + lisOrderId);
         assertThat(hl7Result.toString()).doesNotContain("loinc").doesNotContain("ucum");
@@ -190,7 +192,7 @@ class Hl7LabExchangeFlowTest {
         JsonNode submitted = send("POST", hisBase + "/lab-orders/" + orderId + "/submission", null, null);
         String lisOrderId = submitted.path("destination").path("orderId").asText();
         JsonNode recorded = send("POST", lisUrl + "/orders/" + lisOrderId + "/results", """
-                {"externalResultId":"EXT-RES-HL7-RETRY","testCode":"GLU","value":"141","unit":"mmol/L","referenceRange":"70-110","resultedAt":"2026-03-02T12:00:00Z","status":"FINAL"}
+                {"externalResultId":"EXT-RES-HL7-RETRY","testCode":"GLU","value":"141","unit":"mg/dL","referenceRange":"70-110","resultedAt":"2026-03-02T12:00:00Z","status":"FINAL"}
                 """, LIS_TOKEN);
         JsonNode stored = send("GET", lisUrl + "/orders/" + lisOrderId + "/results", null, LIS_TOKEN);
         assertThat(stored.get(0).path("status").asText()).isEqualTo("FINAL");

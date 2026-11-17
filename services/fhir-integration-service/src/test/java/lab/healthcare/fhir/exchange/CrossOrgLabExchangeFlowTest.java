@@ -131,14 +131,16 @@ class CrossOrgLabExchangeFlowTest {
         assertThat(beforeResults.toString()).doesNotContain("141");
 
         send("POST", lisUrl + "/orders/" + lisOrderId + "/results", """
-                {"externalResultId":"EXT-RES-FLOW","testCode":"GLU","value":"141","unit":"mmol/L","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
+                {"externalResultId":"EXT-RES-FLOW","testCode":"GLU","value":"141","unit":"mg/dL","referenceRange":"70-110","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
                 """, LIS_TOKEN);
         JsonNode results = send("GET", hisBase + "/lab-orders/" + orderId + "/results", null, null);
         assertThat(results.path("correlationId").asText()).isEqualTo(correlationId);
         assertThat(results.path("destination").path("orderId").asText()).isEqualTo(lisOrderId);
         assertThat(results.path("observations").get(0).path("valueQuantity").path("value").asText()).isEqualTo("141");
-        assertThat(results.path("observations").get(0).path("valueQuantity").path("unit").asText()).isEqualTo("mmol/L");
-        assertThat(results.path("observations").get(0).path("valueQuantity").has("system")).isFalse();
+        assertThat(results.path("observations").get(0).path("valueQuantity").path("unit").asText()).isEqualTo("mg/dL");
+        assertThat(results.path("observations").get(0).path("valueQuantity").path("system").asText())
+                .isEqualTo("http://unitsofmeasure.org");
+        assertThat(results.path("observations").get(0).path("valueQuantity").path("code").asText()).isEqualTo("mg/dL");
         assertThat(results.path("observations").get(0).path("basedOn").get(0).path("reference").asText())
                 .isEqualTo("ServiceRequest/" + lisOrderId);
         assertThat(results.toString()).doesNotContain("loinc").doesNotContain("ucum");

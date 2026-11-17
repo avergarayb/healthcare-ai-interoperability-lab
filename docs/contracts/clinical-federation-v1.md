@@ -148,7 +148,7 @@ Two keys suppress a repeated resource:
 - `sourceKey` + resource type + logical id
 - resource type + `meta.source` + identifier system + identifier value, only when `meta.source` is present
 
-The same code and the same value from two sources remain two resources. Federation does not invent LOINC, SNOMED CT, or UCUM. A unit system that Mini HIS already maps, such as `g/dL`, stays as that connector produced it.
+The same code and the same value from two sources remain two resources. Federation does not invent LOINC, SNOMED CT, or UCUM. A unit system that a connector already mapped, such as Mini HIS `g/dL` or Mini LIS `mg/dL`, stays as that connector produced it.
 
 ## Limits
 
