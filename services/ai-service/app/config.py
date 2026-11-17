@@ -45,6 +45,7 @@ class Settings:
     oidc_workload_audit_db_path: str = ""
     oidc_workload_policy_mode: str = "static"
     oidc_workload_registry_db_path: str = ""
+    lab_summary_review_db_path: str = ""
 
     @property
     def model_boundary_url(self) -> str:
@@ -178,6 +179,7 @@ class Settings:
             oidc_workload_audit_db_path=os.getenv("OIDC_WORKLOAD_AUDIT_DB_PATH", ""),
             oidc_workload_policy_mode=os.getenv("OIDC_WORKLOAD_POLICY_MODE", "static"),
             oidc_workload_registry_db_path=os.getenv("OIDC_WORKLOAD_REGISTRY_DB_PATH", ""),
+            lab_summary_review_db_path=os.getenv("LAB_SUMMARY_REVIEW_DB", "").strip(),
         )
 
 
