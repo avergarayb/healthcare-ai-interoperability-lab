@@ -110,7 +110,7 @@ On `mini-his`, list calls append `limit=100`. `X-More-Results: true` marks the c
 ## Limitations
 
 - The default source is local HAPI, not Mini HIS and not Mini LIS. Selecting `mini-lis` replaces the single active source for that process. It does not federate Mini HIS and Mini LIS.
-- Mini LIS normalization is a read of one laboratory. It does not send orders back to Mini HIS and it does not write FHIR. Test codes stay in `https://lab.local/mini-lis/test`. The mapper does not invent LOINC or UCUM.
+- Mini LIS normalization is a read of one laboratory. It does not send orders back to Mini HIS and it does not write FHIR. Test codes stay in `https://lab.local/mini-lis/test`. The mapper does not invent LOINC. Quantity units use the explicit rows in [mini-lis-fhir-v1](mini-lis-fhir-v1.md). It does not convert numbers.
 - Python follow-up factories are unchanged. They keep calling the active source. LangGraph is unchanged.
 - Epic and Oracle are not Clinical Read destinations. Sandbox HTML and Model Boundary v1 stay on their own routes.
 - There is no write, no transaction, and no `$everything` on this API.

@@ -66,7 +66,7 @@ def _summary():
         "kind": "lab-result-summary-v1",
         "review": "pending_human_review",
         "statements": [{
-            "text": "Hemoglobina 13.4 g/dL en HIS y 7.1 mmol/L en LIS.",
+            "text": "Hemoglobina 13.4 g/dL en HIS y 7.1 mg/dL en LIS.",
             "sources": [
                 {"source": "mini-his", "resourceType": "Observation", "id": "MHS-OBS-001"},
                 {"source": "mini-lis", "resourceType": "Observation", "id": "MLS-OBS-001"},
@@ -83,7 +83,12 @@ def _observation(source, observation_id, value, unit):
             "id": observation_id,
             "status": "final",
             "code": {"coding": [{"system": "http://loinc.org", "code": "718-7"}]},
-            "valueQuantity": {"value": value, "unit": unit},
+            "valueQuantity": {
+                "value": value,
+                "unit": unit,
+                "system": "http://unitsofmeasure.org",
+                "code": unit,
+            },
         },
     }
 
@@ -102,7 +107,7 @@ def _envelope(status="complete", lis="complete"):
             {"sourceKey": "mini-his", "resource": {
                 "resourceType": "Patient", "id": PATIENT, "name": [{"family": "Quispe"}]}},
             _observation("mini-his", "MHS-OBS-001", 13.4, "g/dL"),
-            _observation("mini-lis", "MLS-OBS-001", 7.1, "mmol/L"),
+            _observation("mini-lis", "MLS-OBS-001", 7.1, "mg/dL"),
         ],
     }
 
@@ -351,7 +356,12 @@ def test_text_coded_laboratory_fact_is_kept_and_a_panel_is_omitted():
         "resource": {
             "resourceType": "Observation", "id": "MHS-RES-001", "status": "final",
             "code": {"text": "Hemoglobina"},
-            "valueQuantity": {"value": 13.4, "unit": "g/dL"},
+            "valueQuantity": {
+                "value": 13.4,
+                "unit": "g/dL",
+                "system": "http://unitsofmeasure.org",
+                "code": "g/dL",
+            },
         },
     })
     envelope["entries"].append({
@@ -366,6 +376,69 @@ def test_text_coded_laboratory_fact_is_kept_and_a_panel_is_omitted():
     assert {item["id"] for item in chart["facts"]} >= {"MHS-OBS-001", "MHS-RES-001", "MLS-OBS-001"}
     assert "MHS-RES-002" not in {item["id"] for item in chart["facts"]}
     assert "Quispe" not in json.dumps(chart)
+
+
+def test_an_uncoded_or_contradictory_unit_is_not_sent_to_the_model():
+    envelope = _envelope()
+    envelope["entries"] = [
+        entry for entry in envelope["entries"]
+        if entry["resource"].get("id") != "MLS-OBS-001"
+    ]
+    envelope["entries"].append({
+        "sourceKey": "mini-lis",
+        "resource": {
+            "resourceType": "Observation", "id": "MLS-GLU-OLD", "status": "final",
+            "code": {"coding": [{"system": "https://lab.local/mini-lis/test", "code": "GLU"}]},
+            "valueQuantity": {"value": 141, "unit": "mmol/L"},
+            "referenceRange": [{"text": "70-110"}],
+        },
+    })
+    with pytest.raises(ProviderError) as missing:
+        minimize_envelope(envelope, PATIENT)
+    assert missing.value.reason == "context_incomplete"
+
+    coded = {
+        "sourceKey": "mini-lis",
+        "resource": {
+            "resourceType": "Observation", "id": "MLS-GLU-NEW", "status": "final",
+            "code": {"coding": [{"system": "https://lab.local/mini-lis/test", "code": "GLU"}]},
+            "valueQuantity": {
+                "value": 141, "unit": "mg/dL",
+                "system": "http://unitsofmeasure.org", "code": "mg/dL",
+            },
+            "referenceRange": [{
+                "low": {"value": 70, "unit": "mg/dL", "system": "http://unitsofmeasure.org", "code": "mg/dL"},
+                "high": {"value": 110, "unit": "mmol/L", "system": "http://unitsofmeasure.org", "code": "mmol/L"},
+            }],
+        },
+    }
+    envelope["entries"].append(coded)
+    with pytest.raises(ProviderError) as contradictory:
+        minimize_envelope(envelope, PATIENT)
+    assert contradictory.value.reason == "context_incomplete"
+
+    coded["resource"]["referenceRange"] = [{
+        "low": {"value": 70, "unit": "mg/dL", "system": "http://unitsofmeasure.org", "code": "mg/dL"},
+        "high": {"value": 110, "unit": "mg/dL", "system": "http://unitsofmeasure.org", "code": "mg/dL"},
+    }]
+    chart = minimize_envelope(envelope, PATIENT)
+    lis = [item for item in chart["facts"] if item["source"] == "mini-lis"]
+    assert lis == [{
+        "source": "mini-lis",
+        "resourceType": "Observation",
+        "id": "MLS-GLU-NEW",
+        "status": "final",
+        "code": "GLU",
+        "value": "141",
+        "unit": "mg/dL",
+    }]
+    assert "mmol/L" not in json.dumps(chart)
+    assert "MLS-GLU-OLD" not in {item["id"] for item in chart["facts"]}
+    rest = [entry for entry in envelope["entries"] if entry["sourceKey"] != "mini-lis"]
+    lis_entries = [entry for entry in envelope["entries"] if entry["sourceKey"] == "mini-lis"]
+    envelope["entries"] = rest + list(reversed(lis_entries))
+    again = minimize_envelope(envelope, PATIENT)
+    assert again["facts"] == chart["facts"]
 
 
 def test_v6_rolls_back_and_keeps_the_v5_permit(tmp_path):

@@ -39,7 +39,7 @@ class MiniHisLabOrderTest {
             byte[] body;
             if (path.endsWith("/report")) {
                 body = """
-                        {"correlationId":"EXC-TEST","deliveryState":"accepted","observations":[{"resourceType":"Observation","valueQuantity":{"value":141,"unit":"mmol/L"}}]}
+                        {"correlationId":"EXC-TEST","deliveryState":"accepted","observations":[{"resourceType":"Observation","valueQuantity":{"value":141,"unit":"mg/dL"}}]}
                         """.getBytes(StandardCharsets.UTF_8);
             } else {
                 submittedBody.set(new String(http.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));

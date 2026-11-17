@@ -1,6 +1,9 @@
 package lab.healthcare.fhir.clinicalread.minilis;
 
 import lab.healthcare.fhir.clinicalread.ClinicalReadException;
+import lab.healthcare.fhir.terminology.QuantityUnitMapping;
+import lab.healthcare.fhir.terminology.QuantityUnitRegistry;
+import lab.healthcare.fhir.terminology.StaticQuantityUnitRegistry;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,7 +18,8 @@ import java.util.regex.Pattern;
 
 /**
  * Maps proprietary Mini LIS JSON to FHIR R4. Test codes stay in the Mini LIS
- * code system. This class does not invent LOINC or UCUM equivalences.
+ * code system. Quantity units use {@code mini-lis-ucum-v1}. This class does
+ * not invent LOINC and does not convert numbers.
  */
 final class MiniLisNormalizer {
 
@@ -27,7 +31,9 @@ final class MiniLisNormalizer {
     static final String ORGANIZATION_SYSTEM = "https://lab.local/mini-lis/organization";
     static final String CATEGORY_SYSTEM = "http://terminology.hl7.org/CodeSystem/observation-category";
     private static final Pattern DECIMAL = Pattern.compile("-?(?:0|[1-9]\\d*)(?:\\.\\d+)?");
+    private static final Pattern RANGE = Pattern.compile("([0-9]+(?:\\.[0-9]+)?)-([0-9]+(?:\\.[0-9]+)?)");
     private static final Pattern LOGICAL_ID = Pattern.compile("[A-Za-z0-9\\-.]{1,64}");
+    private static final QuantityUnitRegistry UNITS = StaticQuantityUnitRegistry.miniLis();
 
     private final ObjectMapper json;
 
@@ -98,7 +104,7 @@ final class MiniLisNormalizer {
         putValue(resource, requiredText(source, "value"), text(source, "unit"));
         String range = text(source, "referenceRange");
         if (range != null) {
-            resource.putArray("referenceRange").addObject().put("text", range);
+            putRange(resource, range);
         }
         return resource;
     }
@@ -136,10 +142,47 @@ final class MiniLisNormalizer {
         if (unit != null && DECIMAL.matcher(value).matches()) {
             ObjectNode quantity = resource.putObject("valueQuantity");
             quantity.put("value", new BigDecimal(value));
-            quantity.put("unit", unit);
+            applyUnit(quantity, unit);
             return;
         }
         resource.put("valueString", value);
+    }
+
+    private static void applyUnit(ObjectNode quantity, String unit) {
+        var mapped = UNITS.find(StaticQuantityUnitRegistry.MINI_LIS, unit);
+        if (mapped.isEmpty()) {
+            quantity.put("unit", unit);
+            return;
+        }
+        QuantityUnitMapping known = mapped.get();
+        quantity.put("unit", known.unitText());
+        quantity.put("system", known.system());
+        quantity.put("code", known.code());
+    }
+
+    private static void putRange(ObjectNode resource, String range) {
+        ObjectNode reference = resource.putArray("referenceRange").addObject();
+        ObjectNode quantity = resource.has("valueQuantity") ? (ObjectNode) resource.get("valueQuantity") : null;
+        var matcher = RANGE.matcher(range);
+        if (quantity != null && quantity.has("code") && matcher.matches()) {
+            BigDecimal low = new BigDecimal(matcher.group(1));
+            BigDecimal high = new BigDecimal(matcher.group(2));
+            if (low.compareTo(high) <= 0) {
+                copyBound(reference.putObject("low"), quantity, low);
+                copyBound(reference.putObject("high"), quantity, high);
+                return;
+            }
+            quantity.remove("system");
+            quantity.remove("code");
+        }
+        reference.put("text", range);
+    }
+
+    private static void copyBound(ObjectNode target, ObjectNode quantity, BigDecimal value) {
+        target.put("value", value);
+        target.put("unit", quantity.path("unit").asText());
+        target.put("system", quantity.path("system").asText());
+        target.put("code", quantity.path("code").asText());
     }
 
     private ObjectNode testCode(String code, String description) {

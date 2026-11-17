@@ -66,7 +66,7 @@ class Hl7ExchangeCodecTest {
                 OffsetDateTime.parse("2026-03-01T10:00:00Z"),
                 "EXT-RES-1",
                 "141",
-                "mmol/L",
+                "mg/dL",
                 "70-110",
                 "FINAL",
                 OffsetDateTime.parse("2026-03-01T12:00:00Z")));
@@ -80,7 +80,7 @@ class Hl7ExchangeCodecTest {
         fromRest.put("externalResultId", "EXT-RES-1");
         fromRest.put("testCode", "GLU");
         fromRest.put("value", "141");
-        fromRest.put("unit", "mmol/L");
+        fromRest.put("unit", "mg/dL");
         fromRest.put("referenceRange", "70-110");
         fromRest.put("resultedAt", "2026-03-01T12:00:00Z");
         fromRest.put("status", "FINAL");
@@ -88,8 +88,11 @@ class Hl7ExchangeCodecTest {
         JsonNode hl7Observation = mapping.observation(fromHl7);
         JsonNode restObservation = mapping.observation(fromRest);
         assertThat(hl7Observation.path("valueQuantity").path("value").asText()).isEqualTo("141");
-        assertThat(hl7Observation.path("valueQuantity").path("unit").asText()).isEqualTo("mmol/L");
-        assertThat(hl7Observation.path("valueQuantity").has("system")).isFalse();
+        assertThat(hl7Observation.path("valueQuantity").path("unit").asText()).isEqualTo("mg/dL");
+        assertThat(hl7Observation.path("valueQuantity").path("system").asText())
+                .isEqualTo(restObservation.path("valueQuantity").path("system").asText())
+                .isEqualTo("http://unitsofmeasure.org");
+        assertThat(hl7Observation.path("valueQuantity").path("code").asText()).isEqualTo("mg/dL");
         assertThat(hl7Observation.path("code").path("coding").get(0).path("code").asText())
                 .isEqualTo(restObservation.path("code").path("coding").get(0).path("code").asText());
         assertThat(hl7Observation.path("status").asText()).isEqualTo(restObservation.path("status").asText()).isEqualTo("final");
@@ -100,7 +103,9 @@ class Hl7ExchangeCodecTest {
                 .isEqualTo(restObservation.path("subject").path("reference").asText())
                 .isEqualTo("Patient/MLS-PAT-1");
         assertThat(hl7Observation.path("effectiveDateTime").asText()).isEqualTo(restObservation.path("effectiveDateTime").asText());
-        assertThat(hl7Observation.path("referenceRange").get(0).path("text").asText()).isEqualTo("70-110");
+        assertThat(hl7Observation.path("referenceRange").get(0).path("low").path("value").decimalValue())
+                .isEqualByComparingTo("70");
+        assertThat(hl7Observation.path("referenceRange").get(0).path("high").path("code").asText()).isEqualTo("mg/dL");
         assertThat(hl7Observation.path("identifier").get(0).path("value").asText())
                 .isEqualTo(restObservation.path("identifier").get(0).path("value").asText())
                 .isEqualTo("EXT-RES-1");

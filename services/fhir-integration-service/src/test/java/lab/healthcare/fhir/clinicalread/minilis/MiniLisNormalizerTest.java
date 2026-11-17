@@ -51,7 +51,14 @@ class MiniLisNormalizerTest {
         assertThat(order.toString()).doesNotContain("loinc");
         assertThat(observation.path("valueQuantity").path("value").decimalValue()).isEqualByComparingTo("13.5");
         assertThat(observation.path("valueQuantity").path("unit").asText()).isEqualTo("g/dL");
-        assertThat(observation.path("valueQuantity").has("system")).isFalse();
+        assertThat(observation.path("valueQuantity").path("system").asText()).isEqualTo("http://unitsofmeasure.org");
+        assertThat(observation.path("valueQuantity").path("code").asText()).isEqualTo("g/dL");
+        assertThat(observation.path("referenceRange").get(0).path("low").path("value").decimalValue())
+                .isEqualByComparingTo("12.0");
+        assertThat(observation.path("referenceRange").get(0).path("high").path("value").decimalValue())
+                .isEqualByComparingTo("16.0");
+        assertThat(observation.path("referenceRange").get(0).path("low").path("code").asText()).isEqualTo("g/dL");
+        assertThat(observation.path("referenceRange").get(0).has("text")).isFalse();
         assertThat(observation.path("basedOn").get(0).path("reference").asText()).isEqualTo("ServiceRequest/MLS-ORD-002");
         assertThat(observation.path("status").asText()).isEqualTo("final");
         assertThat(report.path("status").asText()).isEqualTo("final");
@@ -62,6 +69,34 @@ class MiniLisNormalizerTest {
         FHIR.newJsonParser().parseResource(ServiceRequest.class, order.toString());
         FHIR.newJsonParser().parseResource(Observation.class, observation.toString());
         FHIR.newJsonParser().parseResource(DiagnosticReport.class, report.toString());
+    }
+
+    @Test
+    void codesSeedGlucoseAndLeavesAnUnmappedUnitUncoded() throws Exception {
+        ObjectNode glucose = normalizer.observation(json.readTree("""
+                {"resultId":"MLS-RES-003","orderId":"MLS-ORD-003","patientId":"MLS-PAT-003","externalResultId":"EXT-RES-003","testCode":"GLU","value":"90","unit":"mg/dL","referenceRange":"70-99","resultedAt":"2026-02-03T12:00:00Z","status":"FINAL"}
+                """));
+        assertThat(glucose.path("valueQuantity").path("value").decimalValue()).isEqualByComparingTo("90");
+        assertThat(glucose.path("valueQuantity").path("unit").asText()).isEqualTo("mg/dL");
+        assertThat(glucose.path("valueQuantity").path("system").asText()).isEqualTo("http://unitsofmeasure.org");
+        assertThat(glucose.path("valueQuantity").path("code").asText()).isEqualTo("mg/dL");
+        assertThat(glucose.path("referenceRange").get(0).path("low").path("value").decimalValue()).isEqualByComparingTo("70");
+        assertThat(glucose.path("referenceRange").get(0).path("high").path("unit").asText()).isEqualTo("mg/dL");
+
+        ObjectNode uncoded = normalizer.observation(json.readTree("""
+                {"resultId":"MLS-RES-141","orderId":"MLS-ORD-141","patientId":"MLS-PAT-003","externalResultId":"EXT-RES-141","testCode":"GLU","value":"141","unit":"mmol/L","referenceRange":"70-110","resultedAt":"2026-02-03T12:00:00Z","status":"FINAL"}
+                """));
+        assertThat(uncoded.path("valueQuantity").path("value").decimalValue()).isEqualByComparingTo("141");
+        assertThat(uncoded.path("valueQuantity").path("unit").asText()).isEqualTo("mmol/L");
+        assertThat(uncoded.path("valueQuantity").has("system")).isFalse();
+        assertThat(uncoded.path("valueQuantity").has("code")).isFalse();
+        assertThat(uncoded.path("referenceRange").get(0).path("text").asText()).isEqualTo("70-110");
+
+        ObjectNode reversed = normalizer.observation(json.readTree("""
+                {"resultId":"MLS-RES-REV","orderId":"MLS-ORD-003","patientId":"MLS-PAT-003","externalResultId":"EXT-RES-REV","testCode":"GLU","value":"90","unit":"mg/dL","referenceRange":"99-70","resultedAt":"2026-02-03T12:00:00Z","status":"FINAL"}
+                """));
+        assertThat(reversed.path("valueQuantity").has("system")).isFalse();
+        assertThat(reversed.path("referenceRange").get(0).path("text").asText()).isEqualTo("99-70");
     }
 
     @Test

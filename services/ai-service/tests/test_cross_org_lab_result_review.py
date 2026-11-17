@@ -72,7 +72,7 @@ def _result(result_id: str, order_id: str, status: str = "final", value: str = "
         "subject": {"reference": "http://127.0.0.1/mini-lis/Patient/MLS-PAT-001"},
         "basedOn": [{"reference": f"http://127.0.0.1/mini-lis/ServiceRequest/{order_id}"}],
         "meta": {"source": "https://lab.local/mini-lis"},
-        "valueQuantity": {"value": value, "unit": "mmol/L"},
+        "valueQuantity": {"value": value, "unit": "mg/dL"},
         "code": {"coding": [{"system": "https://lab.local/mini-lis/test", "code": "GLU"}]},
     }
 

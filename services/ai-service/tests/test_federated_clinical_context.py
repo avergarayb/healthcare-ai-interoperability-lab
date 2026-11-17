@@ -96,7 +96,7 @@ def test_same_fhir_id_from_two_sources_stays_two_references():
         [_source("mini-his", "complete", 1), _source("mini-lis", "complete", 1)],
         [
             _observation("mini-his", "OBS-1", 13.4, "g/dL"),
-            _observation("mini-lis", "OBS-1", 141, "mmol/L"),
+            _observation("mini-lis", "OBS-1", 141, "mg/dL"),
         ],
     )
     context, projection = adapt_federation_envelope(envelope, "MHS-PAT-001")

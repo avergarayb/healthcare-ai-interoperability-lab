@@ -11,6 +11,8 @@ _PATIENT = re.compile(r"MHS-PAT-[0-9]{3}\Z")
 _FACT_ID = re.compile(r"[A-Za-z0-9.-]{1,64}\Z")
 _NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?\Z")
 _DROPPED = frozenset({"name", "birthDate", "address", "telecom", "family", "given", "photo"})
+_UCUM = "http://unitsofmeasure.org"
+_UNIT_FOR_CODE = {"mm[Hg]": "mmHg"}
 
 
 def minimize_envelope(envelope, patient_id):
@@ -90,19 +92,17 @@ def require_model_context(chart, resource_id):
 
 
 def _fact(source, resource):
-    """Keep one final numeric lab fact. A panel or a non-numeric sign is omitted."""
+    """Keep one final numeric lab fact. A panel, a non-numeric sign, or an unverified unit is omitted."""
     code = _code(resource)
-    quantity = resource.get("valueQuantity") if isinstance(resource.get("valueQuantity"), dict) else {}
-    value = quantity.get("value")
-    unit = quantity.get("unit") if isinstance(quantity.get("unit"), str) else ""
     if resource.get("resourceType") == "DiagnosticReport":
         if resource.get("status") != "final" or not code:
             return None
         value, unit = code, ""
-    elif type(value) is float or type(value) is int:
-        value = format(value, "g")
     else:
-        return None
+        verified = _verified_quantity(resource)
+        if verified is None:
+            return None
+        value, unit = verified
     if resource.get("status") != "final" or _FACT_ID.fullmatch(code or "") is None:
         return None
     if _FACT_ID.fullmatch(str(resource.get("id") or "")) is None:
@@ -116,6 +116,50 @@ def _fact(source, resource):
         "value": value,
         "unit": unit,
     }
+
+
+def _verified_quantity(resource):
+    """Accept a quantity only when its UCUM system, code, and unit agree."""
+    quantity = resource.get("valueQuantity")
+    if not isinstance(quantity, dict):
+        return None
+    value = quantity.get("value")
+    unit = quantity.get("unit")
+    code = quantity.get("code")
+    if quantity.get("system") != _UCUM or not isinstance(code, str) or not code:
+        return None
+    if not isinstance(unit, str) or unit != _UNIT_FOR_CODE.get(code, code):
+        return None
+    if type(value) not in (int, float) or isinstance(value, bool):
+        return None
+    if not _ranges_match(resource, unit, code):
+        return None
+    return format(value, "g"), unit
+
+
+def _ranges_match(resource, unit, code):
+    ranges = resource.get("referenceRange")
+    if ranges is None:
+        return True
+    if not isinstance(ranges, list):
+        return False
+    for item in ranges:
+        if not isinstance(item, dict):
+            return False
+        low = item.get("low")
+        high = item.get("high")
+        if low is None and high is None:
+            continue
+        if not isinstance(low, dict) or not isinstance(high, dict):
+            return False
+        for bound in (low, high):
+            if bound.get("system") != _UCUM or bound.get("code") != code or bound.get("unit") != unit:
+                return False
+            if type(bound.get("value")) not in (int, float) or isinstance(bound.get("value"), bool):
+                return False
+        if low["value"] > high["value"]:
+            return False
+    return True
 
 
 def _code(resource):

@@ -8,7 +8,18 @@ The connector reads Mini LIS over HTTP. It sends `X-Service-Token` and does not 
 
 ## Codes
 
-Test codes stay in `https://lab.local/mini-lis/test`. The code is the proprietary value, such as `HGB` or `GLU`. A description, when the order has one, is `code.text`. This mapping does not add LOINC. A numeric result with a unit becomes `valueQuantity.value` and `valueQuantity.unit`. `valueQuantity.system` and `valueQuantity.code` are omitted, including when the unit text is `g/dL`. A non-numeric value becomes `valueString`. A reference range is `referenceRange.text` and is not split into low and high.
+Test codes stay in `https://lab.local/mini-lis/test`. The code is the proprietary value, such as `HGB` or `GLU`. A description, when the order has one, is `code.text`. This mapping does not add LOINC and does not convert numbers.
+
+A numeric result with a unit becomes `valueQuantity.value`. The unit map is `mini-lis-ucum-v1`. It copies the source text and adds `valueQuantity.system` `http://unitsofmeasure.org` plus `valueQuantity.code` only for these rows:
+
+| Source unit | `Quantity.unit` | `Quantity.code` |
+|---|---|---|
+| `g/dL` | `g/dL` | `g/dL` |
+| `mg/dL` | `mg/dL` | `mg/dL` |
+
+Any other unit, including `mmol/L`, stays as `valueQuantity.unit` and omits `system` and `code`. A non-numeric value becomes `valueString`.
+
+A reference range whose text is `low-high`, with both bounds numeric and `low` not above `high`, becomes `referenceRange.low` and `referenceRange.high`. Those quantities use the same unit, system, and code as the coded result. A range that does not match that pattern stays `referenceRange.text`. A coded unit whose range text parses with `low` above `high` loses `system` and `code`, and the range stays text, so the observation is not treated as a verified quantity.
 
 ## Resources
 
