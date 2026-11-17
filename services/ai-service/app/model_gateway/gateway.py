@@ -40,7 +40,8 @@ class NeutralModelGateway:
         if type(self._resolver) is not LedgerDurableAuthorization:
             raise ProviderError("remote_not_authorized")
         deployment = self._registry.get(deployment_id)
-        decision = self._resolver.resolve(access, authorization_id, deployment)
+        decision = self._resolver.resolve(
+            access, authorization_id, deployment, resource_id, budget_microusd)
         if decision.allowed is not True or decision.reason != "accepted":
             raise ProviderError(decision.reason)
         if (decision.deployment_id != deployment.deployment_id

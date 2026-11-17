@@ -46,6 +46,8 @@ def _ready(tmp_path):
     lab = execution_laboratory(tmp_path)
     lab.ledger.migrate_to_v2(lab.admin["ORG-A"])
     lab.ledger.migrate_to_v3(lab.admin["ORG-A"])
+    lab.ledger.migrate_to_v4(lab.admin["ORG-A"])
+    lab.ledger.migrate_remote_audit_v2(lab.admin["ORG-A"])
     return lab
 
 
@@ -54,7 +56,8 @@ def _record(lab, **overrides):
     values = dict(
         authorization_id="remote-ops-a", organization_id="ORG-A", deployment_id=DEPLOYMENT,
         provider_id="openai", model_id="gpt-6-luna", valid_from=now - timedelta(minutes=1),
-        expires_at=now + timedelta(minutes=5))
+        expires_at=now + timedelta(minutes=5), principal_id="synthetic-executor",
+        resource_id=RESOURCE, budget_ceiling_microusd=1000)
     values.update(overrides)
     return RemoteAuthorization(**values)
 
@@ -399,9 +402,13 @@ def test_policy_budget_and_catalog_deny_after_or_before_a_durable_permit(tmp_pat
     lab = _ready(tmp_path)
     record = _register(lab)
     generous = _gateway(lab)
-    priced = _run(generous, lab, budget=10_000_000)
+    priced = _run(generous, lab, budget=1000)
     catalog_reservation = generous._registry.get(DEPLOYMENT).reservation_microusd
-    assert priced.reserved_microusd == catalog_reservation and priced.reserved_microusd != 10_000_000
+    assert priced.reserved_microusd == catalog_reservation and priced.reserved_microusd != 1000
+    inflated = _gateway(lab)
+    with pytest.raises(ProviderError) as ceiling:
+        _run(inflated, lab, budget=10_000_000)
+    assert ceiling.value.reason == "budget_exceeded" and inflated._adapters[DEPLOYMENT].calls == 0
     with pytest.raises(TypeError):
         generous.execute(
             lab.executor["ORG-A"], record.authorization_id, 10_000_000, RESOURCE, DEPLOYMENT,
@@ -410,7 +417,7 @@ def test_policy_budget_and_catalog_deny_after_or_before_a_durable_permit(tmp_pat
     policy = _gateway(lab)
     with pytest.raises(ProviderError) as extra:
         _run(policy, lab, resource="")
-    assert extra.value.reason == "remote_not_authorized" and policy._adapters[DEPLOYMENT].calls == 0
+    assert extra.value.reason == "invalid_input" and policy._adapters[DEPLOYMENT].calls == 0
     poor = _gateway(lab)
     with pytest.raises(ProviderError) as budget:
         _run(poor, lab, budget=1)
