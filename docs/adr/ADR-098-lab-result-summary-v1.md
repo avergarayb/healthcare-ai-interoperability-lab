@@ -8,7 +8,7 @@ Accepted for this laboratory increment. Not a production authorization and not a
 
 The durable permit catalog accepts one additional pair: operation `lab-result-summary-v1` with policy `lab-result-summary-policy-v1`. Every other operation remains `invalid_input`. `vacation-days-v1` stays on `model-gateway-policy-v1`. The same gateway class executes the clinical call. It does not reuse the vacation document, the vacation consent, or the vacation adapter.
 
-The model result is queued as pending. The follow-up review table is unchanged because its trigger must already be a matched follow-up protocol. A lab summary is not that protocol.
+The model result is queued as pending. The follow-up review table is unchanged because its trigger must already be a matched follow-up protocol. A lab summary is not that protocol. One human decision may be stored beside the original row. The original summary stays immutable, and the development session principal is the only reviewer accepted by that page.
 
 ## Consequences
 

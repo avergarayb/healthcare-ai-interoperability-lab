@@ -26,6 +26,11 @@ from app.followup_service import (
     run_followup_http,
 )
 from app.missed_follow_up_service import run_missed_follow_up_http
+from app.clinical_lab_summary.http import (
+    render_lab_summary,
+    render_lab_summary_queue,
+    submit_lab_summary_decision,
+)
 from app.clinical_review_context_http import get_clinical_review_context_http
 from app.human_development_auth import (
     render_development_login,
@@ -171,6 +176,24 @@ async def review_coordination_transition(
         await request.body(),
         request.headers.get("content-type"),
     )
+
+
+@app.get("/lab-summaries")
+def lab_summaries(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_lab_summary_queue(request, settings)
+
+
+@app.get("/lab-summaries/{review_id}")
+def lab_summary(review_id: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_lab_summary(request, settings, review_id)
+
+
+@app.post("/lab-summaries/{review_id}/decision")
+async def lab_summary_decision(
+    review_id: str, request: Request, settings: Settings = Depends(get_settings),
+) -> Response:
+    return submit_lab_summary_decision(
+        request, settings, review_id, await request.body(), request.headers.get("content-type"))
 
 
 @app.get("/review-cases")
