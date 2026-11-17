@@ -128,6 +128,51 @@ def open_authorized_client(credential, http_client=None):
     return client
 
 
+class ClinicalDispatchGrant:
+    """One pass for the lab-summary generation. A vacation grant cannot spend it."""
+
+    def __init__(self):
+        self._open = True
+
+    def consume(self):
+        if self._open is not True:
+            return False
+        self._open = False
+        return True
+
+
+def dispatch_clinical(client, generation, grant=None):
+    """One clinical generateContent call. The vacation fixture is rejected."""
+    from app.clinical_lab_summary.generation import require_clinical_generation
+
+    if type(grant) is not ClinicalDispatchGrant or grant.consume() is not True:
+        raise ProviderError("egress_blocked")
+    require_clinical_generation(generation)
+    if generation.get("max_output_tokens") != 256:
+        raise ProviderError("not_configured")
+    require_official_client(client)
+    config = types.GenerateContentConfig(
+        system_instruction=generation["system_instruction"],
+        response_mime_type="application/json",
+        response_json_schema=generation["response_json_schema"],
+        max_output_tokens=generation["max_output_tokens"],
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
+    )
+    try:
+        response = client.models.generate_content(
+            model=generation["model"], contents=generation["contents"], config=config)
+    except ProviderError:
+        raise
+    except Exception as error:
+        raise ProviderError(_authorized_error(error)) from None
+    body = normalize_response(response)
+    reported = getattr(response, "response_id", None)
+    if type(reported) is str and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", reported):
+        body["provider_request_id"] = reported
+    return body
+
+
 def dispatch_authorized(client, generation, grant=None):
     """One generateContent call after the release was spent. No retry."""
     if type(grant) is not DispatchGrant or grant.consume() is not True:
