@@ -130,11 +130,15 @@ Rechazo: cualquiera de los atributos no coincide, el permiso está revocado o ve
 
 El Product Owner fijó estas decisiones para el contrato. A1 no implementa A2 ni B.
 
-- Una discrepancia de principal o de recurso usará `scope_mismatch`. Ese motivo ya está en el CHECK de auditoría. A1 todavía no compara esos campos en la evaluación: el gateway no cambia.
-- Un exceso sobre el techo almacenado usará `budget_exceeded`. A1 no lo escribe. El CHECK de `enterprise-remote-authorization-audit-v1` no se amplía hasta que una evaluación emita ese motivo. Un techo que no es un entero, o que queda fuera de la reserva del catálogo y del tope de laboratorio de 5.000.000 micro-USD, es `invalid_input` en el alta.
+- Una discrepancia de principal o de recurso usará `scope_mismatch`. Ese motivo ya está en el CHECK de auditoría. A1 no compara esos campos. A2 los compara dentro del ledger, con el principal del acceso reconocido.
+- Un exceso sobre el techo almacenado usará `budget_exceeded`. A1 no lo escribe. El CHECK publicado de `enterprise-remote-authorization-audit-v1` no se reescribe. A2 lo habilita solo en filas nuevas del contrato `enterprise-remote-authorization-audit-v2`. Un techo que no es un entero, o que queda fuera de la reserva del catálogo y del tope de laboratorio de 5.000.000 micro-USD, sigue siendo `invalid_input` en el alta.
 - El objetivo de D04-B es un permiso operativo de un solo uso. A1 no crea la reserva.
 - Una reserva `held` con resultado incierto no se libera sola. Esa recuperación administrativa sigue sin implementarse.
 - La atomicidad del ledger no es una entrega exactamente una vez a un proveedor externo. No hay transporte en esta tarea.
+
+### Auditoría de A2
+
+`budget_exceeded` no cabe en el CHECK publicado por la migración 004. Esa migración no se reescribe y su checksum no cambia. La versión 5 sigue reservada para la reserva de D04-B. La evolución es `migrate_remote_audit_v2`: una transacción explícita que copia las filas de `aip_remote_authorization_audit` sin cambiar su contrato ni su motivo, y admite filas nuevas con `enterprise-remote-authorization-audit-v2` y el motivo `budget_exceeded`. El `schema_version` permanece en 4. Si la copia no se confirma, el archivo sigue en el esquema V4 anterior. La ruta operativa del gateway exige ese vocabulario. Un almacén V3, o un V4 sin esta migración, responde `authority_unverifiable` y no disfraza el rechazo de un fallo de disco.
 
 ### Ajuste de SQLite en A1
 
@@ -257,6 +261,10 @@ Aceptación: la regresión 218/37/34/74/405, más las pruebas nuevas, queda en v
 
 Evidencia: conteos y ausencia de solicitudes reales.
 
+### Verificación A3 incorporada al PR de A2
+
+A3 no añade comportamiento. La evidencia ejecutada en este cierre es 242 PASS: C03, el inventario de arquitectura, el gateway durable, A1, A2, los SDK, los dos `send` y las pruebas de `live-once` que permanecen bloqueadas, con sockets sustituidos y datos sintéticos. La batería amplia de 1374 PASS y 1 SKIP, corrida sobre el mismo árbol antes de esta nota, se reutiliza para C01, C02, conectores y el resto de D03. El SKIP es el enlace simbólico sintético que el sistema operativo no permite crear. B y C1 siguen fuera de este cambio.
+
 Riesgo: un import nuevo rompe el inventario. Corregir solo el allowlist de lo que A2 haya añadido.
 
 ### TASK-C04-D04-B1 — Reserva en el mismo proceso
@@ -330,4 +338,4 @@ Riesgo: crear una interfaz “apagada” que alguien active después. Por eso C1
 
 Cuando el Product Owner autorice implementación, el primer corte es **TASK-C04-D04-A1**. Es reversible por copia del archivo, no cambia el gateway y no abre egress.
 
-El corte que cierra la brecha visible de recurso y presupuesto es **A2**, y conviene autorizarlo enseguida después de A1, antes de cualquier reserva o de C. B y el transporte quedan para aprobaciones posteriores.
+A1 está en `main`. A2 y la verificación de aislamiento de A3 están en `feature/enterprise-ai-processing-task-c04-d04-a2`. B y el transporte quedan para aprobaciones posteriores.

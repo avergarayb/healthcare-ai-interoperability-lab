@@ -16,19 +16,21 @@ class LedgerDurableAuthorization(DurableAuthorizationResolver):
             raise ProviderError("remote_not_authorized")
         self._ledger = ledger
 
-    def resolve(self, access, authorization_id, deployment):
+    def resolve(self, access, authorization_id, deployment, resource_id, budget_microusd):
         if access is None:
             return DurableDecision(False, "authority_unverifiable", None, None, None, None, None)
         try:
             organization_id = access.organization_id
+            principal_id = access.principal_id
             now = self._ledger.clock()
             record = RemoteAuthorization(
                 authorization_id, organization_id, deployment.deployment_id,
                 deployment.identity.provider_id, deployment.identity.model_id,
-                now, now + timedelta(minutes=1))
+                now, now + timedelta(minutes=1), principal_id=principal_id, resource_id=resource_id)
         except Exception:
             return DurableDecision(False, "invalid_input", None, None, None, None, None)
-        decision = self._ledger.evaluate_remote_authorization(access, record)
+        decision = self._ledger.evaluate_remote_authorization(
+            access, record, requested_budget_microusd=budget_microusd)
         allowed = decision.allowed is True and decision.reason == "accepted"
         return DurableDecision(
             allowed, decision.reason, decision.authorization_id,

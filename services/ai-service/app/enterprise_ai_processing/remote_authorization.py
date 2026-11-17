@@ -26,6 +26,7 @@ DECISION_REASONS = frozenset({
     "accepted", "not_granted", "scope_mismatch", "not_yet_effective", "authorization_expired",
     "revoked", "wrong_deployment", "wrong_provider", "wrong_model", "operation_denied",
     "revision_conflict", "invalid_input", "storage_unavailable", "authority_unverifiable",
+    "budget_exceeded",
 })
 
 
@@ -91,4 +92,8 @@ def classify(row, now_us, query):
         return "authorization_expired"
     if row["status"] != "active":
         return "not_granted"
+    if query.principal_id is not None and query.principal_id != row["principal_id"]:
+        return "scope_mismatch"
+    if query.resource_id is not None and query.resource_id != row["resource_id"]:
+        return "scope_mismatch"
     return "accepted"
