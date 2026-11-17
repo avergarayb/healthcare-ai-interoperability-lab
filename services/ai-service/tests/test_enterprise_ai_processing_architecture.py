@@ -125,7 +125,8 @@ def test_no_application_clinical_or_old_connector_workflow_wiring():
             allowed = ("app.enterprise_ai_processing.durable_resolver",)
         if relative.as_posix() in {
                 "enterprise_llm_providers/egress_once.py",
-                "enterprise_llm_providers/egress_gemini_once.py"}:
+                "enterprise_llm_providers/egress_gemini_once.py",
+                "enterprise_llm_providers/vacation_graph_once.py"}:
             allowed = (
                 "app.enterprise_ai_processing.durable_resolver",
                 "app.enterprise_ai_processing.sqlite_ledger",
