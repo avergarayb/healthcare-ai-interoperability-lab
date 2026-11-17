@@ -176,3 +176,19 @@ federation:
       - mini-lis
     mini-lis:
       - mini-lis
+
+external-fhir:
+  enabled: ${EXTERNAL_FHIR_ENABLED:false}
+  source-key: smart-sandbox
+  organization-id: org-smart-sandbox
+  display-name: SMART Health IT R4 sandbox
+  base-url: https://r4.smarthealthit.org
+  allowed-host: r4.smarthealthit.org
+  caller-system: mini-his
+  connect-timeout-millis: 2000
+  read-timeout-millis: 8000
+  max-bytes: 1048576
+  max-pages: 2
+  page-size: 20
+  link-store-path: ${EXTERNAL_FHIR_LINK_STORE_PATH:${java.io.tmpdir}/healthcare-lab-external-fhir/patient-link.sqlite}
+  audit-store-path: ${EXTERNAL_FHIR_AUDIT_STORE_PATH:${java.io.tmpdir}/healthcare-lab-external-fhir/request-audit.sqlite}

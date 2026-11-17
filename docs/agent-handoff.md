@@ -144,6 +144,8 @@ Delegated permanece sin implementar. La autorización final de DEMO-001 permite 
 - [`design/enterprise-connector-maintainability-demo-001.md`](design/enterprise-connector-maintainability-demo-001.md): evaluación read-only de TASK 002–005, evidencia/ubicaciones, hallazgos priorizados y propuestas sin refactorización.
 - [`design/enterprise-ai-processing-policy-fixture-v1.md`](design/enterprise-ai-processing-policy-fixture-v1.md): C01 en revisión; contratos mínimos, reuso A/B público, owner/evidencia sintéticos, límites, resultados y pruebas. Sus referencias enlazan los cuatro documentos DESIGN-001 aprobados; C02/C03/C04 necesitan autorización propia.
 
+INTEROP-001 lee el sandbox SMART solo cuando `external-fhir.enabled` está activo. El valor versionado sigue en falso. El sobre de Clinical Federation no cambia de versión. El permiso `lab-result-summary-v1` y el ledger de dos operaciones no cubren `smart-sandbox`. NeutralModelGateway no ejecuta `external-fhir-lab-summary-v1`. La evidencia sintética histórica de Gemini no se reutiliza.
+
 ## Procedimiento de cambio entre Codex y Cursor
 
 1. La herramienta que toma el turno lee `AGENTS.md`, este handoff y los contratos aplicables; no depende del chat anterior.

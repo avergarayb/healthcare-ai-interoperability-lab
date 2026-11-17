@@ -22,6 +22,7 @@
         <hapi.fhir.version>8.10.0</hapi.fhir.version>
         <skipITs>true</skipITs>
         <hapi.legacy.testOwnedConfirmed>false</hapi.legacy.testOwnedConfirmed>
+        <external.fhir.live>false</external.fhir.live>
     </properties>
 
     <dependencies>
@@ -112,6 +113,7 @@
                     <systemPropertyVariables>
                         <hapi.legacy.profile.enabled>false</hapi.legacy.profile.enabled>
                         <hapi.legacy.testOwnedConfirmed>false</hapi.legacy.testOwnedConfirmed>
+                        <external.fhir.live>${external.fhir.live}</external.fhir.live>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

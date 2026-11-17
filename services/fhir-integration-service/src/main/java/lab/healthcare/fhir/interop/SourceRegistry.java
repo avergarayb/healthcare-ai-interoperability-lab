@@ -1,5 +1,6 @@
 package lab.healthcare.fhir.interop;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -27,10 +28,29 @@ public class SourceRegistry {
 
     private final List<SourceDescriptor> sources;
 
+    @Autowired
     public SourceRegistry(InteropSourcesProperties properties) {
         List<SourceDescriptor> declared = new ArrayList<>();
         properties.getSources().forEach((key, value) -> declared.add(descriptor(key, value)));
         this.sources = List.copyOf(declared);
+    }
+
+    private SourceRegistry(List<SourceDescriptor> sources) {
+        this.sources = List.copyOf(sources);
+    }
+
+    public SourceRegistry withAdditional(SourceDescriptor extra) {
+        if (extra == null || !KEY.matcher(extra.key()).matches() || find(extra.key()).isPresent()) {
+            throw new IllegalStateException("Interop source key is invalid");
+        }
+        for (String capability : extra.capabilities()) {
+            if (!CAPABILITIES.contains(capability)) {
+                throw new IllegalStateException("Interop source capability is unknown");
+            }
+        }
+        List<SourceDescriptor> declared = new ArrayList<>(sources);
+        declared.add(extra);
+        return new SourceRegistry(declared);
     }
 
     public List<SourceDescriptor> sources() {
