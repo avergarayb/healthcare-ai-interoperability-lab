@@ -26,7 +26,7 @@ DECISION_REASONS = frozenset({
     "accepted", "not_granted", "scope_mismatch", "not_yet_effective", "authorization_expired",
     "revoked", "wrong_deployment", "wrong_provider", "wrong_model", "operation_denied",
     "revision_conflict", "invalid_input", "storage_unavailable", "authority_unverifiable",
-    "budget_exceeded",
+    "budget_exceeded", "replay_denied",
 })
 
 

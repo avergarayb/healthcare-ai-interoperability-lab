@@ -48,6 +48,7 @@ def _ready(tmp_path):
     lab.ledger.migrate_to_v3(lab.admin["ORG-A"])
     lab.ledger.migrate_to_v4(lab.admin["ORG-A"])
     lab.ledger.migrate_remote_audit_v2(lab.admin["ORG-A"])
+    lab.ledger.migrate_to_v5(lab.admin["ORG-A"])
     return lab
 
 
@@ -212,6 +213,14 @@ def test_future_expired_and_revoked_permits_are_denied(tmp_path):
     with pytest.raises(ProviderError) as revoked:
         after.execute(lab.executor["ORG-A"], current.authorization_id, BUDGET, RESOURCE, "gemini-offline-a")
     assert revoked.value.reason == "revoked" and after._adapters["gemini-offline-a"].calls == 0
+    unused = _register(
+        lab, authorization_id="remote-revoked", deployment_id="gemini-sdk-a",
+        provider_id="gemini", model_id="gemini-3.5-flash-lite")
+    lab.ledger.revoke_remote_authorization(lab.admin["ORG-A"], unused.authorization_id, "operator_revoked")
+    fresh = _gateway(lab)
+    with pytest.raises(ProviderError) as before:
+        fresh.execute(lab.executor["ORG-A"], unused.authorization_id, BUDGET, RESOURCE, "gemini-sdk-a")
+    assert before.value.reason == "revoked" and fresh._adapters["gemini-sdk-a"].calls == 0
     lab.close()
 
 
@@ -426,20 +435,23 @@ def test_policy_budget_and_catalog_deny_after_or_before_a_durable_permit(tmp_pat
     with pytest.raises(ProviderError) as catalog:
         _run(outside, lab, deployment_id="text-only-offline-a")
     assert catalog.value.reason == "invalid_input" and outside._adapters["text-only-offline-a"].calls == 0
+    _register(lab, authorization_id="remote-fail", deployment_id="gemini-offline-a",
+              provider_id="gemini", model_id="gemini-3.5-flash-lite")
     failing = _Calls(fail="remote_unavailable")
     adapters = lab_adapters()
-    adapters[DEPLOYMENT] = failing
+    adapters["gemini-offline-a"] = failing
     fallback = _gateway(lab, adapters=adapters)
     with pytest.raises(ProviderError) as broken:
-        _run(fallback, lab)
+        _run(fallback, lab, authorization_id="remote-fail", deployment_id="gemini-offline-a")
     assert broken.value.reason == "remote_unavailable"
-    assert failing.calls == 1 and adapters["gemini-offline-a"].calls == 0
+    assert failing.calls == 1 and adapters[DEPLOYMENT].calls == 0
+    _register(lab, authorization_id="remote-counted", deployment_id="openai-sdk-a")
     counted = _Calls(ModelResponse(
-        DEPLOYMENT, _observation(), UsageMetadata(200, 80), 60, None, True, False, False, False, False, 20))
+        "openai-sdk-a", _observation(), UsageMetadata(200, 80), 60, None, True, False, False, False, False, 20))
     adapters = lab_adapters()
-    adapters[DEPLOYMENT] = counted
+    adapters["openai-sdk-a"] = counted
     priced = _gateway(lab, adapters=adapters)
-    result = _run(priced, lab, authorization_id=record.authorization_id)
+    result = _run(priced, lab, authorization_id="remote-counted", deployment_id="openai-sdk-a")
     assert result.output_tokens == 80 and result.included_output_tokens == 20
     assert result.estimated_microusd == 60 and result.thoughts_tokens is None
     lab.close()
