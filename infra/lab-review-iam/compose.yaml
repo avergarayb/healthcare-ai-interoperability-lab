@@ -1,0 +1,39 @@
+name: ${LAB_REVIEW_IAM_PROJECT:?Use prepare.py}
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
+    entrypoint: [/bin/bash, -ec]
+    command:
+      - |
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(</run/secrets/bootstrap_password)"
+        exec /opt/keycloak/bin/kc.sh start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: lab-review-iam-bootstrap
+      KC_HOSTNAME: ${LAB_REVIEW_IAM_ORIGIN:?Loopback origin required}
+      KC_HOSTNAME_STRICT: "true"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_DB: dev-file
+      KC_CACHE: local
+      KC_LOG_LEVEL: WARN
+      KC_HTTP_ACCESS_LOG_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${LAB_REVIEW_IAM_PORT:?Loopback port required}:8080"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - type: bind
+        source: ${LAB_REVIEW_IAM_RUN_DIR:?Run directory required}/realm.json
+        target: /opt/keycloak/data/import/realm.json
+        read_only: true
+    secrets: [bootstrap_password]
+    mem_limit: 1g
+    cpus: 2
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+secrets:
+  bootstrap_password:
+    file: ${LAB_REVIEW_IAM_RUN_DIR:?Run directory required}/bootstrap-password.txt
+volumes:
+  keycloak-data:

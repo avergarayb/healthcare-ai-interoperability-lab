@@ -31,6 +31,12 @@ from app.clinical_lab_summary.http import (
     render_lab_summary_queue,
     submit_lab_summary_decision,
 )
+from app.clinical_lab_summary.iam_http import (
+    finish_iam_login,
+    render_iam_login,
+    start_iam_login,
+    submit_iam_logout,
+)
 from app.clinical_review_context_http import get_clinical_review_context_http
 from app.human_development_auth import (
     render_development_login,
@@ -194,6 +200,31 @@ async def lab_summary_decision(
 ) -> Response:
     return submit_lab_summary_decision(
         request, settings, review_id, await request.body(), request.headers.get("content-type"))
+
+
+@app.get("/lab-review-iam/login")
+def lab_review_iam_login(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return render_iam_login(request, settings)
+
+
+@app.post("/lab-review-iam/start")
+def lab_review_iam_start(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return start_iam_login(request, settings)
+
+
+@app.get("/lab-review-iam/callback")
+async def lab_review_iam_callback_get(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return finish_iam_login(request, settings, await request.body(), request.headers.get("content-type"))
+
+
+@app.post("/lab-review-iam/callback")
+async def lab_review_iam_callback_post(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return finish_iam_login(request, settings, await request.body(), request.headers.get("content-type"))
+
+
+@app.post("/lab-review-iam/logout")
+async def lab_review_iam_logout(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return submit_iam_logout(request, settings, await request.body(), request.headers.get("content-type"))
 
 
 @app.get("/review-cases")

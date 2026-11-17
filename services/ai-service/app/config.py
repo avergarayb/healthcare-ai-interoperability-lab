@@ -46,6 +46,15 @@ class Settings:
     oidc_workload_policy_mode: str = "static"
     oidc_workload_registry_db_path: str = ""
     lab_summary_review_db_path: str = ""
+    lab_review_iam_enabled: bool = False
+    lab_review_iam_issuer: str = ""
+    lab_review_iam_discovery_url: str = ""
+    lab_review_iam_jwks_uri: str = ""
+    lab_review_iam_client_id: str = ""
+    lab_review_iam_redirect_uri: str = ""
+    lab_review_iam_bindings_path: str = ""
+    lab_review_iam_session_db_path: str = ""
+    lab_review_iam_allow_http_loopback: bool = False
 
     @property
     def model_boundary_url(self) -> str:
@@ -180,6 +189,17 @@ class Settings:
             oidc_workload_policy_mode=os.getenv("OIDC_WORKLOAD_POLICY_MODE", "static"),
             oidc_workload_registry_db_path=os.getenv("OIDC_WORKLOAD_REGISTRY_DB_PATH", ""),
             lab_summary_review_db_path=os.getenv("LAB_SUMMARY_REVIEW_DB", "").strip(),
+            lab_review_iam_enabled=os.getenv("LAB_REVIEW_IAM_ENABLED", "false").strip() == "true",
+            lab_review_iam_issuer=os.getenv("LAB_REVIEW_IAM_ISSUER", "").strip(),
+            lab_review_iam_discovery_url=os.getenv("LAB_REVIEW_IAM_DISCOVERY_URL", "").strip(),
+            lab_review_iam_jwks_uri=os.getenv("LAB_REVIEW_IAM_JWKS_URI", "").strip(),
+            lab_review_iam_client_id=os.getenv("LAB_REVIEW_IAM_CLIENT_ID", "").strip(),
+            lab_review_iam_redirect_uri=os.getenv("LAB_REVIEW_IAM_REDIRECT_URI", "").strip(),
+            lab_review_iam_bindings_path=os.getenv("LAB_REVIEW_IAM_BINDINGS_PATH", "").strip(),
+            lab_review_iam_session_db_path=os.getenv("LAB_REVIEW_IAM_SESSION_DB", "").strip(),
+            lab_review_iam_allow_http_loopback=(
+                os.getenv("LAB_REVIEW_IAM_ALLOW_HTTP_LOOPBACK", "false").strip() == "true"
+            ),
         )
 
 
