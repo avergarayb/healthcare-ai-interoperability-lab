@@ -160,7 +160,7 @@ public final class ExternalFhirClient {
         if ("Observation".equals(resourceType) && !OBSERVATION_STATUS.contains(resource.path("status").asText())) {
             return false;
         }
-        if (!subjectMatches(resource, patientId)) {
+        if (!subjectMatches(resource, patientId, properties.getAllowedHost())) {
             return false;
         }
         if ("Observation".equals(resourceType) && resource instanceof ObjectNode object) {
@@ -169,10 +169,10 @@ public final class ExternalFhirClient {
         return true;
     }
 
-    private static boolean subjectMatches(JsonNode resource, String patientId) {
+    private static boolean subjectMatches(JsonNode resource, String patientId, String host) {
         String reference = resource.path("subject").path("reference").asText("");
         String expected = "Patient/" + patientId;
-        return expected.equals(reference) || reference.endsWith("/" + expected);
+        return expected.equals(reference) || reference.equals("https://" + host + "/" + expected);
     }
 
     private static void tag(ObjectNode observation) {
@@ -282,12 +282,24 @@ public final class ExternalFhirClient {
 
     private URI nextUri(String next, String resourceType, String patientId) {
         URI uri = guard(URI.create(next));
-        if (!("/" + resourceType).equals(uri.getPath())) {
+        String path = uri.getPath() == null ? "" : uri.getPath();
+        boolean sameCollection = ("/" + resourceType).equals(path);
+        boolean serverPage = path.isEmpty() || "/".equals(path);
+        if (!sameCollection && !serverPage) {
             throw ClinicalReadException.external("response_rejected");
         }
         String query = uri.getRawQuery() == null ? "" : uri.getRawQuery();
         String lowered = query.toLowerCase(java.util.Locale.ROOT);
-        if (query.contains("://") || lowered.contains("%3a%2f%2f") || query.contains("@") || !samePatient(query, patientId)) {
+        if (query.contains("://") || lowered.contains("%3a%2f%2f") || query.contains("@")) {
+            throw ClinicalReadException.external("response_rejected");
+        }
+        if (sameCollection) {
+            if (!samePatient(query, patientId)) {
+                throw ClinicalReadException.external("response_rejected");
+            }
+            return uri;
+        }
+        if (!query.contains("_getpages=") || query.contains("patient=")) {
             throw ClinicalReadException.external("response_rejected");
         }
         return uri;

@@ -31,6 +31,8 @@ class NeutralModelGateway:
         self._inflight = set()
         self._clinical_spent = set()
         self._clinical_inflight = set()
+        self._external_spent = set()
+        self._external_inflight = set()
 
     def __repr__(self):
         return "NeutralModelGateway(closed)"
@@ -186,6 +188,72 @@ class NeutralModelGateway:
             raise ProviderError("review_unavailable") from None
         self._resolver.consume(access, authorization_id)
         return ClinicalResult(
+            True, "accepted", deployment.deployment_id, access.organization_id,
+            response.input_tokens, response.output_tokens, reservation,
+            response.estimated_microusd, False, "estimated",
+            response.provider_request_id, response.response_status, summary)
+
+    def execute_external_summary(self, access, authorization_id, budget_microusd, resource_id,
+                                 deployment_id, chart, consent, before_consume):
+        """One external summary. Clinical and vacation consents cannot enter."""
+        from app.external_fhir.consent import OperationalExternalConsent, bind_external_consent
+        from app.external_fhir.context import require_model_context, validate_summary
+        from app.external_fhir.model import ExternalResult, arm_external_adapter
+        from app.external_fhir.policy import DEPLOYMENT_ID, OPERATION_ID as EXTERNAL_OPERATION
+        from app.external_fhir.policy import POLICY_REF as EXTERNAL_POLICY
+
+        if type(consent) is not OperationalExternalConsent or not callable(before_consume):
+            raise ProviderError("egress_blocked")
+        if deployment_id != DEPLOYMENT_ID:
+            raise ProviderError("model_denied")
+        minimized = require_model_context(chart, resource_id)
+        deployment = self._registry.get(deployment_id)
+        bind_external_consent(
+            consent, access, deployment, resource_id, budget_microusd, authorization_id)
+        decision = self._resolver.resolve(
+            access, authorization_id, deployment, resource_id, budget_microusd,
+            operation_id=EXTERNAL_OPERATION, policy_ref=EXTERNAL_POLICY)
+        if decision.allowed is not True or decision.reason != "accepted":
+            raise ProviderError(decision.reason)
+        if (decision.deployment_id != deployment.deployment_id
+                or decision.provider_id != deployment.identity.provider_id
+                or decision.model_id != deployment.identity.model_id
+                or decision.organization_id != access.organization_id):
+            raise ProviderError("remote_not_authorized")
+        hold = self._resolver.confirm_hold(
+            access, authorization_id, deployment, resource_id, budget_microusd,
+            operation_id=EXTERNAL_OPERATION, policy_ref=EXTERNAL_POLICY)
+        if hold != "accepted":
+            raise ProviderError(hold)
+        adapter = arm_external_adapter(consent, access, deployment, resource_id, authorization_id)
+        reservation = adapter.estimate(deployment)
+        if reservation != deployment.reservation_microusd or budget_microusd < reservation:
+            raise ProviderError("budget_exceeded")
+        with self._lock:
+            if authorization_id in self._external_spent or authorization_id in self._external_inflight:
+                raise ProviderError("replay_denied")
+            if authorization_id in self._clinical_spent or authorization_id in self._spent:
+                raise ProviderError("replay_denied")
+            self._external_inflight.add(authorization_id)
+        try:
+            response = adapter.invoke_once(minimized)
+        except ProviderError as error:
+            with self._lock:
+                self._external_inflight.discard(authorization_id)
+                self._external_spent.add(authorization_id)
+            raise ProviderError(error.reason, getattr(error, "diagnostic", None)) from None
+        with self._lock:
+            self._external_inflight.discard(authorization_id)
+            self._external_spent.add(authorization_id)
+        summary = validate_summary(minimized, response.parsed)
+        try:
+            before_consume(summary)
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError("review_unavailable") from None
+        self._resolver.consume(access, authorization_id)
+        return ExternalResult(
             True, "accepted", deployment.deployment_id, access.organization_id,
             response.input_tokens, response.output_tokens, reservation,
             response.estimated_microusd, False, "estimated",

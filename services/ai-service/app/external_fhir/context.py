@@ -29,6 +29,7 @@ def minimize_envelope(envelope, patient_id):
     source = sources[0]
     if not isinstance(source, dict) or source.get("sourceKey") != SOURCE or source.get("outcome") != "complete":
         raise ProviderError("context_rejected")
+    _one_patient(entries)
     facts = []
     for entry in entries:
         if not isinstance(entry, dict) or entry.get("sourceKey") != SOURCE:
@@ -102,6 +103,38 @@ def validate_summary(chart, parsed):
             cited.append({"source": key[0], "resourceType": key[1], "id": key[2]})
         checked.append({"text": text, "sources": cited})
     return {"kind": OPERATION_ID, "review": "pending_human_review", "statements": checked}
+
+
+def _one_patient(entries):
+    """A second patient reference denies the chart. A missing subject is not a link."""
+    found = []
+    for entry in entries:
+        resource = entry.get("resource") if isinstance(entry, dict) else None
+        if not isinstance(resource, dict) or resource.get("resourceType") != "Observation":
+            continue
+        subject = resource.get("subject")
+        if subject is None:
+            continue
+        if not isinstance(subject, dict):
+            raise ProviderError("context_rejected")
+        found.append(_logical_patient(subject.get("reference")))
+    if len(set(found)) > 1:
+        raise ProviderError("context_rejected")
+
+
+def _logical_patient(reference):
+    prefix = "https://r4.smarthealthit.org/Patient/"
+    if type(reference) is not str:
+        raise ProviderError("context_rejected")
+    if reference.startswith(prefix):
+        logical = reference[len(prefix):]
+    elif reference.startswith("Patient/"):
+        logical = reference[len("Patient/"):]
+    else:
+        raise ProviderError("context_rejected")
+    if _FACT_ID.fullmatch(logical) is None:
+        raise ProviderError("context_rejected")
+    return logical
 
 
 def _fact(resource):

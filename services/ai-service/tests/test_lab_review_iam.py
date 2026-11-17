@@ -80,7 +80,7 @@ def _bindings(tmp_path, extra=None):
         {"sub": "reviewer-b", "organization_id": "org-lab-b", "role": "clinical-reviewer", "display_name": "Reviewer B"},
     ]
     if extra:
-        rows.append(extra)
+        rows.extend(extra if isinstance(extra, list) else [extra])
     path = tmp_path / "bindings.json"
     path.write_text(json.dumps({"issuer": ISSUER, "bindings": rows}), encoding="utf-8")
     return path
@@ -104,8 +104,8 @@ def _token(key, subject, nonce, **changes):
     return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "lab-review"})
 
 
-def _client(tmp_path, key, subject="reviewer-a"):
-    bindings = _bindings(tmp_path)
+def _client(tmp_path, key, subject="reviewer-a", extra=None):
+    bindings = _bindings(tmp_path, extra)
     settings = _settings(tmp_path, bindings)
     issued = {}
     discovery = {

@@ -77,6 +77,20 @@ class ExternalFhirClientTest {
     }
 
     @Test
+    void absoluteSubjectMustUseTheAllowlistedHost() {
+        Script script = new Script();
+        ObjectNode same = observation(PATIENT, "obs-absolute", "2085-9", "69.3", "mg/dL", true);
+        same.putObject("subject").put("reference", "https://r4.smarthealthit.org/Patient/" + PATIENT);
+        ObjectNode foreign = observation(PATIENT, "obs-other-host", "2085-9", "1", "mg/dL", true);
+        foreign.putObject("subject").put("reference", "https://evil.example/Patient/" + PATIENT);
+        script.page("/Observation", bundle(same, foreign));
+
+        List<JsonNode> found = client(script).search("Observation", PATIENT).resources();
+
+        assertThat(found).extracting(item -> item.path("id").asText()).containsExactly("obs-absolute");
+    }
+
+    @Test
     void nextPageMustStayOnTheAllowlistedHost() {
         Script script = new Script();
         ObjectNode page = bundle(observation(PATIENT, "obs-1", "2085-9", "69.3", "mg/dL", true));
@@ -99,6 +113,22 @@ class ExternalFhirClientTest {
         assertThatThrownBy(() -> client(script).search("Observation", PATIENT))
                 .isInstanceOfSatisfying(ClinicalReadException.class, error -> assertThat(error.code()).isEqualTo("response_rejected"));
         assertThat(script.seen).hasSize(1);
+    }
+
+    @Test
+    void serverContinuationWithoutAPatientParameterIsRead() {
+        Script script = new Script();
+        ObjectNode page = bundle(observation(PATIENT, "obs-1", "2085-9", "69.3", "mg/dL", true));
+        page.putArray("link").addObject().put("relation", "next")
+                .put("url", "https://r4.smarthealthit.org/?_getpages=opaque&_count=20");
+        script.page("/Observation", page);
+        script.page("/", bundle(observation(PATIENT, "obs-2", "787-2", "80", "fL", true)));
+
+        ExternalFhirClient.SearchResult found = client(script).search("Observation", PATIENT);
+
+        assertThat(found.resources()).extracting(item -> item.path("id").asText()).containsExactly("obs-1", "obs-2");
+        assertThat(found.truncated()).isFalse();
+        assertThat(script.seen).hasSize(2);
     }
 
     @Test
@@ -376,9 +406,10 @@ class ExternalFhirClientTest {
             if (failure != null) {
                 throw failure;
             }
-            ArrayDeque<ExternalFhirClient.Fetched> queue = pages.get(uri.getPath());
+            String key = uri.getPath() == null || uri.getPath().isEmpty() ? "/" : uri.getPath();
+            ArrayDeque<ExternalFhirClient.Fetched> queue = pages.get(key);
             if (queue == null || queue.isEmpty()) {
-                throw new IllegalStateException("unexpected path");
+                throw new IllegalStateException("unexpected path " + uri.getPath());
             }
             return queue.remove();
         }
