@@ -178,6 +178,18 @@ def dispatch_external(client, generation, grant=None):
     return _generate_once(client, generation)
 
 
+def dispatch_jurisdiction(client, generation, profile, grant=None):
+    """One jurisdiction generateContent call. The grant cannot be a clinical grant."""
+    from app.jurisdiction_lab.generation import require_jurisdiction_generation
+
+    if type(grant) is not ExternalDispatchGrant or grant.consume() is not True:
+        raise ProviderError("egress_blocked")
+    require_jurisdiction_generation(generation, profile)
+    if generation.get("max_output_tokens") != 256:
+        raise ProviderError("not_configured")
+    return _generate_once(client, generation)
+
+
 def _generate_once(client, generation):
     require_official_client(client)
     config = types.GenerateContentConfig(

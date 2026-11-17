@@ -192,3 +192,7 @@ external-fhir:
   page-size: 20
   link-store-path: ${EXTERNAL_FHIR_LINK_STORE_PATH:${java.io.tmpdir}/healthcare-lab-external-fhir/patient-link.sqlite}
   audit-store-path: ${EXTERNAL_FHIR_AUDIT_STORE_PATH:${java.io.tmpdir}/healthcare-lab-external-fhir/request-audit.sqlite}
+
+jurisdiction-lab:
+  enabled: ${JURISDICTION_LAB_ENABLED:false}
+  profile: ${JURISDICTION_LAB_PROFILE:}

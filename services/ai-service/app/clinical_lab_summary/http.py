@@ -257,6 +257,12 @@ def _detail(case, access):
     ]
     if case.get("organization_id"):
         parts.append(_pair("Organización", case["organization_id"]))
+    evidence = case.get("clinical_evidence") or []
+    if evidence:
+        first = evidence[0]
+        parts.append(_pair("Perfil aplicado", first.get("profile_id") or ""))
+        parts.append(_pair("Versión del perfil", first.get("profile_version") or ""))
+        parts.append(_pair("Clase de validación", first.get("validation_class") or ""))
     receipt = case["receipt"] or {}
     for label, key in (
         ("Proveedor", "provider"), ("Modelo", "model"), ("Fase", "phase"),
@@ -267,6 +273,11 @@ def _detail(case, access):
         if key in receipt and receipt[key] is not None:
             parts.append(_pair(label, receipt[key]))
     parts.append("</dl>")
+    if evidence:
+        parts.append(
+            "<p class=\"warning\">El perfil aplicado es una regla interna de demostración. "
+            "Esta validación no constituye conformidad RENHICE, HCDSNS ni EHDS, "
+            "ni un documento IPS completo.</p>")
     if receipt.get("phase") == "intercepted":
         parts.append(
             "<p class=\"warning\">Esta ejecución usó el transporte Gemini interceptado. "
@@ -286,13 +297,36 @@ def _detail(case, access):
     for statement in statements:
         parts.append("<p class=\"statement\">" + escape(statement.get("text") or "") + "</p>")
     parts.append("</section>")
-    parts.append(_observations(case["sources"]))
+    if evidence:
+        parts.append(_clinical_evidence(evidence))
+    parts.append(_observations(case["sources"], verified=bool(evidence)))
     parts.append(_decision_block(case, access))
     parts.append(_audit(case))
     return "".join(parts)
 
 
-def _observations(sources):
+def _clinical_evidence(evidence):
+    rows = [
+        "<tr><th scope=\"col\">Fuente</th><th scope=\"col\">Recurso</th><th scope=\"col\">Código</th>"
+        "<th scope=\"col\">Valor</th><th scope=\"col\">UCUM</th><th scope=\"col\">Estado</th>"
+        "<th scope=\"col\">Procedencia</th></tr>"
+    ]
+    for item in evidence:
+        rows.append(
+            "<tr><td>" + escape(item["source"]) + "</td><td>" + escape(item["resource_id"])
+            + "</td><td>" + escape(item["code"]) + "</td><td>" + escape(item["value"])
+            + "</td><td>" + escape(item["ucum_system"] + " " + item["ucum_code"])
+            + "</td><td>" + escape(item["status"]) + "</td><td>" + escape(item["provenance_ref"])
+            + "</td></tr>")
+    return (
+        "<section class=\"panel\"><h2>Observaciones verificadas</h2>"
+        "<p>Estos valores salen de los recursos clínicos validados. "
+        "No se reconstruyen desde el texto del modelo.</p>"
+        "<div class=\"table-scroll\"><table><caption>Evidencia citada</caption>"
+        + "".join(rows) + "</table></div></section>")
+
+
+def _observations(sources, verified=False):
     parts = ["<section class=\"panel\"><h2>Referencias persistidas</h2>"]
     if not sources:
         parts.append("<p class=\"warning\">No hay referencias a observaciones en el registro.</p></section>")
@@ -312,7 +346,7 @@ def _observations(sources):
             + "</td><td>" + escape(view["value"]) + "</td><td>" + escape(view["unit"])
             + "</td><td>" + escape(view["range"]) + "</td><td><span class=\"status "
             + escape(view["kind"]) + "\">" + escape(view["semantic"]) + "</span></td></tr>")
-    if "absent" in kinds:
+    if "absent" in kinds and not verified:
         parts.append(
             "<p class=\"warning\">Dato ausente. Hay una referencia sin valor ni unidad persistidos. "
             "Esta página no los toma del texto del modelo.</p>")

@@ -3,7 +3,10 @@ package lab.healthcare.fhir.externalfhir;
 import lab.healthcare.fhir.federation.ClinicalConnector;
 import lab.healthcare.fhir.federation.FederationProperties;
 import lab.healthcare.fhir.federation.FederationService;
+import lab.healthcare.fhir.federation.JurisdictionBinding;
 import lab.healthcare.fhir.federation.audit.FederationSecurityAudit;
+import lab.healthcare.fhir.jurisdiction.JurisdictionLabProperties;
+import lab.healthcare.fhir.jurisdiction.JurisdictionProfile;
 import lab.healthcare.fhir.exchange.ExchangeStore;
 import lab.healthcare.fhir.interop.SourceRegistry;
 
@@ -18,6 +21,7 @@ import org.springframework.context.annotation.Primary;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -66,24 +70,38 @@ public class ExternalFhirConfiguration {
             ObjectMapper json,
             FederationSecurityAudit securityAudit,
             org.springframework.beans.factory.ObjectProvider<ExternalFhirProperties> external,
-            org.springframework.beans.factory.ObjectProvider<ExternalPatientLinkStore> links) {
+            org.springframework.beans.factory.ObjectProvider<ExternalPatientLinkStore> links,
+            org.springframework.beans.factory.ObjectProvider<JurisdictionLabProperties> jurisdiction) {
         ExternalFhirProperties properties = external.getIfAvailable();
         ExternalPatientLinkStore linkStore = links.getIfAvailable();
+        JurisdictionLabProperties jurisdictionProperties = jurisdiction.getIfAvailable();
         SourceRegistry effective = registry;
-        Set<String> explicit = Set.of();
+        Set<String> explicit = new java.util.LinkedHashSet<>();
+        Map<String, JurisdictionBinding> bindings = Map.of();
         if (properties != null && properties.isEnabled() && linkStore != null) {
             properties.requireClosed();
             effective = registry.withAdditional(properties.descriptor());
-            List<String> grant = new ArrayList<>(
-                    federation.getGrants().getOrDefault(properties.getCallerSystem(), List.of()));
-            if (!grant.contains(properties.getSourceKey())) {
-                grant.add(properties.getSourceKey());
-                federation.getGrants().put(properties.getCallerSystem(), List.copyOf(grant));
-            }
-            explicit = Set.of(properties.getSourceKey());
+            grant(federation, properties.getCallerSystem(), properties.getSourceKey());
+            explicit.add(properties.getSourceKey());
+        }
+        if (jurisdictionProperties != null && jurisdictionProperties.isEnabled()) {
+            JurisdictionProfile profile = JurisdictionProfile.require(jurisdictionProperties.getProfile());
+            effective = effective.withAdditional(profile.descriptor());
+            grant(federation, "mini-his", profile.sourceKey());
+            explicit.add(profile.sourceKey());
+            bindings = Map.of(profile.sourceKey(), profile.binding());
         }
         return new FederationService(
-                effective, store, connectors, federation, json, securityAudit, linkStore, explicit);
+                effective, store, connectors, federation, json, securityAudit, linkStore,
+                Set.copyOf(explicit), bindings);
+    }
+
+    private static void grant(FederationProperties federation, String caller, String sourceKey) {
+        List<String> grant = new ArrayList<>(federation.getGrants().getOrDefault(caller, List.of()));
+        if (!grant.contains(sourceKey)) {
+            grant.add(sourceKey);
+            federation.getGrants().put(caller, List.copyOf(grant));
+        }
     }
 
     private static Path path(String configured, String name) {
