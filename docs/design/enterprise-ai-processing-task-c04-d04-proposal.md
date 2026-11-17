@@ -360,4 +360,14 @@ Siguen pendientes el IAM de producción, la atribución distinta del administrad
 
 ### EGRESS-001 — Controlled Real OpenAI Execution
 
-El siguiente incremento planificado, todavía sin implementar, es una primera llamada HTTPS real desde `NeutralModelGateway` a OpenAI. Usaría datos sintéticos, credenciales fuera del repositorio, la reserva durable de D04-B y una autorización expresa del Product Owner. Esta nota no modifica `send`, no activa `live-once` y no realiza ninguna solicitud externa.
+La ruta es `VacationClauseAgent` o el comando manual, luego `NeutralModelGateway`, la autorización durable, la reserva `held`, el consentimiento de esa ejecución y, solo entonces, `OneShotOpenAITransport` hacia Responses. No hay un segundo gateway. El agente no llama a OpenAI. Gemini permanece en `egress_blocked`.
+
+Sin `egress_consent`, `execute` usa el adaptador de laboratorio. `OpenAISDKTransport.send` sigue exigiendo `live_egress_enabled()`, que permanece en falso. `live-once` no se activa. El consentimiento no es un booleano de proceso: `OperationalEgressConsent.issue` exige la frase, la identidad, el permiso, el despliegue `openai-sdk-a` y el modelo `gpt-6-luna`. `claim` entrega una liberación que `send` gasta una sola vez.
+
+El límite de confianza queda entre la fila `held` y el HTTPS. SQLite confirma la reserva y la auditoría v3 antes del envío, en este archivo y un proceso. No promete que el proveedor haya ejecutado la llamada una sola vez, ni acuerdo entre réplicas. Una excepción de red, un timeout o un HTTP de error dejan la fila `held`. No hay reintento ni una segunda autorización de reemplazo. El costo publicado es `estimated`; `cost_exact` queda en falso porque no hay factura del proveedor. La cuenta de OpenAI no se consulta con una segunda llamada: el catálogo fija el modelo y el Product Owner lo confirma con la frase. Una respuesta de otro modelo se rechaza y no se reintenta.
+
+La primera llamada real no se ejecuta en las pruebas. El comando, desde `services/ai-service`, con la clave solo en el entorno local y sin proxy ni `OPENAI_BASE_URL`, es:
+
+`.\.venv\Scripts\python.exe -m app.enterprise_llm_providers.egress_once`
+
+Pide la frase `CONFIRMO EGRESS-001 UNA SOLICITUD openai gpt-6-luna vacation-days-v1 DATOS SINTETICOS SIN REINTENTO`. Usa el documento sintético ya fijado, `store=false`, `reasoning.effort=none` y un tope de salida de 256, que es el máximo ya tasado en la reserva de catálogo. Una salida de 16 tokens no cabe en el esquema estricto. El presupuesto no sube: el techo sigue siendo esa reserva. El marcador queda en `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-egress-001`. Un segundo intento, también de otro principal, recibe denegación. El comando histórico `live-once` se detiene antes del SDK.

@@ -170,9 +170,11 @@ def test_v3_rows_block_migration_without_a_partial_schema(tmp_path):
 
 
 def test_gateway_contract_and_transports_stay_closed(tmp_path):
-    parameters = tuple(inspect.signature(NeutralModelGateway.execute).parameters)
-    assert parameters == ("self", "access", "authorization_id", "budget_microusd", "resource_id",
-                          "deployment_id", "supplied_url", "operation_id")
+    signature = inspect.signature(NeutralModelGateway.execute)
+    assert tuple(signature.parameters) == (
+        "self", "access", "authorization_id", "budget_microusd", "resource_id",
+        "deployment_id", "supplied_url", "operation_id", "egress_consent")
+    assert signature.parameters["egress_consent"].default is None
     gateway = Path(__file__).resolve().parents[1] / "app" / "model_gateway" / "gateway.py"
     agent = Path(__file__).resolve().parents[1] / "app" / "model_gateway" / "agent.py"
     processing = Path(__file__).resolve().parents[1] / "app" / "enterprise_ai_processing" / "gateway.py"

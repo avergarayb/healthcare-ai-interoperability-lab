@@ -106,6 +106,8 @@ class ModelResponse:
     prompt_inferred: bool | None = None
     visible_inferred: bool | None = None
     included_output_tokens: int | None = None
+    provider_request_id: str | None = None
+    response_status: str | None = None
 
     def __repr__(self):
         return "ModelResponse(closed)"
@@ -141,6 +143,9 @@ class GatewayResult:
     prompt_inferred: bool | None = None
     visible_inferred: bool | None = None
     included_output_tokens: int | None = None
+    provider_request_id: str | None = None
+    response_status: str | None = None
+    cost_kind: str | None = None
 
     def __repr__(self):
         return "GatewayResult(closed)"

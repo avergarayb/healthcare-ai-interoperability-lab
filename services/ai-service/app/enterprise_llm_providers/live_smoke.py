@@ -1,8 +1,7 @@
 """Isolated smoke executor for one fixed synthetic fixture.
 
-The default mode does not open a socket. live-once reaches the SDK only after
-the owner types the confirmation on an interactive terminal. A permit object
-is not enough to send, and the public transport stays closed.
+The default mode does not open a socket. live-once stops before the SDK.
+The operational send is the neutral gateway with one execution consent.
 """
 import json
 import os
@@ -170,20 +169,12 @@ def _live_once(stdin, environ, clock):
         raise ProviderError("invalid_input")
     if _environment_redirect(environ) or _environment_redirect(os.environ):
         raise ProviderError("environment_redirect")
-    payload, reservation = prepare_fixed(clock)
+    prepare_fixed(clock)
     credential = environ.get("OPENAI_API_KEY")
     if type(credential) is not str or credential == "":
         raise ProviderError("credential_absent")
     _require_confirmation(stdin)
-    client = open_official_client(credential)
-    directory = default_attempt_directory(environ)
-    require_closed_payload(payload, TIMEOUT_SECONDS)
-    claim_attempt(directory)
-    try:
-        body = dispatch_responses(client, payload, TIMEOUT_SECONDS)
-        return _from_body(body, reservation, requests_sent=1)
-    except ProviderError as error:
-        return _failure_report(error, 1, reservation)
+    raise ProviderError("egress_blocked")
 
 
 def _require_confirmation(stdin):

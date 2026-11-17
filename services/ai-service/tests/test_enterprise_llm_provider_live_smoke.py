@@ -94,6 +94,20 @@ def _run(argv, stdin, environ):
     return cli(argv, stdin, environ, _clock)
 
 
+def test_c04c_live_once_stops_before_the_sdk(monkeypatch, tmp_path):
+    monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("socket")))
+
+    class _TTY(StringIO):
+        def isatty(self):
+            return True
+
+    report = _run(
+        ["live-once"], _TTY(CONFIRMATION_PHRASE + "\n"),
+        {"LOCALAPPDATA": str(tmp_path), "OPENAI_API_KEY": KEY})
+    assert report["reason"] == "egress_blocked" and report["requests_sent"] == 0
+    assert live_egress_enabled() is False and KEY not in json.dumps(report)
+
+
 def test_c04c_dry_run_does_not_open_a_socket(monkeypatch):
     def blocked(*args, **kwargs):
         raise AssertionError("socket")

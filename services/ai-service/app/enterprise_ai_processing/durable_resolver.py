@@ -39,6 +39,18 @@ class LedgerDurableAuthorization(DurableAuthorizationResolver):
             deployment.identity.model_id if allowed else None,
             organization_id if allowed else None)
 
+    def clock(self):
+        return self._ledger.clock
+
+    def confirm_hold(self, access, authorization_id, deployment, resource_id, budget_microusd):
+        """The hold must still be the committed row. A memory grant is not enough."""
+        try:
+            return self._ledger.read_operational_hold(
+                access, authorization_id, deployment.deployment_id, deployment.identity.provider_id,
+                deployment.identity.model_id, resource_id, budget_microusd)
+        except Exception:
+            return "storage_unavailable"
+
     def consume(self, access, authorization_id):
         try:
             self._ledger.consume_remote_reservation(access, authorization_id)
