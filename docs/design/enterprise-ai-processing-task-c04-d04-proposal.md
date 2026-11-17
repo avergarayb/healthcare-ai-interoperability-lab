@@ -383,3 +383,13 @@ La primera llamada real no se ejecuta aquí. El comando, desde `services/ai-serv
 `.\.venv\Scripts\python.exe -m app.enterprise_llm_providers.egress_gemini_once once`
 
 La frase es `CONFIRMO EGRESS-002 UNA SOLICITUD gemini gemini-3.5-flash-lite vacation-days-v1 DATOS SINTETICOS SIN REINTENTO`. El marcador queda en `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-egress-002`. Un segundo intento queda denegado. No hay reintento automático.
+
+### E2E-LLM-001 — LangGraph sobre el gateway neutral
+
+El grafo `VacationGraph` ordena admisión, una llamada y un registro público. El nodo de modelo llama a `VacationClauseAgent`, que llama a `NeutralModelGateway`. No importa el SDK de Gemini ni el grafo clínico de seguimiento. La operación sigue siendo `vacation-days-v1`; no se añade otra operación ni se reutiliza ese permiso para información sanitaria. `retry_policy` queda en `None`. Si la llamada externa falla, el mismo grafo no vuelve a invocar el gateway. Un intento legítimo posterior necesita otra autorización y no borra la reserva anterior. C03 permanece en `FakeEnterpriseModel`.
+
+La demo manual, no ejecutada en las pruebas, desde `services/ai-service` es:
+
+`.\.venv\Scripts\python.exe -m app.enterprise_llm_providers.vacation_graph_once once`
+
+Usa la misma frase de EGRESS-002, el permiso `e2e-llm-001-gemini` y el directorio `%LOCALAPPDATA%\healthcare-ai-interoperability-lab\c04-e2e-llm-001`.

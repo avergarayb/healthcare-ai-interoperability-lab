@@ -11,7 +11,7 @@ class VacationClauseAgent:
         self._gateway = gateway
 
     def run(self, access, authorization_id, budget_microusd, resource_id, deployment_id,
-            supplied_url=None, operation_id="vacation-days-v1"):
+            supplied_url=None, operation_id="vacation-days-v1", egress_consent=None):
         return self._gateway.execute(
             access, authorization_id, budget_microusd, resource_id, deployment_id,
-            supplied_url, operation_id)
+            supplied_url, operation_id, egress_consent)
