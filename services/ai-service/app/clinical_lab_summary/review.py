@@ -96,14 +96,14 @@ def list_reviews(path):
         if _has_decision_schema(connection):
             rows = connection.execute(
                 "SELECT review.review_id, review.authorization_id, review.patient_id, review.status, "
-                "decision.decision "
+                "decision.decision, decision.decided_at "
                 "FROM lab_summary_review AS review "
                 "LEFT JOIN lab_summary_decision AS decision ON decision.review_id = review.review_id "
                 "ORDER BY review.rowid"
             ).fetchall()
         else:
             rows = [
-                (row[0], row[1], row[2], row[3], None)
+                (row[0], row[1], row[2], row[3], None, None)
                 for row in connection.execute(
                     "SELECT review_id, authorization_id, patient_id, status FROM lab_summary_review ORDER BY rowid"
                 )
@@ -112,7 +112,7 @@ def list_reviews(path):
         connection.close()
     return [
         {"review_id": row[0], "authorization_id": row[1], "patient_id": row[2],
-         "status": row[3], "decision": row[4]}
+         "status": row[3], "decision": row[4], "decided_at": row[5]}
         for row in rows
     ]
 
@@ -289,12 +289,18 @@ def _sources(summary):
     found = []
     for statement in summary.get("statements") or []:
         for source in statement.get("sources") or []:
-            found.append({
+            if not isinstance(source, dict):
+                continue
+            item = {
                 "text": statement.get("text") or "",
                 "source": source.get("source") or "",
                 "resourceType": source.get("resourceType") or "",
                 "id": source.get("id") or "",
-            })
+            }
+            for key in ("system", "code", "unit", "value", "range_low", "range_high"):
+                if key in source:
+                    item[key] = source[key]
+            found.append(item)
     return found
 
 

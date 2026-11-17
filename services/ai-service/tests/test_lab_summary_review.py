@@ -198,5 +198,83 @@ def test_http_rejects_a_browser_role_and_records_one_decision(tmp_path):
             headers={"content-type": "application/x-www-form-urlencoded", **ORIGIN})
         assert again.status_code == 409
         assert _original(path) == before
+        assert "Confirmo esta decisión" in page.text
+        assert "No es autenticación clínica de producción" in page.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_dashboard_filters_persisted_rows_and_does_not_parse_quantities(tmp_path):
+    path = tmp_path / "review.sqlite3"
+    summary = {
+        "kind": "lab-result-summary-v1",
+        "review": "pending_human_review",
+        "statements": [{
+            "text": "GLU 141 mmol/L",
+            "sources": [
+                {"source": "mini-lis", "resourceType": "Observation", "id": "MLS-RES-OLD"},
+                {
+                    "source": "mini-lis", "resourceType": "Observation", "id": "MLS-RES-UNCODED",
+                    "value": 141, "unit": "mmol/L",
+                },
+                {
+                    "source": "mini-his", "resourceType": "Observation", "id": "MHS-RES-001",
+                    "system": "http://unitsofmeasure.org", "code": "g/dL", "unit": "g/dL",
+                    "value": 13.4, "range_low": 12, "range_high": 16,
+                },
+            ],
+        }],
+    }
+    queue_summary(path, REVIEW_ID, "e2e-clinical-001-gemini", "MHS-PAT-001", summary)
+    other = "11111111-1111-4111-8111-111111111111"
+    queue_summary(path, other, "lab-other", "MHS-PAT-002", SUMMARY)
+    prepare_decision_store(path)
+    decide(path, other, _reviewer(), "approved", "Registro sintético.", WHEN)
+    settings = Settings(
+        model_boundary_base_url="http://model-boundary.test",
+        model_boundary_path="/api/model-boundary/v1",
+        model_boundary_timeout_seconds=5,
+        model_boundary_service_token="synthetic-service-token-a",
+        human_review_form_signing_secret="synthetic-form-signing-secret-b",
+        host="127.0.0.1",
+        port=8090,
+        ai_review_db_path=str(tmp_path / "follow-up.sqlite3"),
+        institutional_knowledge_db_path=str(tmp_path / "knowledge.sqlite3"),
+        human_session_db_path=str(tmp_path / "human-session.sqlite3"),
+        human_review_development_auth_enabled=True,
+        human_review_development_auth_secret="development-secret-value-32chars-min",
+        human_review_development_principal_id="lab-reviewer",
+        human_review_development_principal_display_name="Lab reviewer",
+        lab_summary_review_db_path=str(path),
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        client = TestClient(app, base_url="http://127.0.0.1")
+        logged = client.post(
+            "/review-login",
+            content=b"developmentSecret=development-secret-value-32chars-min",
+            headers={"content-type": "application/x-www-form-urlencoded", **ORIGIN},
+            follow_redirects=False)
+        client.cookies.set(SESSION_COOKIE, logged.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1])
+        page = client.get("/lab-summaries")
+        assert page.status_code == 200
+        assert ">1<" in page.text or page.text.count("<strong>1</strong>") == 2
+        assert page.text.count("<strong>1</strong>") >= 2
+        assert page.text.count("<strong>0</strong>") == 1
+        pending = client.get("/lab-summaries?estado=pending&q=MHS-PAT-002")
+        assert "Ningún resumen coincide" in pending.text
+        assert "/lab-summaries/" + other not in pending.text
+        detail = client.get("/lab-summaries/" + REVIEW_ID)
+        assert "GLU 141 mmol/L" in detail.text
+        assert "texto histórico generado por el modelo" in detail.text
+        assert "no está semánticamente validada" in detail.text
+        assert "Dato ausente" in detail.text
+        assert "Unidad no verificable" in detail.text
+        assert "No registrado" in detail.text
+        assert "70-110" not in detail.text
+        assert "mini-lis" in detail.text and "MLS-RES-OLD" in detail.text
+        assert "MLS-RES-UNCODED" in detail.text and "mmol/L" in detail.text
+        assert "13.4" in detail.text and "g/dL" in detail.text and "12–16 g/dL" in detail.text
+        assert "UCUM verificable" in detail.text
     finally:
         app.dependency_overrides.clear()

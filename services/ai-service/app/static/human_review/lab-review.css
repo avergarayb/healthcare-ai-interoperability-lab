@@ -1,0 +1,292 @@
+.lab-shell {
+  background: #f6f8fb;
+  margin: 0;
+  max-width: none;
+}
+
+.lab-shell .skip {
+  left: 0.5rem;
+  position: absolute;
+  top: -3rem;
+}
+
+.lab-shell .skip:focus {
+  top: 0.5rem;
+}
+
+.lab-frame {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.lab-shell aside {
+  background: #12324d;
+  color: #f4f7fb;
+  padding: 1.25rem 1rem;
+}
+
+.lab-shell aside a,
+.lab-shell aside a:visited {
+  border-radius: 0.25rem;
+  color: #f4f7fb;
+  display: block;
+  padding: 0.45rem 0.65rem;
+  text-decoration: none;
+}
+
+.lab-shell aside a[aria-current="page"],
+.lab-shell aside a:hover,
+.lab-shell aside a:focus {
+  background: #1f4e79;
+  outline: 2px solid #f4f7fb;
+  outline-offset: 2px;
+}
+
+.brand {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 0.4rem;
+}
+
+.disclaimer {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  margin: 0 0 1rem;
+}
+
+.lab-main {
+  min-width: 0;
+  padding: 1.1rem 1.4rem 2.4rem;
+}
+
+.lab-shell header {
+  align-items: baseline;
+  color: #3d4c5c;
+  display: flex;
+  font-size: 0.9rem;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.lab-shell header p {
+  margin: 0;
+}
+
+.lab-shell h1 {
+  font-size: 1.7rem;
+  margin: 0.35rem 0 0.8rem;
+}
+
+.lab-shell h2 {
+  font-size: 1.15rem;
+  margin: 0 0 0.6rem;
+}
+
+.metrics {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 0.85rem;
+}
+
+.metric {
+  background: #ffffff;
+  border: 1px solid #d5dde6;
+  border-radius: 0.4rem;
+  color: #1c1c1c;
+  display: block;
+  padding: 0.7rem 0.85rem;
+  text-decoration: none;
+}
+
+.metric span {
+  color: #3d4c5c;
+  font-size: 0.85rem;
+}
+
+.metric strong {
+  display: block;
+  font-size: 1.7rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.filters {
+  align-items: end;
+  background: #ffffff;
+  border: 1px solid #d5dde6;
+  border-radius: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.7rem;
+  margin: 0 0 0.4rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.filters label {
+  display: grid;
+  font-size: 0.8rem;
+  gap: 0.15rem;
+}
+
+.filters input,
+.filters select {
+  min-height: 2rem;
+  padding: 0.15rem 0.4rem;
+}
+
+.filters input[name="q"] {
+  width: 14rem;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d5dde6;
+  border-radius: 0.4rem;
+  margin-top: 0.9rem;
+  padding: 0.85rem 1rem 1rem;
+}
+
+.model-text {
+  background: #f7f4ea;
+  border-color: #e2d7b8;
+}
+
+.statement {
+  font-size: 1.05rem;
+  margin-bottom: 0.4rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.lab-shell table {
+  background: #ffffff;
+  min-width: 36rem;
+}
+
+.lab-shell caption {
+  margin-bottom: 0.35rem;
+}
+
+.lab-shell th {
+  background: #eef3f8;
+}
+
+.lab-shell dl {
+  display: grid;
+  gap: 0.35rem 1rem;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  margin: 0;
+}
+
+.lab-shell dt {
+  font-weight: 600;
+}
+
+.lab-shell dd {
+  margin: 0;
+}
+
+.status {
+  border-radius: 999px;
+  color: #1c1c1c;
+  display: inline-block;
+  font-weight: 600;
+  padding: 0.1rem 0.55rem;
+  white-space: nowrap;
+}
+
+.status.pending,
+.status.unverified {
+  background: #fff4d6;
+  border: 1px solid #8a6a1f;
+}
+
+.status.approved {
+  background: #e5f4ea;
+  border: 1px solid #1f6b3a;
+}
+
+.status.verified {
+  background: #e7f0f8;
+  border: 1px solid #1f4e79;
+}
+
+.status.rejected {
+  background: #fde8e6;
+  border: 1px solid #8d2f28;
+}
+
+.status.absent {
+  background: #eef1f4;
+  border: 1px solid #4d5b6a;
+}
+
+.warning,
+.empty {
+  background: #f7f8fa;
+  border-left: 4px solid #1f4e79;
+  color: #1c1c1c;
+  padding: 0.6rem 0.8rem;
+}
+
+.decision {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 0.8rem;
+  max-width: 40rem;
+}
+
+.decision label {
+  flex: 1 1 16rem;
+}
+
+.decision input[name="note"] {
+  min-height: 2rem;
+  width: 100%;
+}
+
+.decision button {
+  justify-self: start;
+  margin-right: 0.5rem;
+  min-height: 2.2rem;
+  padding: 0.25rem 0.8rem;
+}
+
+@media (max-width: 800px) {
+  .lab-frame {
+    grid-template-columns: 1fr;
+  }
+
+  .lab-shell aside nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .lab-shell aside a {
+    display: inline-block;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  }
+
+  .lab-shell dl {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .lab-main {
+    padding: 0.9rem 0.8rem 1.6rem;
+  }
+
+  .filters input[name="q"] {
+    width: 12rem;
+  }
+}
