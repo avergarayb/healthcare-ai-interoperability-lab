@@ -7,6 +7,8 @@ POLICY_REF = "model-gateway-policy-v1"
 OPERATION_ID = "vacation-days-v1"
 CLINICAL_OPERATION_ID = "lab-result-summary-v1"
 CLINICAL_POLICY_REF = "lab-result-summary-policy-v1"
+EXTERNAL_OPERATION_ID = "external-fhir-lab-summary-v1"
+EXTERNAL_POLICY_REF = "external-fhir-lab-summary-policy-v1"
 CAPABILITY = "structured_output+usage_report"
 SCOPES = {
     ("openai-sdk-a", "openai", "gpt-6-luna"),

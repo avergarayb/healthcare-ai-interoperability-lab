@@ -474,9 +474,16 @@ def _receipt(path, authorization_id):
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(receipt, dict) or receipt.get("operation_id") != "lab-result-summary-v1":
+    if not isinstance(receipt, dict):
         return None
-    if authorization_id != "e2e-clinical-001-gemini":
+    operation = receipt.get("operation_id")
+    if operation == "lab-result-summary-v1":
+        if authorization_id != "e2e-clinical-001-gemini":
+            return None
+    elif operation == "external-fhir-lab-summary-v1":
+        if authorization_id != "external-fhir-001" or receipt.get("phase") != "intercepted":
+            return None
+    else:
         return None
     kept = {
         "provider": receipt.get("provider"),

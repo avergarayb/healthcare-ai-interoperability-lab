@@ -150,6 +150,35 @@ def dispatch_clinical(client, generation, grant=None):
     require_clinical_generation(generation)
     if generation.get("max_output_tokens") != 256:
         raise ProviderError("not_configured")
+    return _generate_once(client, generation)
+
+
+class ExternalDispatchGrant:
+    """One pass for the external FHIR summary. A clinical grant cannot spend it."""
+
+    def __init__(self):
+        self._open = True
+
+    def consume(self):
+        if self._open is not True:
+            return False
+        self._open = False
+        return True
+
+
+def dispatch_external(client, generation, grant=None):
+    """One external generateContent call. A missing injected client cannot open the network."""
+    from app.external_fhir.generation import require_external_generation
+
+    if type(grant) is not ExternalDispatchGrant or grant.consume() is not True:
+        raise ProviderError("egress_blocked")
+    require_external_generation(generation)
+    if generation.get("max_output_tokens") != 256:
+        raise ProviderError("not_configured")
+    return _generate_once(client, generation)
+
+
+def _generate_once(client, generation):
     require_official_client(client)
     config = types.GenerateContentConfig(
         system_instruction=generation["system_instruction"],

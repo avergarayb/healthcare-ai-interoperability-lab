@@ -73,6 +73,7 @@ def render_lab_summary(request: Request, settings: Settings, review_id: str) -> 
             return _html(_page(access, "Resumen", denied, "detalle"), 403)
     try:
         case = read_review(path, review_id)
+        case["organization_id"] = review_organization(path, review_id) or ""
     except ReviewError as error:
         status = 404 if error.reason == "not_found" else 503
         return _html(_page(access, "Resumen", _p("El resumen no está disponible."), "bandeja"), status)
@@ -254,6 +255,8 @@ def _detail(case, access):
         _pair("Operación", summary.get("kind") or ""),
         _pair("Revisión del modelo", summary.get("review") or ""),
     ]
+    if case.get("organization_id"):
+        parts.append(_pair("Organización", case["organization_id"]))
     receipt = case["receipt"] or {}
     for label, key in (
         ("Proveedor", "provider"), ("Modelo", "model"), ("Fase", "phase"),
@@ -263,7 +266,12 @@ def _detail(case, access):
     ):
         if key in receipt and receipt[key] is not None:
             parts.append(_pair(label, receipt[key]))
-    parts.append("</dl></section>")
+    parts.append("</dl>")
+    if receipt.get("phase") == "intercepted":
+        parts.append(
+            "<p class=\"warning\">Esta ejecución usó el transporte Gemini interceptado. "
+            "No es una respuesta del proveedor real.</p>")
+    parts.append("</section>")
     statements = summary.get("statements") or []
     parts.append(
         "<section class=\"panel model-text\"><h2>Texto original generado por el modelo</h2>"

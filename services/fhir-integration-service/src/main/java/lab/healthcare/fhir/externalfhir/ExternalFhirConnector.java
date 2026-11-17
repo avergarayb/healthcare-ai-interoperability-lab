@@ -42,7 +42,11 @@ public final class ExternalFhirConnector implements ClinicalConnector {
                 }
                 yield new Collected(List.of(patient), false);
             }
-            case "Observation", "DiagnosticReport" -> {
+            case "Observation" -> {
+                ExternalFhirClient.SearchResult result = client.searchLaboratoryQuantities(patientId);
+                yield new Collected(result.resources(), result.truncated());
+            }
+            case "DiagnosticReport" -> {
                 ExternalFhirClient.SearchResult result = client.search(resourceType, patientId);
                 yield new Collected(result.resources(), result.truncated());
             }
