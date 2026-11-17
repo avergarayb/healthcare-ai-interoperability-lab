@@ -171,3 +171,5 @@ A future Python client can `POST /api/clinical-federation/v1/context` with the p
 ## Not in this contract
 
 Probabilistic matching, a second HAPI FHIR server, Kafka, RabbitMQ, a new user interface, LangGraph changes, and cross-organization reads without a grant.
+
+An external FHIR R4 reader is specified separately in [external FHIR R4 v1](external-fhir-r4-v1.md). It does not change this envelope, this contract version, or the checked-in grant list. When that reader is enabled, `smart-sandbox` is granted only for an explicit `sources` entry and only through an explicit patient link. Omitting `sources` does not add it.

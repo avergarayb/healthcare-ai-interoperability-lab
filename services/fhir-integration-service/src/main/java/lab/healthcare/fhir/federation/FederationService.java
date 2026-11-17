@@ -59,6 +59,8 @@ public class FederationService {
     private final FederationProperties properties;
     private final ObjectMapper json;
     private final FederationSecurityAudit securityAudit;
+    private final lab.healthcare.fhir.externalfhir.ExternalPatientLinkStore externalLinks;
+    private final Set<String> explicitSources;
 
     public FederationService(
             SourceRegistry registry,
@@ -67,6 +69,18 @@ public class FederationService {
             FederationProperties properties,
             ObjectMapper json,
             FederationSecurityAudit securityAudit) {
+        this(registry, store, connectors, properties, json, securityAudit, null, Set.of());
+    }
+
+    public FederationService(
+            SourceRegistry registry,
+            ExchangeStore store,
+            List<ClinicalConnector> connectors,
+            FederationProperties properties,
+            ObjectMapper json,
+            FederationSecurityAudit securityAudit,
+            lab.healthcare.fhir.externalfhir.ExternalPatientLinkStore externalLinks,
+            Set<String> explicitSources) {
         this.registry = registry;
         this.store = store;
         this.connectors = new LinkedHashMap<>();
@@ -76,6 +90,8 @@ public class FederationService {
         this.properties = properties;
         this.json = json;
         this.securityAudit = securityAudit;
+        this.externalLinks = externalLinks;
+        this.explicitSources = explicitSources == null ? Set.of() : Set.copyOf(explicitSources);
     }
 
     public JsonNode query(String callerSystem, JsonNode request) {
@@ -282,6 +298,13 @@ public class FederationService {
         if (sourceKey.equals(requested.patientSystemKey())) {
             return connector.resolvePatient(requested.identifierSystem(), requested.identifierValue());
         }
+        if (externalLinks != null && externalLinks.owns(sourceKey)) {
+            return externalLinks.find(
+                    requested.patientSystemKey(),
+                    requested.identifierSystem(),
+                    requested.identifierValue(),
+                    sourceKey).orElse(null);
+        }
         return store.findPatientLink(
                 requested.patientSystemKey(),
                 requested.identifierSystem(),
@@ -359,7 +382,9 @@ public class FederationService {
 
     private List<String> select(String caller, List<String> requested) {
         List<String> granted = properties.getGrants().getOrDefault(caller, List.of());
-        List<String> chosen = requested == null ? granted : requested;
+        List<String> chosen = requested == null
+                ? granted.stream().filter(source -> !explicitSources.contains(source)).toList()
+                : requested;
         if (chosen.isEmpty() || chosen.size() > properties.getMaxSources()) {
             throw FederationException.invalidRequest();
         }

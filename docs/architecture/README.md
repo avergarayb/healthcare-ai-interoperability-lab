@@ -156,6 +156,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 - [Clinical review context V1 contract](../contracts/clinical-review-context-v1.md)
 - [Clinical Read API v1 contract](../contracts/clinical-read-v1.md)
 - [Clinical Federation v1 contract](../contracts/clinical-federation-v1.md)
+- [External FHIR R4 v1](../contracts/external-fhir-r4-v1.md) — opt-in read of one public synthetic sandbox. It is not an Epic or Oracle integration.
 - [AI clinical federation consumer](../contracts/ai-clinical-federation-v1.md)
 - [Federated protocol evaluation v1](../contracts/federated-protocol-evaluation-v1.md)
 - [Cross-organization laboratory result review v1](../contracts/cross-org-lab-result-review-v1.md)

@@ -1,5 +1,7 @@
 package lab.healthcare.fhir.clinicalread;
 
+import java.util.Set;
+
 /**
  * Stable failure for the clinical read API. The message is the error code and
  * contains no clinical payload.
@@ -43,5 +45,14 @@ public final class ClinicalReadException extends RuntimeException {
 
     public static ClinicalReadException invalidSource() {
         return new ClinicalReadException("invalid_source", 422);
+    }
+
+    public static ClinicalReadException external(String code) {
+        if (code == null || !Set.of(
+                "unauthorized", "forbidden", "rate_limited", "source_error", "timeout",
+                "redirect_rejected", "response_rejected").contains(code)) {
+            throw new IllegalArgumentException("external code");
+        }
+        return new ClinicalReadException(code, 503);
     }
 }
