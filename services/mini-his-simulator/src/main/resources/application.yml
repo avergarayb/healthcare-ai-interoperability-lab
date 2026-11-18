@@ -15,3 +15,7 @@ mini-his:
     service-token: ${MINI_HIS_EXCHANGE_TOKEN:}
     connect-timeout: 2s
     read-timeout: 5s
+  inpatient:
+    service-token: ${MINI_HIS_INPATIENT_TOKEN:}
+    ward-password: ${MINI_HIS_WARD_PASSWORD:}
+    coordinator-url: ${DISCHARGE_COORDINATOR_URL:}
