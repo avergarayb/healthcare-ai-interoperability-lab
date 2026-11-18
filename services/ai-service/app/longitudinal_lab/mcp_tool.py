@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 from app.clinical_federation_client import ClinicalFederationClient, FederationClientError
 from app.enterprise_llm_providers.errors import ProviderError
 from app.jurisdiction_lab.profile import CALLER_ORGANIZATION, CALLER_SYSTEM
+from app.lab_federation_hosts import federation_host_allowed
 
 from .compare import collect_observations
 from .series import OPERATION_ID, series_for
@@ -94,7 +95,7 @@ def _client_allowed(client, profile):
     if client.patient_identifier_system != profile.patient_system or client.sources != (profile.source_key,):
         return False
     host = urlsplit(client.base_url).hostname or ""
-    return host in {"127.0.0.1", "localhost"}
+    return federation_host_allowed(host, profile.source_key)
 
 
 def _schema():
