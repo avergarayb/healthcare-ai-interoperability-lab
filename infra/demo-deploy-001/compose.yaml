@@ -1,0 +1,277 @@
+name: demo-deploy-001
+
+x-federation-env: &federation-env
+  JURISDICTION_LAB_ENABLED: "true"
+  EXTERNAL_FHIR_ENABLED: "false"
+  FEDERATION_SECURITY_AUDIT_STORE_PATH: /var/lab/federation-audit/security-audit.sqlite
+
+x-ai-env: &ai-env
+  AI_SERVICE_HOST: 127.0.0.1
+  AI_SERVICE_PORT: "8090"
+  AI_CLINICAL_CONTEXT_MODE: federated
+  AI_FEDERATION_REQUESTING_ORGANIZATION_ID: org-mini-his
+  AI_FEDERATION_PATIENT_SYSTEM_KEY: mini-his
+  LLM_EXPERIMENTAL_ENABLED: "false"
+  FOLLOWUP_AGENT_ENABLED: "false"
+  HUMAN_REVIEW_DEVELOPMENT_AUTH_ENABLED: "false"
+  LAB_REVIEW_IAM_ENABLED: "true"
+  LAB_REVIEW_IAM_ALLOW_HTTP_LOOPBACK: "false"
+  LAB_REVIEW_IAM_ISSUER: https://demo.localhost:18443/realms/demo-deploy
+  LAB_REVIEW_IAM_DISCOVERY_URL: https://demo.localhost:18443/realms/demo-deploy/.well-known/openid-configuration
+  LAB_REVIEW_IAM_JWKS_URI: https://demo.localhost:18443/realms/demo-deploy/protocol/openid-connect/certs
+  LAB_REVIEW_IAM_CLIENT_ID: lab-review-web
+  LAB_REVIEW_IAM_BINDINGS_PATH: /run/secrets/bindings
+  LAB_REVIEW_IAM_SESSION_DB: /var/lab/iam/session.sqlite3
+  LAB_SUMMARY_REVIEW_DB: /var/lab/review/lab-summary.sqlite3
+  PLATFORM_REVIEW_DB: /var/lab/review/lab-summary.sqlite3
+  PLATFORM_IN_CONTAINER: "true"
+  PLATFORM_LEDGER_ROOT: /var/lab/ledger
+  PLATFORM_AI_URL: http://127.0.0.1:8090
+  PLATFORM_TOKEN_FILE: /run/secrets/federation_token
+  AI_REVIEW_DB_PATH: /var/lab/followup/review.sqlite3
+  HUMAN_SESSION_DB_PATH: /var/lab/human/session.sqlite3
+  INSTITUTIONAL_KNOWLEDGE_DB_PATH: /var/lab/knowledge/institutional.sqlite3
+  DEMO_TRUST_PROXY: "true"
+  DEMO_FORWARDED_ALLOW_IPS: "*"
+  DEMO_CA_FILE: /run/demo-ca/ca.crt
+  DEMO_ISSUER: https://demo.localhost:18443/realms/demo-deploy
+  SSL_CERT_FILE: /run/demo-ca/ca.crt
+  REQUESTS_CA_BUNDLE: /run/demo-ca/ca.crt
+
+x-java-health: &java-health
+  test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8081'"]
+  interval: 10s
+  timeout: 5s
+  retries: 18
+  start_period: 90s
+
+x-ai-health: &ai-health
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 25s
+
+x-log: &log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  proxy:
+    image: caddy:2.10.2-alpine
+    ports:
+      - "127.0.0.1:18080:18080"
+      - "127.0.0.1:18443:18443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${DEMO_RUN_DIR:?Run directory required}/certs:/certs:ro
+    read_only: true
+    tmpfs: [/tmp, /data, /config]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -S -O /dev/null --header=Host:pe.demo.localhost http://127.0.0.1:18080/health 2>&1 | grep -q ' 301 '"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *log
+    networks:
+      edge:
+        aliases:
+          - demo.localhost
+          - pe.demo.localhost
+          - es.demo.localhost
+
+  keycloak-db:
+    image: postgres:16.10-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [demo-keycloak-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *log
+    networks: [data]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
+    entrypoint: [/bin/bash, -ec]
+    command:
+      - |
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(</run/secrets/bootstrap_password)"
+        export KC_DB_PASSWORD="$$(</run/secrets/db_password)"
+        exec /opt/keycloak/bin/kc.sh start-dev --import-realm --http-enabled=true
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: demo-deploy-bootstrap
+      KC_HOSTNAME: https://demo.localhost:18443
+      KC_HOSTNAME_STRICT: "true"
+      KC_HOSTNAME_STRICT_HTTPS: "true"
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_CACHE: local
+      KC_LOG_LEVEL: WARN
+      KC_HTTP_ACCESS_LOG_ENABLED: "false"
+    volumes:
+      - demo-keycloak:/opt/keycloak/data
+      - type: bind
+        source: ${DEMO_RUN_DIR:?Run directory required}/realm.json
+        target: /opt/keycloak/data/import/realm.json
+        read_only: true
+    secrets: [bootstrap_password, db_password]
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 40s
+    mem_limit: 1g
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [edge, data]
+
+  federation-pe:
+    profiles: ["peru"]
+    image: demo-deploy-federation:0.1.0
+    build:
+      context: ../..
+      dockerfile: services/fhir-integration-service/Dockerfile
+    environment:
+      <<: *federation-env
+      JURISDICTION_LAB_PROFILE: pe-lab-demo-v1
+    volumes: [demo-pe-data:/var/lab]
+    secrets: [federation_token]
+    healthcheck: *java-health
+    mem_limit: 1g
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [edge]
+
+  federation-es:
+    profiles: ["spain"]
+    image: demo-deploy-federation:0.1.0
+    build:
+      context: ../..
+      dockerfile: services/fhir-integration-service/Dockerfile
+    environment:
+      <<: *federation-env
+      JURISDICTION_LAB_PROFILE: es-lab-demo-v1
+    volumes: [demo-es-data:/var/lab]
+    secrets: [federation_token]
+    healthcheck: *java-health
+    mem_limit: 1g
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [edge]
+
+  ai-pe:
+    profiles: ["peru"]
+    image: demo-deploy-ai:0.1.0
+    build:
+      context: ../../services/ai-service
+      dockerfile: Dockerfile
+    environment:
+      <<: *ai-env
+      PLATFORM_PROFILE: pe-lab-demo-v1
+      PLATFORM_FEDERATION_URL: http://federation-pe:8081
+      MODEL_BOUNDARY_BASE_URL: http://federation-pe:8081
+      AI_FEDERATION_SOURCES: pe-lab-demo
+      AI_FEDERATION_PATIENT_IDENTIFIER_SYSTEM: https://lab.local/jurisdiction/pe/patient
+      LAB_REVIEW_IAM_REDIRECT_URI: https://pe.demo.localhost:18443/lab-review-iam/callback
+    volumes:
+      - demo-pe-data:/var/lab
+      - ${DEMO_RUN_DIR:?Run directory required}/certs:/run/demo-ca:ro
+      - ../platform-001:/opt/platform:ro
+      - ./:/opt/demo:ro
+    secrets: [federation_token, boundary_token, signing_secret, bindings]
+    depends_on:
+      federation-pe:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck: *ai-health
+    mem_limit: 768m
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [edge]
+
+  ai-es:
+    profiles: ["spain"]
+    image: demo-deploy-ai:0.1.0
+    build:
+      context: ../../services/ai-service
+      dockerfile: Dockerfile
+    environment:
+      <<: *ai-env
+      PLATFORM_PROFILE: es-lab-demo-v1
+      PLATFORM_FEDERATION_URL: http://federation-es:8081
+      MODEL_BOUNDARY_BASE_URL: http://federation-es:8081
+      AI_FEDERATION_SOURCES: es-lab-demo
+      AI_FEDERATION_PATIENT_IDENTIFIER_SYSTEM: https://lab.local/jurisdiction/es/patient
+      LAB_REVIEW_IAM_REDIRECT_URI: https://es.demo.localhost:18443/lab-review-iam/callback
+    volumes:
+      - demo-es-data:/var/lab
+      - ${DEMO_RUN_DIR:?Run directory required}/certs:/run/demo-ca:ro
+      - ../platform-001:/opt/platform:ro
+      - ./:/opt/demo:ro
+    secrets: [federation_token, boundary_token, signing_secret, bindings]
+    depends_on:
+      federation-es:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck: *ai-health
+    mem_limit: 768m
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [edge]
+
+networks:
+  edge:
+    name: demo-deploy-001-edge
+  data:
+    name: demo-deploy-001-data
+
+secrets:
+  federation_token:
+    file: ${DEMO_RUN_DIR:?Run directory required}/federation-token
+  boundary_token:
+    file: ${DEMO_RUN_DIR:?Run directory required}/boundary-token
+  signing_secret:
+    file: ${DEMO_RUN_DIR:?Run directory required}/signing-secret
+  bindings:
+    file: ${DEMO_RUN_DIR:?Run directory required}/bindings.json
+  bootstrap_password:
+    file: ${DEMO_RUN_DIR:?Run directory required}/bootstrap-password.txt
+  db_password:
+    file: ${DEMO_RUN_DIR:?Run directory required}/db-password.txt
+
+volumes:
+  demo-keycloak-db:
+  demo-keycloak:
+  demo-pe-data:
+  demo-es-data:

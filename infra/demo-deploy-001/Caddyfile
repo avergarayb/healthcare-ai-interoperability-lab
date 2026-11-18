@@ -1,0 +1,79 @@
+{
+	admin off
+	auto_https disable_redirects
+	servers {
+		timeouts {
+			read_body 30s
+			read_header 10s
+			write 60s
+			idle 120s
+		}
+	}
+}
+
+(common) {
+	encode gzip
+	request_body {
+		max_size 1MB
+	}
+	header {
+		Strict-Transport-Security "max-age=3600"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+		-Server
+	}
+	log {
+		output stdout
+		format filter {
+			request>headers>Cookie delete
+			request>headers>Authorization delete
+			request>headers>X-Service-Token delete
+			request>uri query {
+				delete code
+				delete state
+				delete nonce
+				delete code_challenge
+				delete code_verifier
+				delete session_state
+				delete access_token
+				delete id_token
+				delete token
+			}
+		}
+	}
+}
+
+http://demo.localhost:18080, http://pe.demo.localhost:18080, http://es.demo.localhost:18080 {
+	redir https://{host}:18443{uri} permanent
+}
+
+https://demo.localhost:18443 {
+	tls /certs/cert.pem /certs/key.pem
+	import common
+	handle /admin* {
+		respond "not published" 404
+	}
+	handle /realms/demo-deploy/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /realms/* {
+		respond "not published" 404
+	}
+	handle /resources/* {
+		reverse_proxy keycloak:8080
+	}
+	respond "not published" 404
+}
+
+https://pe.demo.localhost:18443 {
+	tls /certs/cert.pem /certs/key.pem
+	import common
+	reverse_proxy ai-pe:8090
+}
+
+https://es.demo.localhost:18443 {
+	tls /certs/cert.pem /certs/key.pem
+	import common
+	reverse_proxy ai-es:8090
+}

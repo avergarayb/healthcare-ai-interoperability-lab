@@ -1,0 +1,31 @@
+# Example only. Compose does not mount this file.
+# Replace the host with the name the Product Owner confirms. Do not invent one.
+# Use Caddy's public certificate issuer only after DNS points at the VM and
+# DEMO_VM_AUTHORIZED is set. Do not copy the local test certificate here.
+
+https://{$DEMO_PUBLIC_HOST} {
+	encode gzip
+	request_body {
+		max_size 1MB
+	}
+	header {
+		Strict-Transport-Security "max-age=86400"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+		-Server
+	}
+	handle /admin* {
+		respond "not published" 404
+	}
+	handle /realms/demo-deploy/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /realms/* {
+		respond "not published" 404
+	}
+	handle /resources/* {
+		reverse_proxy keycloak:8080
+	}
+	respond "not published" 404
+}

@@ -94,12 +94,22 @@ def main() -> None:
     _secret("boundary_token", "MODEL_BOUNDARY_SERVICE_TOKEN")
     _secret("signing_secret", "HUMAN_REVIEW_FORM_SIGNING_SECRET")
     os.environ.pop("GEMINI_API_KEY", None)
+    os.environ.pop("OPENAI_API_KEY", None)
+    ca = Path(os.environ.get("DEMO_CA_FILE", ""))
+    if ca.is_file():
+        os.environ["SSL_CERT_FILE"] = str(ca)
+        os.environ["REQUESTS_CA_BUNDLE"] = str(ca)
     upstream = os.environ.get("PLATFORM_IAM_UPSTREAM", "").strip()
     if upstream:
         _forward(int(os.environ.get("PLATFORM_IAM_LISTEN", "18340")), upstream)
     profile = os.environ.get("PLATFORM_PROFILE", "unset")
     print(f"platform_start service=ai profile={profile} iam=enabled", flush=True)
     import uvicorn
+    if os.environ.get("DEMO_TRUST_PROXY") == "true":
+        uvicorn.run(
+            "app.main:app", host="0.0.0.0", port=8090, access_log=False,
+            proxy_headers=True, forwarded_allow_ips=os.environ.get("DEMO_FORWARDED_ALLOW_IPS", "*"))
+        return
     uvicorn.run("app.main:app", host="0.0.0.0", port=8090, access_log=False)
 
 

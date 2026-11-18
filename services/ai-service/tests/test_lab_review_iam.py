@@ -338,3 +338,38 @@ def test_unknown_subject_is_not_authorized(tmp_path):
     key = _key()
     client, issued, _settings_value = _client(tmp_path, key, "not-bound")
     assert "denied" in _login(client, issued).headers["location"]
+
+
+def test_demo_ca_is_optional_and_does_not_trust_the_process_proxy(monkeypatch):
+    from app.clinical_lab_summary.iam import IamConfig, _client
+    monkeypatch.delenv("DEMO_CA_FILE", raising=False)
+    config = IamConfig("https://demo.localhost:18443/realms/demo-deploy", "", "", "lab-review-web", "", {}, "sessions.sqlite3", False)
+    client = _client(config)
+    assert client.trust_env is False
+    client.close()
+
+
+def test_https_demo_host_keeps_the_callback_path(tmp_path):
+    from dataclasses import replace
+    issuer = "https://pe.demo.localhost:8443/realms/demo-deploy"
+    bindings = tmp_path / "https-bindings.json"
+    bindings.write_text(json.dumps({"issuer": issuer, "bindings": [
+        {"sub": "reviewer-a", "organization_id": "org-lab-a", "role": "clinical-reviewer", "display_name": "Reviewer A"},
+    ]}), encoding="utf-8")
+    accepted = replace(
+        _settings(tmp_path, bindings),
+        lab_review_iam_issuer=issuer,
+        lab_review_iam_discovery_url=issuer + "/.well-known/openid-configuration",
+        lab_review_iam_jwks_uri=issuer + "/protocol/openid-connect/certs",
+        lab_review_iam_redirect_uri="https://pe.demo.localhost:8443/lab-review-iam/callback",
+        lab_review_iam_allow_http_loopback=False,
+    )
+    assert load_config(accepted).issuer == issuer
+    with pytest.raises(IamRejected):
+        load_config(replace(
+            accepted,
+            lab_review_iam_redirect_uri="http://pe.demo.localhost:8443/lab-review-iam/callback"))
+    with pytest.raises(IamRejected):
+        load_config(replace(
+            accepted,
+            lab_review_iam_redirect_uri="https://pe.demo.localhost:8443/other"))

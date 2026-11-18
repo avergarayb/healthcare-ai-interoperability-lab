@@ -9,9 +9,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import secrets
 import sqlite3
+import ssl
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +41,7 @@ _ADMIN_GRANTS = frozenset({"read", "audit"})
 _ORG_ID = re.compile(r"^org-[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
 _SUBJECT = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _ISSUER = re.compile(r"^https?://127\.0\.0\.1:[0-9]{2,5}/realms/[A-Za-z0-9_-]{1,64}$|^https://[A-Za-z0-9._:-]{1,200}/realms/[A-Za-z0-9_-]{1,64}$")
+_DNS_HOST = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
 
 
 class IamRejected(Exception):
@@ -184,13 +187,18 @@ def end_session_url(config: IamConfig, client: httpx.Client | None = None) -> st
 
 def _require_redirect(redirect, allow_http):
     parts = urlsplit(redirect)
-    if parts.hostname != "127.0.0.1" or parts.path != "/lab-review-iam/callback" or parts.query or parts.fragment:
+    if (parts.path != "/lab-review-iam/callback" or parts.query or parts.fragment
+            or parts.username or parts.password):
         raise IamRejected("configuration_rejected")
-    if parts.scheme == "https":
-        return
-    if allow_http and parts.scheme == "http":
-        return
-    raise IamRejected("configuration_rejected")
+    if parts.hostname == "127.0.0.1":
+        if parts.scheme == "https":
+            return
+        if allow_http and parts.scheme == "http":
+            return
+        raise IamRejected("configuration_rejected")
+    host = parts.hostname or ""
+    if parts.scheme != "https" or _DNS_HOST.fullmatch(host) is None:
+        raise IamRejected("configuration_rejected")
 
 
 def _require_loopback_http(*urls, allow_http):
@@ -324,7 +332,12 @@ def _post_form(client, config, url, form):
 
 
 def _client(config):
-    return httpx.Client(timeout=2.0, trust_env=False, follow_redirects=False)
+    verify: bool | ssl.SSLContext = True
+    ca_file = os.environ.get("DEMO_CA_FILE", "")
+    if ca_file and Path(ca_file).is_file():
+        verify = ssl.create_default_context()
+        verify.load_verify_locations(cafile=ca_file)
+    return httpx.Client(timeout=2.0, trust_env=False, follow_redirects=False, verify=verify)
 
 
 class _TransactionStore:

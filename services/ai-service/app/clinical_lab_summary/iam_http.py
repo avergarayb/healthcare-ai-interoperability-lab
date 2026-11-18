@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from html import escape
 from urllib.parse import parse_qsl
 
-import httpx
 from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
@@ -11,7 +10,7 @@ from app.config import Settings
 from app.human_development_auth import require_human_session
 
 from .iam import (
-    SESSION_COOKIE, TRANSACTION_COOKIE, IamRejected, begin_authentication,
+    SESSION_COOKIE, TRANSACTION_COOKIE, IamRejected, _client, begin_authentication,
     clock_now, complete_authentication, end_session_url, load_config, resolve_session, revoke_session,
 )
 
@@ -107,8 +106,7 @@ def finish_iam_login(request: Request, settings: Settings, raw_body: bytes, cont
         return _redirect("/lab-review-iam/login?reason=denied")
     try:
         config = load_config(settings)
-        client = getattr(request.app.state, "lab_review_iam_http", None) or httpx.Client(
-            timeout=2.0, trust_env=False, follow_redirects=False)
+        client = getattr(request.app.state, "lab_review_iam_http", None) or _client(config)
         try:
             token, _session = complete_authentication(
                 config, fields["state"], fields["code"], clock_now(request), client)
