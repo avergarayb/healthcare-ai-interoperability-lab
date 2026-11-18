@@ -10,7 +10,7 @@ Una persona entra a Mini HIS, abre una hospitalización, registra el contexto y 
 
 Definir en el entorno, sin versionarlas, la clave de la sesión, el token de servicio y `DISCHARGE_MODEL_MODE=intercepted`. Mini HIS y el servicio de IA quedan en `127.0.0.1`. La URL del coordinador tiene que ser loopback. Cada clic de preparación genera una autorización nueva. No borrar la base ni las revisiones para repetir el caso.
 
-Usuarios de la sesión: `clinica` puede operar; `auditor` solo consulta. La organización es `org-mini-his`.
+Usuarios de la sesión: `clinica` puede operar; `auditor` solo consulta. La organización es `org-mini-his`. Esas cuentas son una credencial de laboratorio local. No son OIDC ni un segundo realm de Keycloak. Mini HIS queda en `127.0.0.1` mientras `mini-his.allow-container-bind` esté en falso. El coordinador rechaza una URL que no sea loopback.
 
 ## Guion
 
@@ -32,4 +32,4 @@ La misma tarde, la ficha se recorrió de nuevo con la interfaz de pestañas. El 
 
 ## Límite
 
-No es un alta de un hospital real, no usa un proveedor LLM en esta pasada y no sustituye la bandeja OIDC de Perú y España. El estado READY de esta guía depende de una pasada completa en el navegador, no de las pruebas de API.
+No es un alta de un hospital real, no usa un proveedor LLM en esta pasada y no sustituye la bandeja OIDC de Perú y España. El 18 de noviembre de 2026 la fecha del equipo estaba dentro de la vigencia 2026–2027 y la recuperación devolvió los cinco protocolos. Fuera de esa ventana la preparación se detiene con `protocols_unavailable`, sin guardar un borrador ni inventar citas. El estado READY de esta guía depende de una pasada completa en el navegador, no de las pruebas de API.

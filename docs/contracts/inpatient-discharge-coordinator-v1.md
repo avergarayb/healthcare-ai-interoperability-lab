@@ -12,7 +12,7 @@ Contradictory medication statements stay in the chart and force an abstention. T
 
 ## Protocols
 
-Five synthetic protocols are version `1.0`, valid for `org-mini-his` during 2026–2027: preparation, pending verification, continuity, follow-up coordination, and documentation review. Another organization and an expired text are not cited. Each citation names the protocol, the version, and the section `Human Authority`.
+Five synthetic protocols are version `1.0`, valid for `org-mini-his` during 2026–2027: preparation, pending verification, continuity, follow-up coordination, and documentation review. Retrieval uses the system date. On 2026-11-18 that date is inside the window and returns the five active protocols. A date outside the window, another organization, or the expired text yields fewer than five protocols. The graph then stops with `protocols_unavailable` and does not store a draft or invent a citation. Each stored citation names the protocol, the version, and the section `Human Authority`.
 
 ## Graph
 
@@ -28,4 +28,4 @@ A new preparation uses a new authorization id. A consumed authorization is not r
 
 ## Session
 
-The ward session is a laboratory control for this simulator. It is not a second Keycloak realm and it does not replace the laboratory OIDC review used by the longitudinal demonstrations. An empty password fails closed. An auditor can read and cannot change the episode.
+The ward session is a laboratory control for this simulator. The users `clinica` and `auditor` are local credentials, not an OIDC login and not a second Keycloak realm. They do not replace the laboratory OIDC review used by the longitudinal demonstrations. An empty password fails closed. An auditor can read and cannot change the episode, the proposal, the approval, or the tasks. Mini HIS binds to `127.0.0.1` unless `mini-his.allow-container-bind` is explicitly true. The coordinator accepts only a loopback base URL.
