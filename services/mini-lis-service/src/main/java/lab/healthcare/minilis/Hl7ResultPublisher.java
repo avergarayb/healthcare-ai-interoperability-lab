@@ -22,19 +22,27 @@ public class Hl7ResultPublisher {
 
     private final LaboratoryRecordService records;
     private final Hl7Properties properties;
+    private final boolean containerNetwork;
     private final Hl7Messages messages = new Hl7Messages();
     private volatile String host;
     private volatile int port;
 
-    public Hl7ResultPublisher(LaboratoryRecordService records, Hl7Properties properties) {
+    public Hl7ResultPublisher(
+            LaboratoryRecordService records,
+            Hl7Properties properties,
+            @org.springframework.beans.factory.annotation.Value("${mini-lis.allow-external-bind:false}") boolean containerNetwork) {
         this.records = records;
         this.properties = properties;
+        this.containerNetwork = containerNetwork;
         this.host = properties.getOutboundHost();
         this.port = properties.getOutboundPort();
     }
 
     public void configurePeer(String host, int port) {
-        if (!BindPolicy.isLoopback(host) || port < 1 || port > 65535) {
+        boolean allowed = containerNetwork
+                ? host != null && host.matches("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+                : BindPolicy.isLoopback(host);
+        if (!allowed || port < 1 || port > 65535) {
             throw MiniLisException.invalidRequest();
         }
         this.host = host;
@@ -91,7 +99,8 @@ public class Hl7ResultPublisher {
                 result.status().name(),
                 result.resultedAt()));
         try {
-            String ack = MllpExchange.transact(host, port, er7, properties.getConnectTimeout(), properties.getReadTimeout());
+            String ack = MllpExchange.transact(
+                    host, port, er7, properties.getConnectTimeout(), properties.getReadTimeout(), containerNetwork);
             Hl7Messages.ParsedMessage parsed = messages.parse(ack);
             String code = parsed == null ? "AR" : Hl7Messages.value(parsed.terser(), "/MSA-1");
             String detail = parsed == null ? "invalid_request" : safeDetail(parsed.terser());

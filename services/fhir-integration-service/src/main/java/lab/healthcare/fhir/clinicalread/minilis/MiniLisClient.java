@@ -31,11 +31,21 @@ final class MiniLisClient {
     private final ObjectMapper json;
 
     MiniLisClient(String baseUrl, String serviceToken, Duration connectTimeout, Duration readTimeout, ObjectMapper json) {
+        this(baseUrl, serviceToken, connectTimeout, readTimeout, json, false);
+    }
+
+    MiniLisClient(
+            String baseUrl, String serviceToken, Duration connectTimeout, Duration readTimeout, ObjectMapper json,
+            boolean containerNetwork) {
         if (json == null) {
             throw new IllegalArgumentException("JSON mapper must be provided");
         }
         String normalized = baseUrl == null ? "" : baseUrl.trim().replaceAll("/+$", "");
-        if (!loopbackHttp(normalized)) {
+        if (containerNetwork) {
+            if (!containerHttp(normalized)) {
+                throw new IllegalArgumentException("Mini LIS base URL must be an internal container HTTP address");
+            }
+        } else if (!loopbackHttp(normalized)) {
             throw new IllegalArgumentException("Mini LIS base URL must be an HTTP loopback address");
         }
         if (serviceToken == null || serviceToken.isBlank()) {
@@ -115,6 +125,18 @@ final class MiniLisClient {
 
     static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private static boolean containerHttp(String baseUrl) {
+        try {
+            URI uri = URI.create(baseUrl);
+            String host = uri.getHost();
+            return "http".equalsIgnoreCase(uri.getScheme())
+                    && host != null
+                    && host.matches("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?");
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
     private static boolean loopbackHttp(String baseUrl) {

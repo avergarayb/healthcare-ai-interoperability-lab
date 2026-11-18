@@ -24,7 +24,15 @@ final class MllpExchange {
     }
 
     static ServerSocket listen(String bindAddress, int port) throws IOException {
-        if (!BindPolicy.isLoopback(bindAddress)) {
+        return listen(bindAddress, port, false);
+    }
+
+    static ServerSocket listen(String bindAddress, int port, boolean containerNetwork) throws IOException {
+        if (containerNetwork) {
+            if (!"0.0.0.0".equals(bindAddress) && !BindPolicy.isLoopback(bindAddress)) {
+                throw new IOException("MLLP bind is not a container address");
+            }
+        } else if (!BindPolicy.isLoopback(bindAddress)) {
             throw new IOException("MLLP bind is not a loopback address");
         }
         ServerSocket server = new ServerSocket();
@@ -34,7 +42,17 @@ final class MllpExchange {
 
     static String transact(String host, int port, String message, Duration connectTimeout, Duration readTimeout)
             throws IOException {
-        if (!BindPolicy.isLoopback(host)) {
+        return transact(host, port, message, connectTimeout, readTimeout, false);
+    }
+
+    static String transact(
+            String host, int port, String message, Duration connectTimeout, Duration readTimeout, boolean containerNetwork)
+            throws IOException {
+        if (containerNetwork) {
+            if (host == null || !host.matches("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")) {
+                throw new IOException("MLLP peer is not a container service name");
+            }
+        } else if (!BindPolicy.isLoopback(host)) {
             throw new IOException("MLLP peer is not a loopback address");
         }
         try (Socket socket = new Socket()) {

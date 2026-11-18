@@ -161,6 +161,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 - [PLATFORM-001 local demonstration](../demos/platform-001.md) — one Compose project with loopback-only published ports, one process per jurisdiction profile, and a separate synthetic Keycloak realm. Federation, review, LangGraph, and the durable ledger run in Linux containers. The model hop is intercepted. Mini HIS, Mini LIS, and local HAPI stay on their existing support stack. Decisions: [ADR-105](../adr/ADR-105-platform-001-local-demonstration.md) and [ADR-107](../adr/ADR-107-linux-portable-ledger.md).
 - [Linux portable ledger v1](../contracts/linux-001-portable-ledger-v1.md) — Windows keeps its byte lock; Linux uses `flock` on the profile volume. Reservation, budget, and audit rules stay the same. Not a network filesystem and not a live model call. Decision: [ADR-107](../adr/ADR-107-linux-portable-ledger.md).
 - [Single-VM demonstration deployment v1](../contracts/demo-deploy-001-v1.md) — a separate Compose project with Caddy as the only published service and a new Keycloak PostgreSQL realm. The public hostname mode stays off. Not a Hetzner deployment. Decision: [ADR-108](../adr/ADR-108-demo-deploy-001.md).
+- [Demonstration catalog v1](../contracts/demo-catalog-001-v1.md) — three clinical demonstrations. The hospital profile keeps HL7 on an internal Compose network. Decision: [ADR-109](../adr/ADR-109-demo-catalog-001.md).
 - [AI clinical federation consumer](../contracts/ai-clinical-federation-v1.md)
 - [Federated protocol evaluation v1](../contracts/federated-protocol-evaluation-v1.md)
 - [Cross-organization laboratory result review v1](../contracts/cross-org-lab-result-review-v1.md)
@@ -211,6 +212,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 | [ADR-106](../adr/ADR-106-hl7-002-hospital-laboratory.md) | Accepted for the existing HL7 v2.5.1 laboratory profile. A reused control id with a different message is rejected. Not a new engine and not a second country stack. |
 | [ADR-107](../adr/ADR-107-linux-portable-ledger.md) | Accepted for the portable ledger lock and the in-container LangGraph demonstration. Not a Hetzner deployment and not a replacement of SQLite. |
 | [ADR-108](../adr/ADR-108-demo-deploy-001.md) | Accepted for the single-VM demonstration package. Local HTTPS only until a hostname is confirmed. Not a remote deployment. |
+| [ADR-109](../adr/ADR-109-demo-catalog-001.md) | Accepted for the demonstration catalog. Hospital HL7 stays on an unpublished container network. |
 
 ## Historical governance artifacts
 

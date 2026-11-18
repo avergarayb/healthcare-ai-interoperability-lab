@@ -27,7 +27,8 @@ def main():
     sends = []
     try:
         _open_clinical(lab)
-        _permit(lab, "hl7-002-hospital")
+        authorization_id = os.environ.get("HL7_AUTHORIZATION_ID", "hl7-002-hospital")
+        _permit(lab, authorization_id)
         federation = ClinicalFederationClient(
             os.environ["HL7_FEDERATION_URL"],
             os.environ["HL7_FEDERATION_TOKEN"],
@@ -37,10 +38,10 @@ def main():
             sources=("mini-his", "mini-lis"),
             timeout_seconds=20)
         gemini = _intercepted(sends)
-        consent = _clinical_consent(lab, "hl7-002-hospital", gemini)
+        consent = _clinical_consent(lab, authorization_id, gemini)
         graph = _graph(lab, federation, review)
-        state = graph.invoke(lab.executor["ORG-A"], "hl7-002-hospital", 1000, PATIENT, consent)
-        replay = graph.invoke(lab.executor["ORG-A"], "hl7-002-hospital", 1000, PATIENT, consent)
+        state = graph.invoke(lab.executor["ORG-A"], authorization_id, 1000, PATIENT, consent)
+        replay = graph.invoke(lab.executor["ORG-A"], authorization_id, 1000, PATIENT, consent)
         stored = list_reviews(review)
         if len(stored) != 1:
             raise RuntimeError("review_count")
@@ -65,6 +66,8 @@ def main():
         summary_text = json.dumps(report["summary"])
         if "MSH|" in summary_text or "OML^" in summary_text or "PID|" in summary_text:
             raise RuntimeError("hl7_in_review")
+        current_ids = {his_observation, lis_observation}
+        current_cited, historical_cited = _classified(report["summary"], current_ids)
         with sqlite3.connect(lab.ledger.path) as connection:
             reservations = [row[0] for row in connection.execute(
                 "SELECT status FROM aip_remote_execution_reservation")]
@@ -80,6 +83,8 @@ def main():
             "provider_calls": len(sends),
             "chart_ids": sends[0]["chart_ids"] if sends else [],
             "cited": sorted(list(cited)),
+            "current_cited": current_cited,
+            "historical_cited": historical_cited,
             "summary_status": report["status"],
             "decision": None if decided.get("decision") is None else decided["decision"]["decision"],
             "decision_audit": report["decision_audit"],
@@ -100,16 +105,12 @@ def _intercepted(sends):
             raise RuntimeError("hl7_in_model_request")
         chart = _chart(raw)
         observations = [fact for fact in chart["facts"] if fact["resourceType"] == "Observation"]
-        statements = []
-        for fact in observations:
-            statements.append({
-                "text": fact["code"] + " " + fact["value"] + " " + fact["unit"],
-                "sources": [{
-                    "source": fact["source"],
-                    "resourceType": "Observation",
-                    "id": fact["id"],
-                }],
-            })
+        current_ids = {os.environ["HL7_HIS_OBSERVATION_ID"], os.environ["HL7_LIS_OBSERVATION_ID"]}
+        current = [fact for fact in observations if fact["id"] in current_ids]
+        historical = [fact for fact in observations if fact["id"] not in current_ids]
+        statements = [_statement(fact, "Resultado vigente.") for fact in current]
+        for start in range(0, len(historical), 4):
+            statements.append(_historical(historical[start:start + 4]))
         body = json.dumps({
             "kind": "lab-result-summary-v1",
             "review": "pending_human_review",
@@ -122,6 +123,50 @@ def _intercepted(sends):
         return httpx.Response(200, json=_body(body), request=request)
 
     return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def _statement(fact, prefix):
+    return {
+        "text": prefix + " " + fact["code"] + " " + fact["value"] + " " + fact["unit"],
+        "sources": [{
+            "source": fact["source"],
+            "resourceType": "Observation",
+            "id": fact["id"],
+        }],
+    }
+
+
+def _historical(facts):
+    body = "; ".join(fact["id"] + " " + fact["code"] + " " + fact["value"] + " " + fact["unit"] for fact in facts)
+    return {
+        "text": "Observacion historica sintetica, distinta de esta orden. " + body,
+        "sources": [{
+            "source": fact["source"],
+            "resourceType": "Observation",
+            "id": fact["id"],
+        } for fact in facts],
+    }
+
+
+def _classified(summary, current_ids):
+    current_cited = []
+    historical_cited = []
+    for statement in summary["statements"]:
+        ids = [item["id"] for item in statement["sources"]]
+        text = statement["text"]
+        if any(item in current_ids for item in ids) and any(item not in current_ids for item in ids):
+            raise RuntimeError("historical_mixed_into_current")
+        if all(item in current_ids for item in ids):
+            if "historica" in text:
+                raise RuntimeError("current_labeled_historical")
+            current_cited.extend(ids)
+        else:
+            if "historica" not in text:
+                raise RuntimeError("historical_attributed_to_case")
+            historical_cited.extend(ids)
+    if not current_ids.issubset(set(current_cited)):
+        raise RuntimeError("current_result_missing")
+    return sorted(set(current_cited)), sorted(set(historical_cited))
 
 
 def _chart(raw):

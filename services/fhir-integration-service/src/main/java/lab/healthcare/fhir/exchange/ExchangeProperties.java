@@ -111,6 +111,7 @@ public class ExchangeProperties {
         private int port = 2575;
         private String sharedSecret = "";
         private int listenPort = 2576;
+        private boolean containerNetwork = false;
         private String sendingApplication = "FHIR-EXCHANGE";
         private String sendingFacility = "fhir-integration-service";
         private String receivingApplication = "MINI-LIS";
@@ -146,6 +147,14 @@ public class ExchangeProperties {
 
         public void setListenPort(int listenPort) {
             this.listenPort = listenPort;
+        }
+
+        public boolean isContainerNetwork() {
+            return containerNetwork;
+        }
+
+        public void setContainerNetwork(boolean containerNetwork) {
+            this.containerNetwork = containerNetwork;
         }
 
         public String getSendingApplication() {

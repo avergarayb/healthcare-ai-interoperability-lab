@@ -6,6 +6,6 @@ RUN mvn -q -DskipTests package
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
-COPY --from=build /src/target/mini-lis-service-0.0.1-SNAPSHOT.jar /app/mini-lis-service.jar
+COPY --from=build /src/target/mini-lis-service-0.0.1-SNAPSHOT-exec.jar /app/mini-lis-service.jar
 EXPOSE 8096
 ENTRYPOINT ["java", "-jar", "/app/mini-lis-service.jar"]

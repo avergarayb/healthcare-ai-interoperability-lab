@@ -153,6 +153,17 @@ class Hl7ExchangeCodecTest {
                     Duration.ofMillis(300), Duration.ofMillis(300)))
                     .isInstanceOf(java.io.IOException.class);
         }
+        assertThatThrownBy(() -> MllpSession.transact(
+                "mini-lis", 1, "MSH|", Duration.ofMillis(200), Duration.ofMillis(200)))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("loopback");
+        assertThat(serverAddress(MllpSession.listen(0)).isLoopbackAddress()).isTrue();
+    }
+
+    private static java.net.InetAddress serverAddress(java.net.ServerSocket server) throws java.io.IOException {
+        try (server) {
+            return ((java.net.InetSocketAddress) server.getLocalSocketAddress()).getAddress();
+        }
     }
 
     private static DestinationCommand command() {
