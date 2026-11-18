@@ -260,6 +260,7 @@ class FederationFlowTest {
                 "server.address", "127.0.0.1",
                 "spring.main.banner-mode", "off",
                 "mini-his.sqlite-path", database.toString(),
+                "spring.flyway.enabled", "false",
                 "mini-his.organization-id", "org-mini-his"));
         his = hisApplication.run("--server.port=0", "--server.address=127.0.0.1");
         hisUrl = "http://127.0.0.1:" + his.getEnvironment().getProperty("local.server.port");

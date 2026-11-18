@@ -2,7 +2,12 @@ server:
   address: 127.0.0.1
   port: 8095
 
+spring:
+  flyway:
+    enabled: false
+
 mini-his:
+  allow-container-bind: ${MINI_HIS_ALLOW_CONTAINER_BIND:false}
   sqlite-path: data/mini-his.sqlite
   organization-id: org-mini-his
   exchange:

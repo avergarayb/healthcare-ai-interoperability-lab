@@ -154,6 +154,7 @@ exchange:
         port: ${EXCHANGE_MINI_LIS_HL7_PORT:2575}
         shared-secret: ${EXCHANGE_MINI_LIS_HL7_SECRET:}
         listen-port: ${EXCHANGE_HL7_LISTEN_PORT:2576}
+        container-network: ${EXCHANGE_HL7_CONTAINER_NETWORK:false}
         sending-application: FHIR-EXCHANGE
         sending-facility: fhir-integration-service
         receiving-application: MINI-LIS

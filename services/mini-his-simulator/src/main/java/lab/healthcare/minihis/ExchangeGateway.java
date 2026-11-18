@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -29,10 +30,12 @@ public class ExchangeGateway {
     private final MiniHisSettings settings;
     private final ObjectMapper json;
     private final HttpClient http;
+    private final boolean containerNetwork;
 
-    public ExchangeGateway(MiniHisSettings settings, ObjectMapper json) {
+    public ExchangeGateway(MiniHisSettings settings, ObjectMapper json, Environment environment) {
         this.settings = settings;
         this.json = json;
+        this.containerNetwork = Boolean.parseBoolean(environment.getProperty("mini-his.allow-container-bind", "false"));
         Duration connect = settings.getExchange().getConnectTimeout();
         this.http = HttpClient.newBuilder()
                 .connectTimeout(connect == null ? Duration.ofSeconds(2) : connect)
@@ -42,7 +45,8 @@ public class ExchangeGateway {
 
     public boolean configured() {
         String baseUrl = settings.getExchange().getBaseUrl();
-        return baseUrl != null && !baseUrl.isBlank() && loopbackHttp(baseUrl.trim())
+        boolean addressOk = containerNetwork ? containerHttp(baseUrl) : loopbackHttp(baseUrl);
+        return baseUrl != null && !baseUrl.isBlank() && addressOk
                 && settings.getExchange().getServiceToken() != null
                 && !settings.getExchange().getServiceToken().isBlank();
     }
@@ -93,6 +97,18 @@ public class ExchangeGateway {
 
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private static boolean containerHttp(String baseUrl) {
+        try {
+            URI uri = URI.create(baseUrl == null ? "" : baseUrl.trim());
+            String host = uri.getHost();
+            return "http".equalsIgnoreCase(uri.getScheme())
+                    && host != null
+                    && host.matches("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?");
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
     private static boolean loopbackHttp(String baseUrl) {

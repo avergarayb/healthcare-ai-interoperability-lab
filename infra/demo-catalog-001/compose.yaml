@@ -1,0 +1,130 @@
+name: demo-catalog-hospital
+
+services:
+  lis-db:
+    image: postgres:16.10-alpine
+    environment:
+      POSTGRES_USER: minilis
+      POSTGRES_DB: minilis
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [catalog-lis-db:/var/lib/postgresql/data]
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minilis -d minilis"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt: ["no-new-privileges:true"]
+
+  mini-lis:
+    build:
+      context: ../../services/mini-lis-service
+    image: demo-catalog-mini-lis:0.1.0
+    depends_on:
+      lis-db:
+        condition: service_healthy
+    environment:
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: "8096"
+      MINI_LIS_ALLOW_EXTERNAL_BIND: "true"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://lis-db:5432/minilis
+      SPRING_DATASOURCE_USERNAME: minilis
+      MINI_LIS_HL7_ENABLED: "true"
+      MINI_LIS_HL7_BIND: 0.0.0.0
+      MINI_LIS_HL7_PORT: "2575"
+      MINI_LIS_HL7_OUTBOUND_HOST: federation
+      MINI_LIS_HL7_OUTBOUND_PORT: "2576"
+    secrets: [lis_token, hl7_secret, db_password]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        export MINI_LIS_SERVICE_TOKEN="$$(cat /run/secrets/lis_token)"
+        export MINI_LIS_HL7_SHARED_SECRET="$$(cat /run/secrets/hl7_secret)"
+        export SPRING_DATASOURCE_PASSWORD="$$(cat /run/secrets/db_password)"
+        exec java -jar /app/mini-lis-service.jar
+    networks: [internal]
+    security_opt: ["no-new-privileges:true"]
+
+  mini-his:
+    build:
+      context: ../../services/mini-his-simulator
+    image: demo-catalog-mini-his:0.1.0
+    environment:
+      MINI_HIS_ALLOW_CONTAINER_BIND: "true"
+      MINI_HIS_EXCHANGE_BASE_URL: http://federation:8081
+    secrets: [his_token]
+    volumes: [catalog-his:/app/data]
+    networks: [internal]
+    security_opt: ["no-new-privileges:true"]
+
+  federation:
+    build:
+      context: ../..
+      dockerfile: services/fhir-integration-service/Dockerfile
+    image: demo-catalog-federation:0.1.0
+    depends_on: [mini-his, mini-lis]
+    environment:
+      JURISDICTION_LAB_ENABLED: "false"
+      EXTERNAL_FHIR_ENABLED: "false"
+      EXCHANGE_STORE_PATH: /var/lab/exchange/correlation.sqlite
+      FEDERATION_SECURITY_AUDIT_STORE_PATH: /var/lab/federation-audit/security-audit.sqlite
+      CLINICAL_READ_MINI_HIS_BASE_URL: http://mini-his:8095
+      CLINICAL_READ_MINI_LIS_BASE_URL: http://mini-lis:8096
+      CLINICAL_READ_MINI_LIS_CONTAINER_NETWORK: "true"
+      INTEROP_SOURCES_MINI_HIS_BASE_URL: http://mini-his:8095
+      INTEROP_SOURCES_MINI_LIS_BASE_URL: http://mini-lis:8096
+      EXCHANGE_MINI_LIS_PROTOCOL: hl7v2
+      EXCHANGE_MINI_LIS_HL7_HOST: mini-lis
+      EXCHANGE_MINI_LIS_HL7_PORT: "2575"
+      EXCHANGE_HL7_LISTEN_PORT: "2576"
+      EXCHANGE_HL7_CONTAINER_NETWORK: "true"
+    secrets: [federation_token, his_token, lis_token, hl7_secret]
+    volumes: [catalog-exchange:/var/lab]
+    networks: [internal]
+    security_opt: ["no-new-privileges:true"]
+
+  operator:
+    image: demo-deploy-ai:0.1.0
+    profiles: [run]
+    depends_on: [federation]
+    environment:
+      CATALOG_HIS_URL: http://mini-his:8095
+      CATALOG_LIS_URL: http://mini-lis:8096
+      CATALOG_FEDERATION_URL: http://federation:8081
+      CATALOG_CASE_ID: ${CATALOG_CASE_ID:-catalog-case-001}
+      CATALOG_NEGATIVE: ${CATALOG_NEGATIVE:-}
+      HL7_LEDGER_DIR: /var/lab/ledger
+      HL7_REVIEW_DB: /var/lab/review/human-review.sqlite3
+    secrets: [his_token, lis_token, federation_token]
+    volumes:
+      - catalog-ledger:/var/lab/ledger
+      - catalog-review:/var/lab/review
+      - ../../services/ai-service/hl7_hospital_live.py:/app/hl7_hospital_live.py:ro
+      - ./catalog_hospital.py:/opt/catalog/catalog_hospital.py:ro
+    entrypoint: ["python", "/opt/catalog/catalog_hospital.py"]
+    networks: [internal]
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  internal:
+    name: demo-catalog-hospital-internal
+
+secrets:
+  his_token:
+    file: ${CATALOG_RUN_DIR:?Run directory required}/his-token
+  lis_token:
+    file: ${CATALOG_RUN_DIR:?Run directory required}/lis-token
+  federation_token:
+    file: ${CATALOG_RUN_DIR:?Run directory required}/federation-token
+  hl7_secret:
+    file: ${CATALOG_RUN_DIR:?Run directory required}/hl7-secret
+  db_password:
+    file: ${CATALOG_RUN_DIR:?Run directory required}/db-password
+
+volumes:
+  catalog-lis-db:
+  catalog-his:
+  catalog-exchange:
+  catalog-ledger:
+  catalog-review:

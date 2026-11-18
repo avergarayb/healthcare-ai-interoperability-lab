@@ -42,7 +42,7 @@ public class Hl7Server {
             throw new IllegalStateException("Mini LIS HL7 refuses a non-loopback bind");
         }
         try {
-            server = MllpExchange.listen(properties.getBindAddress(), properties.getPort());
+            server = MllpExchange.listen(properties.getBindAddress(), properties.getPort(), allowExternalBind);
             running = true;
             workers = Executors.newCachedThreadPool(task -> {
                 Thread thread = new Thread(task, "mini-lis-mllp");

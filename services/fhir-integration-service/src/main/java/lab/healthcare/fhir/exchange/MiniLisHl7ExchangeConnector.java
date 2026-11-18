@@ -57,7 +57,11 @@ public final class MiniLisHl7ExchangeConnector implements OrderDestination, Resu
             Duration readTimeout,
             ExchangeStore store,
             ObjectMapper json) {
-        if (!MllpSession.loopback(host)) {
+        if (peer.isContainerNetwork()) {
+            if (!MllpSession.containerName(host)) {
+                throw new IllegalArgumentException("Mini LIS HL7 host must be a container service name");
+            }
+        } else if (!MllpSession.loopback(host)) {
             throw new IllegalArgumentException("Mini LIS HL7 host must be a loopback address");
         }
         this.peer = peer;
@@ -102,7 +106,7 @@ public final class MiniLisHl7ExchangeConnector implements OrderDestination, Resu
         String er7 = codec.oml(peer, controlId, secret, command, patient);
         Hl7ExchangeCodec.Ack ack;
         try {
-            ack = codec.ack(MllpSession.transact(host, port, er7, connectTimeout, readTimeout));
+            ack = codec.ack(MllpSession.transact(host, port, er7, connectTimeout, readTimeout, peer.isContainerNetwork()));
         } catch (Exception ex) {
             log.info("hl7_oml_failed control={} error=unavailable", controlId);
             throw ExchangeException.unavailable();
@@ -190,7 +194,7 @@ public final class MiniLisHl7ExchangeConnector implements OrderDestination, Resu
 
     private void startListener() {
         try {
-            listener = MllpSession.listen(peer.getListenPort());
+            listener = MllpSession.listen(peer.getListenPort(), peer.isContainerNetwork());
             running = true;
             workers = Executors.newCachedThreadPool(task -> {
                 Thread thread = new Thread(task, "exchange-mllp");
