@@ -44,6 +44,7 @@ def _mark(name: str) -> None:
 def run() -> dict:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from profiles import ISSUER, binding, require_profile
+    issuer = os.environ.get("DEMO_ISSUER", "").strip() or ISSUER
 
     profile_id = require_profile(os.environ.get("PLATFORM_PROFILE", ""))
     from profiles import PROFILES
@@ -193,11 +194,11 @@ def run() -> dict:
             headers={"Content-Type": "application/x-www-form-urlencoded"})
         if denied.status_code != 303:
             raise SystemExit("iam_bypass")
-        discovery = http.get(ISSUER + "/.well-known/openid-configuration")
+        discovery = http.get(issuer + "/.well-known/openid-configuration")
         document = discovery.json()
-        if discovery.status_code != 200 or document.get("issuer") != ISSUER:
+        if discovery.status_code != 200 or document.get("issuer") != issuer:
             raise SystemExit("discovery_rejected")
-        if not str(document.get("jwks_uri", "")).startswith(ISSUER + "/"):
+        if not str(document.get("jwks_uri", "")).startswith(issuer + "/"):
             raise SystemExit("discovery_rejected")
 
         reviewer = binding("reviewer-pe" if profile_id.startswith("pe-") else "reviewer-es")
@@ -205,7 +206,7 @@ def run() -> dict:
         auditor = binding("auditor-pe")
         try:
             IamReviewer(
-                iam_principal_id(ISSUER, auditor["sub"]), ISSUER, auditor["sub"],
+                iam_principal_id(issuer, auditor["sub"]), issuer, auditor["sub"],
                 auditor["organization_id"], auditor["role"], "session-auditor")
         except ReviewError as error:
             auditor_outcome = error.reason
@@ -214,7 +215,7 @@ def run() -> dict:
         if auditor_outcome != "role_denied":
             raise SystemExit("auditor_permitted")
         foreign = IamReviewer(
-            iam_principal_id(ISSUER, other["sub"]), ISSUER, other["sub"],
+            iam_principal_id(issuer, other["sub"]), issuer, other["sub"],
             other["organization_id"], other["role"], "session-other")
         try:
             decide(review_path, review_id, foreign, "rejected", "sintetica", "2026-11-17T20:00:00.000000Z")
@@ -225,7 +226,7 @@ def run() -> dict:
         if foreign_outcome != "organization_denied":
             raise SystemExit("organization_permitted")
         owner = IamReviewer(
-            iam_principal_id(ISSUER, reviewer["sub"]), ISSUER, reviewer["sub"],
+            iam_principal_id(issuer, reviewer["sub"]), issuer, reviewer["sub"],
             reviewer["organization_id"], reviewer["role"], "session-reviewer")
         decide(review_path, review_id, owner, "approved", "sintetica", "2026-11-17T20:05:00.000000Z")
         try:
