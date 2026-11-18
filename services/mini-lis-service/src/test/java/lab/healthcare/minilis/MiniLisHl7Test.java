@@ -46,7 +46,7 @@ class MiniLisHl7Test {
         registry.add("mini-lis.hl7.enabled", () -> "true");
         registry.add("mini-lis.hl7.port", () -> "0");
         registry.add("mini-lis.hl7.shared-secret", () -> SECRET);
-        registry.add("mini-lis.hl7.allowed-organizations", () -> "org-mini-his");
+        registry.add("mini-lis.hl7.allowed-organizations", () -> "org-mini-his,org-pe-hospital");
         registry.add("mini-lis.hl7.outbound-port", () -> "0");
     }
 
@@ -81,6 +81,31 @@ class MiniLisHl7Test {
                         .header("X-Service-Token", TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.orderId").value(orderId));
+    }
+
+    @Test
+    void aReusedControlIdWithDifferentContentDoesNotReplaceTheOrder() throws Exception {
+        String first = send(order("MSG-SCOPE-001", "MHS-LAB-SCOPE-1", SECRET, "org-mini-his"));
+        String orderId = field(first, "/RESPONSE/PATIENT/ORDER/ORC-3-1");
+        String changed = send(order("MSG-SCOPE-001", "MHS-LAB-SCOPE-2", SECRET, "org-mini-his"));
+        assertThat(ackCode(changed)).isEqualTo("AE");
+        assertThat(ackDetail(changed)).isEqualTo("contradictory_message");
+        mockMvc.perform(get("/orders")
+                        .param("requestingOrganizationId", "org-mini-his")
+                        .param("externalRequestId", "MHS-LAB-SCOPE-1")
+                        .header("X-Service-Token", TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.orderId").value(orderId));
+        mockMvc.perform(get("/orders")
+                        .param("requestingOrganizationId", "org-mini-his")
+                        .param("externalRequestId", "MHS-LAB-SCOPE-2")
+                        .header("X-Service-Token", TOKEN))
+                .andExpect(status().isNotFound());
+        String replay = send(order("MSG-SCOPE-001", "MHS-LAB-SCOPE-1", SECRET, "org-mini-his"));
+        assertThat(field(replay, "/RESPONSE/PATIENT/ORDER/ORC-3-1")).isEqualTo(orderId);
+        String otherOrganization = send(order("MSG-SCOPE-001", "MHS-LAB-SCOPE-1", SECRET, "org-pe-hospital"));
+        assertThat(ackCode(otherOrganization)).isEqualTo("AA");
+        assertThat(field(otherOrganization, "/RESPONSE/PATIENT/ORDER/ORC-3-1")).isNotEqualTo(orderId);
     }
 
     @Test

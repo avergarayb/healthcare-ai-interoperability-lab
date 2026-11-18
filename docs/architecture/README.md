@@ -206,6 +206,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 | [ADR-096](../adr/ADR-096-identity-provider-agnostic-v1.md) | Accepted architectural direction: provider-independent identity, internal bindings, verified memberships and separate resource authorization. Keycloak is an optional laboratory fixture, not a mandatory customer dependency. No product runtime changes in TASK 001/002; later adoption needs its own authorization. |
 | [ADR-097](../adr/ADR-097-enterprise-connector-authorization-boundaries.md) | Accepted — architectural direction only: separate platform/local/external authorities, initial modular approach, conceptual controls/restrictions and independent A/B/C/D gates. No operational Graph certification, real permissions/credentials, Graph calls, implemented enterprise custody or automatic authorization of subsequent tasks. |
 | [ADR-105](../adr/ADR-105-platform-001-local-demonstration.md) | Accepted for the local Peru and Spain demonstration stack. Not a production deployment, not multi-tenancy, and not a migration of SQLite to PostgreSQL. |
+| [ADR-106](../adr/ADR-106-hl7-002-hospital-laboratory.md) | Accepted for the existing HL7 v2.5.1 laboratory profile. A reused control id with a different message is rejected. Not a new engine and not a second country stack. |
 
 ## Historical governance artifacts
 

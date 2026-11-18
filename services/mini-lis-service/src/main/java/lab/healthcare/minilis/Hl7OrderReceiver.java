@@ -43,6 +43,15 @@ public class Hl7OrderReceiver {
         }
         Terser terser = parsed.terser();
         String controlId = Hl7Messages.value(terser, "/MSH-10");
+        String sendingApplication = Hl7Messages.value(terser, "/MSH-3");
+        String sendingFacility = Hl7Messages.value(terser, "/MSH-4");
+        String digest = Hl7Messages.orderDigest(
+                Hl7Messages.value(terser, "/ORDER/ORC-21-10"),
+                Hl7Messages.value(terser, "/PATIENT/PID-3-1"),
+                Hl7Messages.value(terser, "/ORDER/ORC-2-1"),
+                Hl7Messages.value(terser, "/ORDER/OBSERVATION_REQUEST/OBR-4-1"),
+                Hl7Messages.value(terser, "/ORDER/OBSERVATION_REQUEST/OBR-4-2"),
+                Hl7Messages.value(terser, "/ORDER/OBSERVATION_REQUEST/OBR-7"));
         if (!ID.matcher(controlId).matches() || !Hl7Messages.VERSION.equals(Hl7Messages.value(terser, "/MSH-12"))) {
             log.info("hl7_oml_rejected error=invalid_request");
             return messages.ack(properties.getReceivingApplication(), properties.getReceivingFacility(), "O21", "AR", safe(controlId), "invalid_request");
@@ -53,18 +62,31 @@ public class Hl7OrderReceiver {
         }
         String organizationId = Hl7Messages.value(terser, "/ORDER/ORC-21-10");
         if (!properties.allowedOrganizationList().contains(organizationId) || !organizationId.equals(Hl7Messages.value(terser, "/PATIENT/PID-3-4"))) {
-            Hl7Ack rejected = records.rememberRejection(controlId, null, "AE", "organization_forbidden");
+            Hl7Ack rejected = records.rememberRejection(
+                    sendingApplication, sendingFacility, organizationId, controlId, null, "AE", "organization_forbidden", digest);
             log.info("hl7_oml_rejected control={} error={}", controlId, rejected.detail());
             return messages.ack(properties.getReceivingApplication(), properties.getReceivingFacility(), "O21", rejected.code(), controlId, rejected.detail());
         }
-        OmlOrder order = order(terser, controlId, organizationId);
+        OmlOrder order = order(terser, controlId, organizationId, sendingApplication, sendingFacility, digest);
         if (order == null || Hl7Messages.forbiddenCodeSystem(Hl7Messages.value(terser, "/ORDER/OBSERVATION_REQUEST/OBR-4-3"))) {
-            Hl7Ack rejected = records.rememberRejection(controlId, order == null ? null : order.placerOrderId(), "AE", "invalid_request");
+            Hl7Ack rejected = records.rememberRejection(
+                    sendingApplication,
+                    sendingFacility,
+                    organizationId,
+                    controlId,
+                    order == null ? null : order.placerOrderId(),
+                    "AE",
+                    "invalid_request",
+                    digest);
             log.info("hl7_oml_rejected control={} error=invalid_request", controlId);
             return messages.ack(properties.getReceivingApplication(), properties.getReceivingFacility(), "O21", rejected.code(), controlId, rejected.detail());
         }
         try {
             Hl7Ack ack = records.acceptOml(order);
+            if (!"AA".equals(ack.code())) {
+                log.info("hl7_oml_rejected control={} error={}", controlId, ack.detail());
+                return messages.ack(properties.getReceivingApplication(), properties.getReceivingFacility(), "O21", ack.code(), controlId, ack.detail());
+            }
             log.info("hl7_oml_accepted control={} order={} duplicate={}", controlId, ack.fillerOrderId(), ack.duplicate());
             return messages.orderResponse(
                     properties.getReceivingApplication(),
@@ -78,7 +100,15 @@ public class Hl7OrderReceiver {
             String detail = "invalid_request".equals(ex.code()) || "invalid_transition".equals(ex.code()) || "not_found".equals(ex.code())
                     ? ex.code()
                     : "invalid_request";
-            Hl7Ack rejected = records.rememberRejection(controlId, order.placerOrderId(), "AE", detail);
+            Hl7Ack rejected = records.rememberRejection(
+                    order.sendingApplication(),
+                    order.sendingFacility(),
+                    order.organizationId(),
+                    controlId,
+                    order.placerOrderId(),
+                    "AE",
+                    detail,
+                    order.payloadDigest());
             log.info("hl7_oml_rejected control={} error={}", controlId, detail);
             return messages.ack(properties.getReceivingApplication(), properties.getReceivingFacility(), "O21", rejected.code(), controlId, rejected.detail());
         }
@@ -98,7 +128,13 @@ public class Hl7OrderReceiver {
                 && properties.getReceivingFacility().equals(Hl7Messages.value(terser, "/MSH-6"));
     }
 
-    private static OmlOrder order(Terser terser, String controlId, String organizationId) {
+    private static OmlOrder order(
+            Terser terser,
+            String controlId,
+            String organizationId,
+            String sendingApplication,
+            String sendingFacility,
+            String digest) {
         String externalId = Hl7Messages.value(terser, "/PATIENT/PID-3-1");
         String family = Hl7Messages.value(terser, "/PATIENT/PID-5-1");
         String given = Hl7Messages.value(terser, "/PATIENT/PID-5-2");
@@ -114,7 +150,9 @@ public class Hl7OrderReceiver {
                 || !"NW".equals(Hl7Messages.value(terser, "/ORDER/ORC-1"))) {
             return null;
         }
-        return new OmlOrder(controlId, organizationId, externalId, family, given, birthDate, sex, placer, code, description, requestedAt);
+        return new OmlOrder(
+                controlId, organizationId, externalId, family, given, birthDate, sex, placer, code, description, requestedAt,
+                sendingApplication, sendingFacility, digest);
     }
 
     private static String safe(String controlId) {

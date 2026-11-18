@@ -43,5 +43,9 @@ public interface ExchangeStore {
             String externalResultId,
             String observationJson);
 
+    default Optional<String> hl7Observation(String messageControlId) {
+        return Optional.empty();
+    }
+
     java.util.List<String> hl7Observations(String destinationOrderId);
 }

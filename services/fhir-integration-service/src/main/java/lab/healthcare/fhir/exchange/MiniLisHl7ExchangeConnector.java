@@ -282,11 +282,31 @@ public final class MiniLisHl7ExchangeConnector implements OrderDestination, Resu
         body.put("status", status);
         body.put("requestedAt", correlation.requestedAt().toString());
         body.put("orderStatus", orderStatus.isBlank() ? "IN_PROGRESS" : orderStatus);
-        boolean stored = store.saveHl7Observation(
-                oru.controlId(), oru.fillerOrderId(), correlation.sourceOrderId(), oru.externalResultId(), body.toString());
+        String encoded = body.toString();
+        String decision = observationDecision(store.hl7Observation(oru.controlId()).orElse(null), encoded);
+        if ("contradictory".equals(decision)) {
+            log.info("hl7_oru_rejected control={} error=contradictory_message", oru.controlId());
+            return codec.ackMessage(peer, "R01", "AE", oru.controlId(), "contradictory_message");
+        }
+        boolean stored = "new".equals(decision) && store.saveHl7Observation(
+                oru.controlId(), oru.fillerOrderId(), correlation.sourceOrderId(), oru.externalResultId(), encoded);
+        if (!stored) {
+            decision = observationDecision(store.hl7Observation(oru.controlId()).orElse(null), encoded);
+            if (!"duplicate".equals(decision)) {
+                log.info("hl7_oru_rejected control={} error=contradictory_message", oru.controlId());
+                return codec.ackMessage(peer, "R01", "AE", oru.controlId(), "contradictory_message");
+            }
+        }
         String detail = "order=" + oru.fillerOrderId() + "&result=" + oru.externalResultId() + "&duplicate=" + !stored;
         log.info("hl7_oru_accepted control={} order={} duplicate={}", oru.controlId(), oru.fillerOrderId(), !stored);
         return codec.ackMessage(peer, "R01", "AA", oru.controlId(), detail);
+    }
+
+    static String observationDecision(String existing, String next) {
+        if (existing == null) {
+            return "new";
+        }
+        return existing.equals(next) ? "duplicate" : "contradictory";
     }
 
     private boolean peerMatches(Hl7ExchangeCodec.Oru oru) {

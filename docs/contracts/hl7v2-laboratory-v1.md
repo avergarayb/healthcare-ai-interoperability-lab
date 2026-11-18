@@ -49,7 +49,7 @@ Java accepts the ORU only when the secret and the sending system match and the p
 
 ## Idempotency
 
-The same `MSH-10` returns the stored response and does not create another order or observation. A new control id with the same placer order returns `ORL^O22`, `MSA-3` `duplicate`, and the original LIS order id in `ORC-3-1`. If the response is lost after Mini LIS commits, the retry is safe. If the ACK is lost after Java stores an ORU, the same result id returns `duplicate=true`.
+The same sender, facility, organization, and `MSH-10`, with the same clinical order, returns the stored response and does not create another order or observation. The same key with a different clinical order is `AE` `contradictory_message` and leaves the stored order in place. A new control id with the same placer order returns `ORL^O22`, `MSA-3` `duplicate`, and the original LIS order id in `ORC-3-1`. See [hl7-002-hospital-laboratory-v1](hl7-002-hospital-laboratory-v1.md). If the response is lost after Mini LIS commits, the retry is safe. If the ACK is lost after Java stores an ORU, the same result id returns `duplicate=true`.
 
 The clinical result status stays `PRELIMINARY`, `FINAL`, or `CANCELLED` in Mini LIS. A failed ORU publication does not change that status and does not remove the result. The technical outcome is the publication response: `AA`, or `destination_unavailable` when the Java listener does not answer. `POST /hl7/results/{resultId}/publication` sends the same `MSH-10` again. A second acceptance does not create another observation.
 

@@ -207,10 +207,20 @@ public class LaboratoryRepository {
                 patientId);
     }
 
-    public Optional<Hl7Ack> findHl7Ack(String messageControlId) {
-        List<Hl7Ack> rows = jdbc.query(
-                "SELECT ack_code, ack_detail FROM hl7_inbound_message WHERE message_control_id = ?",
-                (rs, row) -> Hl7Ack.fromStored(rs.getString("ack_code"), rs.getString("ack_detail")),
+    public Optional<StoredHl7Message> findHl7Message(
+            String sendingApplication, String sendingFacility, String organizationId, String messageControlId) {
+        List<StoredHl7Message> rows = jdbc.query(
+                """
+                SELECT ack_code, ack_detail, payload_digest
+                FROM hl7_inbound_message
+                WHERE sending_application = ? AND sending_facility = ? AND organization_id = ? AND message_control_id = ?
+                """,
+                (rs, row) -> new StoredHl7Message(
+                        Hl7Ack.fromStored(rs.getString("ack_code"), rs.getString("ack_detail")),
+                        rs.getString("payload_digest")),
+                sendingApplication,
+                sendingFacility,
+                organizationId,
                 messageControlId);
         if (rows.isEmpty()) {
             return Optional.empty();
@@ -221,19 +231,33 @@ public class LaboratoryRepository {
         return Optional.of(rows.get(0));
     }
 
-    public void insertHl7Ack(String messageControlId, String messageType, Hl7Ack ack, String placerOrderId, OffsetDateTime receivedAt) {
+    public void insertHl7Ack(
+            String sendingApplication,
+            String sendingFacility,
+            String organizationId,
+            String messageControlId,
+            String messageType,
+            Hl7Ack ack,
+            String placerOrderId,
+            String payloadDigest,
+            OffsetDateTime receivedAt) {
         write(() -> jdbc.update(
                 """
                 INSERT INTO hl7_inbound_message (
-                    message_control_id, message_type, ack_code, ack_detail, placer_order_id, filler_order_id, received_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    sending_application, sending_facility, organization_id, message_control_id,
+                    message_type, ack_code, ack_detail, placer_order_id, filler_order_id, payload_digest, received_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
+                sendingApplication,
+                sendingFacility,
+                organizationId,
                 messageControlId,
                 messageType,
                 ack.code(),
                 ack.detail(),
                 placerOrderId,
                 ack.fillerOrderId(),
+                payloadDigest,
                 Timestamp.from(receivedAt.toInstant())));
     }
 

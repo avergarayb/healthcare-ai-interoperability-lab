@@ -14,5 +14,8 @@ public record OmlOrder(
         String placerOrderId,
         String testCode,
         String testDescription,
-        OffsetDateTime requestedAt) {
+        OffsetDateTime requestedAt,
+        String sendingApplication,
+        String sendingFacility,
+        String payloadDigest) {
 }

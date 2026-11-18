@@ -182,6 +182,13 @@ public final class SqliteExchangeStore implements ExchangeStore {
     }
 
     @Override
+    public synchronized Optional<String> hl7Observation(String messageControlId) {
+        return queryString(
+                "SELECT observation_json FROM exchange_hl7_result WHERE message_control_id = ?",
+                messageControlId);
+    }
+
+    @Override
     public synchronized java.util.List<String> hl7Observations(String destinationOrderId) {
         try (Connection connection = open();
                 PreparedStatement statement = connection.prepareStatement(

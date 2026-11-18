@@ -24,6 +24,13 @@ class Hl7ExchangeCodecTest {
     private final Hl7Messages lis = new Hl7Messages();
 
     @Test
+    void anIdenticalStoredResultIsADuplicateAndADifferentBodyIsContradictory() {
+        assertThat(MiniLisHl7ExchangeConnector.observationDecision(null, "{\"value\":\"141\"}")).isEqualTo("new");
+        assertThat(MiniLisHl7ExchangeConnector.observationDecision("{\"value\":\"141\"}", "{\"value\":\"141\"}")).isEqualTo("duplicate");
+        assertThat(MiniLisHl7ExchangeConnector.observationDecision("{\"value\":\"141\"}", "{\"value\":\"90\"}")).isEqualTo("contradictory");
+    }
+
+    @Test
     void anOmlUsesTheProfileAndCarriesNoLoinc() {
         ExchangeProperties.Hl7 peer = new ExchangeProperties.Hl7();
         String er7 = codec.oml(peer, "MSG-UNIT-1", "secret", command(), patient());
