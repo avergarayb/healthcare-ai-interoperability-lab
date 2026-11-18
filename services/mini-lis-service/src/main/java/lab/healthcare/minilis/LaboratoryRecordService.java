@@ -185,9 +185,10 @@ public class LaboratoryRecordService {
 
     @Transactional
     public Hl7Ack acceptOml(OmlOrder order) {
-        Optional<Hl7Ack> stored = repository.findHl7Ack(order.messageControlId());
+        Optional<StoredHl7Message> stored = repository.findHl7Message(
+                order.sendingApplication(), order.sendingFacility(), order.organizationId(), order.messageControlId());
         if (stored.isPresent()) {
-            return stored.get();
+            return replay(stored.get(), order.payloadDigest());
         }
         ExternalPatient patient = nested(this::resolvePatient, order);
         boolean duplicate = false;
@@ -208,19 +209,53 @@ public class LaboratoryRecordService {
             duplicate = true;
         }
         Hl7Ack ack = Hl7Ack.accepted(created.orderId(), patient.patientId(), duplicate);
-        repository.insertHl7Ack(order.messageControlId(), "OML_O21", ack, order.placerOrderId(), now());
+        repository.insertHl7Ack(
+                order.sendingApplication(),
+                order.sendingFacility(),
+                order.organizationId(),
+                order.messageControlId(),
+                "OML_O21",
+                ack,
+                order.placerOrderId(),
+                order.payloadDigest(),
+                now());
         return ack;
     }
 
     @Transactional
-    public Hl7Ack rememberRejection(String messageControlId, String placerOrderId, String code, String detail) {
-        Optional<Hl7Ack> stored = repository.findHl7Ack(messageControlId);
+    public Hl7Ack rememberRejection(
+            String sendingApplication,
+            String sendingFacility,
+            String organizationId,
+            String messageControlId,
+            String placerOrderId,
+            String code,
+            String detail,
+            String payloadDigest) {
+        Optional<StoredHl7Message> stored = repository.findHl7Message(
+                sendingApplication, sendingFacility, organizationId, messageControlId);
         if (stored.isPresent()) {
-            return stored.get();
+            return replay(stored.get(), payloadDigest);
         }
         Hl7Ack ack = Hl7Ack.error(code, detail);
-        repository.insertHl7Ack(messageControlId, "OML_O21", ack, placerOrderId, now());
+        repository.insertHl7Ack(
+                sendingApplication,
+                sendingFacility,
+                organizationId,
+                messageControlId,
+                "OML_O21",
+                ack,
+                placerOrderId,
+                payloadDigest,
+                now());
         return ack;
+    }
+
+    private static Hl7Ack replay(StoredHl7Message stored, String payloadDigest) {
+        if (!stored.digest().isEmpty() && !stored.digest().equals(payloadDigest)) {
+            return Hl7Ack.error("AE", "contradictory_message");
+        }
+        return stored.ack();
     }
 
     private ExternalPatient resolvePatient(OmlOrder order) {

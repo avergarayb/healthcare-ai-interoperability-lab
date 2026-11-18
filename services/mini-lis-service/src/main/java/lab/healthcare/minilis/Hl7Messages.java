@@ -6,10 +6,13 @@ import ca.uhn.hl7v2.model.Message;
 import ca.uhn.hl7v2.parser.Parser;
 import ca.uhn.hl7v2.util.Terser;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.HexFormat;
 import java.util.Locale;
 
 /**
@@ -21,6 +24,32 @@ public final class Hl7Messages {
 
     public static final String VERSION = "2.5.1";
     public static final String LIS_TEST_SYSTEM = "https://lab.local/mini-lis/test";
+
+    public static String orderDigest(
+            String organizationId,
+            String patientId,
+            String placerOrderId,
+            String testCode,
+            String testDescription,
+            String requestedAt) {
+        String canonical = String.join("|",
+                text(organizationId),
+                text(patientId),
+                text(placerOrderId),
+                text(testCode),
+                text(testDescription),
+                text(requestedAt));
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (Exception ex) {
+            throw new IllegalStateException("HL7 digest is unavailable");
+        }
+    }
+
+    private static String text(String value) {
+        return value == null ? "" : value;
+    }
 
     static {
         if (System.getProperty("hapi.home") == null) {

@@ -88,6 +88,7 @@ class Hl7LabExchangeFlowTest {
                 "server.address", "127.0.0.1",
                 "spring.main.banner-mode", "off",
                 "mini-his.sqlite-path", database.toString(),
+                "spring.flyway.enabled", "false",
                 "mini-his.organization-id", "org-mini-his",
                 "mini-his.exchange.base-url", "http://127.0.0.1:" + exchangePort,
                 "mini-his.exchange.service-token", HIS_TOKEN));
