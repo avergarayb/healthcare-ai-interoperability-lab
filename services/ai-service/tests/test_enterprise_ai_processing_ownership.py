@@ -101,11 +101,10 @@ def test_relative_root_rejected(tmp_path):
         SQLiteExecutionLedger(Path("relative-c02-root"), TestAccessAuthority(clock), clock)
 
 
-@pytest.mark.parametrize("platform", ["posix", "unsupported"])
+@pytest.mark.parametrize("platform", ["java", "unsupported"])
 def test_unsupported_platform_fails_closed_before_creating_files(tmp_path, monkeypatch, platform):
     clock = Clock()
     with monkeypatch.context() as guard:
-        # Negative gate test only: does not execute or validate POSIX locking.
         guard.setattr(os, "name", platform)
         with pytest.raises(ExecutionError):
             SQLiteExecutionLedger(tmp_path, TestAccessAuthority(clock), clock)
@@ -114,7 +113,8 @@ def test_unsupported_platform_fails_closed_before_creating_files(tmp_path, monke
 
 @pytest.mark.parametrize("nested", [False, True])
 def test_native_directory_alias_cannot_acquire_coordinator(tmp_path, nested):
-    assert os.name == "nt", "C02 ownership validation requires real Windows"
+    if os.name != "nt":
+        pytest.skip("Windows junction")
     import _winapi
     target, alias = tmp_path / "actual", tmp_path / "alias"
     target.mkdir()

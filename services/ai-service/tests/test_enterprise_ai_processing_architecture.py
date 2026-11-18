@@ -35,7 +35,7 @@ IMPORTS = {
                              "..enterprise_connectors.models", "..enterprise_connectors.registry"}),
     "fake_model.py": frozenset({".execution_types"}),
     "sqlite_ledger.py": frozenset({"contextlib", "dataclasses", "datetime", "hashlib", "os", "pathlib", "sqlite3", "stat", "threading",
-                                  "uuid", "msvcrt", ".execution_types", ".models", ".remote_authorization",
+                                  "uuid", "msvcrt", "fcntl", ".execution_types", ".models", ".remote_authorization",
                                   "..enterprise_connectors.models"}),
     "remote_authorization.py": frozenset({"dataclasses", "datetime"}),
     "durable_resolver.py": frozenset({
@@ -151,7 +151,7 @@ def test_c01_negative_controls_still_reject_original_forbidden_dependencies(sour
     ("gateway.py", "connection.execute('SELECT x')"), ("fake_model.py", "import sqlite3"),
     ("fake_model.py", "from app.config import Settings"), ("execution_types.py", "import socket"),
     ("sqlite_ledger.py", "import httpx"), ("sqlite_ledger.py", "import openai"),
-    ("sqlite_ledger.py", "import fcntl"),
+    ("sqlite_ledger.py", "import socket"),
     ("gateway.py", "from app.gemini_provider import GeminiProvider"), ("gateway.py", "import mcp"),
     ("gateway.py", "from app.institutional_knowledge import index"), ("gateway.py", "router.add_api_route()"),
     ("gateway.py", "service._event()"), ("sqlite_ledger.py", "service._validate_delivery()"),

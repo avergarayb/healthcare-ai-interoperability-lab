@@ -1,22 +1,37 @@
-"""HTTP demonstration for one jurisdiction profile.
+"""One jurisdiction demonstration inside the Linux AI container.
 
-The durable ledger is Windows-only, so this runner executes on the host and
-calls the published federation port. MCP and LangGraph stay in process. The
-model client is intercepted. Container-to-container HTTP and the blocked
-provider socket are probe.py.
+LangGraph, MCP, and the durable ledger run in this process. Federation HTTP
+and Keycloak discovery are real. The model client is intercepted. probe.py
+checks that the provider socket stays closed.
 """
 from __future__ import annotations
 
 import json
 import os
+import platform
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+_NETWORK_FS = {"nfs", "nfs4", "cifs", "smb", "smbfs", "9p", "drvfs", "fuse.sshfs", "virtiofs"}
+
 
 def _entries_contain(envelope: dict, marker: str) -> bool:
     return marker in json.dumps(envelope.get("entries", []))
+
+
+def _filesystem(path: str) -> str:
+    best, kind = "", ""
+    for line in Path("/proc/mounts").read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        mount, fstype = parts[1], parts[2]
+        if path == mount or path.startswith(mount.rstrip("/") + "/"):
+            if len(mount) >= len(best):
+                best, kind = mount, fstype
+    return kind
 
 
 _STAGE = {"value": "start"}
@@ -34,15 +49,20 @@ def run() -> dict:
     from profiles import PROFILES
     selected = PROFILES[profile_id]
     federation_url = os.environ.get("PLATFORM_FEDERATION_URL", "").strip().rstrip("/")
-    if os.environ.get("GEMINI_API_KEY", "").strip():
+    if os.environ.get("GEMINI_API_KEY", "").strip() or os.environ.get("OPENAI_API_KEY", "").strip():
         raise SystemExit("provider_key_present")
-    if os.name != "nt":
-        raise SystemExit("ledger_windows_only")
+    if os.environ.get("PLATFORM_IN_CONTAINER") != "true" or os.name != "posix":
+        raise SystemExit("graph_not_in_linux")
+    if not Path("/.dockerenv").is_file() or platform.system() != "Linux":
+        raise SystemExit("graph_not_in_linux")
     parts = urlsplit(federation_url)
-    if parts.hostname != "127.0.0.1" or parts.port != selected["published_port"]:
+    if parts.hostname != selected["host"] or parts.port != 8081:
         raise SystemExit("profile_rejected")
 
     from app.clinical_federation_client import ClinicalFederationClient, FederationClientError
+    from app.enterprise_llm_providers.errors import ProviderError
+    from app.enterprise_llm_providers.transport import live_egress_enabled
+    from app.longitudinal_lab.policy import request_real_provider_send
     from app.clinical_lab_summary.review import (
         IamReviewer, ReviewError, decide, iam_principal_id, read_review,
     )
@@ -63,6 +83,15 @@ def run() -> dict:
         token = Path(token_file).read_text(encoding="utf-8").strip()
     if not token:
         raise SystemExit("federation_unconfigured")
+    if live_egress_enabled():
+        raise SystemExit("provider_policy_open")
+    try:
+        request_real_provider_send()
+    except ProviderError as error:
+        if error.reason != "provider_send_blocked":
+            raise SystemExit("provider_policy_open")
+    else:
+        raise SystemExit("provider_policy_open")
 
     import httpx
     http = httpx.Client(timeout=20.0, follow_redirects=False)
@@ -89,13 +118,22 @@ def run() -> dict:
             raise SystemExit("ucum_rejected")
         if evidence["organization_id"] != profile.organization_id:
             raise SystemExit("organization_rejected")
+        expected = "+0.6" if profile_id.startswith("pe-") else "-5"
+        expected_unit = "g/dL" if profile_id.startswith("pe-") else "mg/dL"
+        if chart["absolute_difference"] != expected or chart["unit"] != expected_unit:
+            raise SystemExit("difference_rejected")
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         if not os.environ.get("PLATFORM_LEDGER_ROOT") or not os.environ.get("PLATFORM_REVIEW_DB"):
             raise SystemExit("ledger_unconfigured")
         ledger_root = Path(os.environ["PLATFORM_LEDGER_ROOT"]).resolve()
+        if ledger_root != Path("/var/lab/ledger"):
+            raise SystemExit("ledger_unconfigured")
+        filesystem = _filesystem(str(ledger_root))
+        if filesystem in _NETWORK_FS:
+            raise SystemExit("ledger_network_filesystem")
         ledger_root.mkdir(parents=True, exist_ok=True)
-        ledger_dir = ledger_root / stamp
+        ledger_dir = ledger_root / profile_id
         review_path = Path(os.environ["PLATFORM_REVIEW_DB"]).resolve()
         review_path.parent.mkdir(parents=True, exist_ok=True)
         _mark("ledger")
@@ -118,6 +156,12 @@ def run() -> dict:
             state = graph.invoke(
                 lab.executor[profile.organization_id], series_for(profile).authorization_id, 1000,
                 profile.patient_value, consent)
+            held = _permit(
+                lab, profile, authorization_id="linux-held-001", resource_id="linux-held-probe")
+            held_decision = lab.ledger.evaluate_remote_authorization(
+                lab.executor[profile.organization_id], held, 977)
+            if held_decision.reason != "accepted":
+                raise SystemExit("hold_rejected")
         finally:
             lab.close()
         if state.get("phase") != "PENDING_REVIEW":
@@ -198,6 +242,19 @@ def run() -> dict:
         if not final["decision"].get("reviewer_id"):
             raise SystemExit("audit_rejected")
 
+        import sqlite3
+        status_conn = sqlite3.connect(ledger_path.as_uri() + "?mode=ro", uri=True)
+        try:
+            reservation_rows = status_conn.execute(
+                "SELECT authorization_id, status FROM aip_remote_execution_reservation"
+            ).fetchall()
+        finally:
+            status_conn.close()
+        reservations = {row[0]: row[1] for row in reservation_rows}
+        clinical_id = series_for(profile).authorization_id
+        if reservations.get(clinical_id) != "consumed" or reservations.get("linux-held-001") != "held":
+            raise SystemExit("reservation_rejected")
+
         from sqlite_backup import copy_sqlite, schema_version
         copied = copy_sqlite(ledger_path, ledger_root / "backup" / stamp)
         version = schema_version(copied)
@@ -219,7 +276,11 @@ def run() -> dict:
             "direction": rows[0]["direction"],
             "model_calls": len(sends),
             "model_host": sends[0].url.host,
-            "provider_socket": "intercepted_on_host",
+            "provider_socket": "intercepted_in_container",
+            "executor": "linux-container",
+            "os_name": os.name,
+            "system": platform.system(),
+            "ledger_filesystem": filesystem,
             "unauthenticated_status": anonymous.status_code,
             "discovery_issuer": document.get("issuer"),
             "auditor": auditor_outcome,
@@ -229,6 +290,9 @@ def run() -> dict:
             "summary_status": final["status"],
             "schema_version": version,
             "backup": copied.name,
+            "reservation": reservations.get(clinical_id),
+            "held_reservation": reservations.get("linux-held-001"),
+            "provider_policy": "blocked",
         }
         (ledger_root / "platform-last.json").write_text(
             json.dumps(report, ensure_ascii=True), encoding="utf-8")

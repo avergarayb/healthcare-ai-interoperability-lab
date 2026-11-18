@@ -26,6 +26,8 @@ The two demonstrations can start, stop, and be backed up without a second produc
 
 A later increment may adapt the Windows ledger so the graph can run in a Linux container. This increment does not make that change.
 
+LINUX-001 is that later increment. [ADR-107](ADR-107-linux-portable-ledger.md) records the portable lock and the in-container graph. The decisions above describe the stack before that change.
+
 ## References
 
 - [platform-001](../demos/platform-001.md)

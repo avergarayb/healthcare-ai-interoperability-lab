@@ -24,6 +24,10 @@ x-ai-env: &ai-env
   LAB_REVIEW_IAM_SESSION_DB: /var/lab/iam/session.sqlite3
   LAB_SUMMARY_REVIEW_DB: /var/lab/review/lab-summary.sqlite3
   PLATFORM_REVIEW_DB: /var/lab/review/lab-summary.sqlite3
+  PLATFORM_IN_CONTAINER: "true"
+  PLATFORM_LEDGER_ROOT: /var/lab/ledger
+  PLATFORM_AI_URL: http://127.0.0.1:8090
+  PLATFORM_TOKEN_FILE: /run/secrets/federation_token
   AI_REVIEW_DB_PATH: /var/lab/followup/review.sqlite3
   HUMAN_SESSION_DB_PATH: /var/lab/human/session.sqlite3
   INSTITUTIONAL_KNOWLEDGE_DB_PATH: /var/lab/knowledge/institutional.sqlite3
