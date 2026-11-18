@@ -1,6 +1,8 @@
 package lab.healthcare.minihis;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -17,6 +19,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,10 +38,16 @@ public class WardController {
             "tarea-abierta", "tarea-resuelta", "preparacion-lista", "preparacion-pendiente",
             "decision-registrada", "seguimiento-creado", "episodio-cerrado", "version-conflicto",
             "no-autorizado", "coordinador-no-disponible", "entrada-invalida", "ya-registrado",
-            "aprobacion-invalida", "episodio-abierto");
+            "aprobacion-invalida", "episodio-abierto", "orden-registrada", "orden-enviada",
+            "orden-no-enviada", "agente-preparado", "agente-no-disponible", "decision-aprobada",
+            "rechazada", "reconocido", "escalado");
 
     private final InpatientStore store;
     private final DischargeCoordinator coordinator;
+    private final LabOrderStore orders;
+    private final MiniHisStore patients;
+    private final ExchangeGateway exchange;
+    private final CriticalLabClient criticalLab;
     private final String organizationId;
     private final String password;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -44,10 +55,18 @@ public class WardController {
     public WardController(
             InpatientStore store,
             DischargeCoordinator coordinator,
+            LabOrderStore orders,
+            MiniHisStore patients,
+            ExchangeGateway exchange,
+            CriticalLabClient criticalLab,
             @Value("${mini-his.organization-id}") String organizationId,
             @Value("${mini-his.inpatient.ward-password:}") String password) {
         this.store = store;
         this.coordinator = coordinator;
+        this.orders = orders;
+        this.patients = patients;
+        this.exchange = exchange;
+        this.criticalLab = criticalLab;
         this.organizationId = organizationId;
         this.password = password == null ? "" : password;
     }
@@ -298,6 +317,251 @@ public class WardController {
         return mutate(request, episodeId, () -> store.close(episodeId, version, principal(request).userId()), "episodio-cerrado");
     }
 
+    @GetMapping(path = "/ward/orders", produces = MediaType.TEXT_HTML_VALUE)
+    public String orders(HttpServletRequest request) {
+        return WardView.orders(principal(request), csrf(request), takeNotice(request), orders.listAll());
+    }
+
+    @GetMapping(path = "/ward/orders/new", produces = MediaType.TEXT_HTML_VALUE)
+    public String newOrder(HttpServletRequest request) {
+        if (!clinician(request)) {
+            notice(request, "no-autorizado");
+            return orders(request);
+        }
+        return WardView.orderForm(principal(request), csrf(request), takeNotice(request), store.patients(), store.episodes());
+    }
+
+    @PostMapping("/ward/orders")
+    public ResponseEntity<Void> createOrder(
+            @RequestParam String patientId,
+            @RequestParam(required = false) String episodeId,
+            @RequestParam String testCode,
+            @RequestParam String indication,
+            @RequestParam String requestedOn,
+            HttpServletRequest request) {
+        if (!clinician(request) || !csrfOk(request)) {
+            notice(request, "no-autorizado");
+            return redirect("/ward/orders");
+        }
+        if (!"718-7".equals(testCode) || patients.findPatient(patientId).isEmpty()
+                || indication == null || indication.isBlank() || indication.length() > 200 || indication.indexOf('<') >= 0) {
+            notice(request, "entrada-invalida");
+            return redirect("/ward/orders/new");
+        }
+        LocalDate day;
+        try {
+            day = LocalDate.parse(requestedOn);
+        } catch (RuntimeException ex) {
+            notice(request, "entrada-invalida");
+            return redirect("/ward/orders/new");
+        }
+        if (episodeId != null && !episodeId.isBlank() && store.episodes().stream()
+                .noneMatch(row -> episodeId.equals(row.get("episode_id")) && patientId.equals(row.get("patient_id")))) {
+            notice(request, "entrada-invalida");
+            return redirect("/ward/orders/new");
+        }
+        LabOrderView created = orders.insert(
+                patientId, "mini-lis", testCode, "Hemoglobina", day.atTime(12, 0).atOffset(ZoneOffset.UTC).toString());
+        orders.rememberContext(created.orderId(), episodeId, indication.trim());
+        notice(request, "orden-registrada");
+        return submitOrder(created.orderId(), request);
+    }
+
+    @PostMapping("/ward/orders/{orderId}/submission")
+    public ResponseEntity<Void> submitOrder(@PathVariable String orderId, HttpServletRequest request) {
+        if (!clinician(request) || !csrfOk(request)) {
+            notice(request, "no-autorizado");
+            return redirect("/ward/orders/" + orderId);
+        }
+        LabOrderView order = orders.find(orderId).orElse(null);
+        PatientView patient = order == null ? null : patients.findPatient(order.patientId()).orElse(null);
+        if (order == null || patient == null) {
+            notice(request, "entrada-invalida");
+            return redirect("/ward/orders");
+        }
+        if ("submitted".equals(order.localStatus())) {
+            notice(request, "ya-registrado");
+            return redirect("/ward/orders/" + orderId);
+        }
+        ObjectNode body = mapper.createObjectNode();
+        body.put("sourceOrganizationId", organizationId);
+        body.put("destinationSystemKey", order.destinationSystemKey());
+        body.put("externalRequestId", order.orderId());
+        body.put("testCode", order.testCode());
+        body.put("testDescription", order.testDescription());
+        body.put("requestedAt", order.requestedAt());
+        ObjectNode identity = body.putObject("patient");
+        identity.put("identifierSystem", SyntheticSeed.PROPRIETARY_PATIENT_SYSTEM);
+        identity.put("identifierValue", patient.patientId());
+        identity.put("familyName", patient.familyName());
+        identity.put("givenName", patient.givenName());
+        identity.put("birthDate", patient.birthDate());
+        identity.put("administrativeSex", patient.administrativeSex());
+        try {
+            JsonNode accepted = exchange.submit(body);
+            orders.markSubmitted(
+                    order.orderId(),
+                    accepted.path("correlationId").asText(),
+                    accepted.path("destination").path("orderId").asText(),
+                    accepted.path("destination").path("organizationId").asText());
+            notice(request, "orden-enviada");
+        } catch (ExchangeGateway.ExchangeGatewayException ex) {
+            orders.markFailed(order.orderId());
+            notice(request, "orden-no-enviada");
+        }
+        return redirect("/ward/orders/" + orderId);
+    }
+
+    @GetMapping(path = "/ward/orders/{orderId}", produces = MediaType.TEXT_HTML_VALUE)
+    public String order(@PathVariable String orderId, HttpServletRequest request) {
+        LabOrderView order = orders.find(orderId).orElse(null);
+        if (order == null) {
+            notice(request, "entrada-invalida");
+            return orders(request);
+        }
+        CriticalHemoglobinRule.Reading reading = new CriticalHemoglobinRule.Reading("", "", false);
+        String reportError = "";
+        if (order.correlationId() != null && !order.correlationId().isBlank()) {
+            try {
+                reading = CriticalHemoglobinRule.read(exchange.report(order.orderId()), order.testCode());
+            } catch (ExchangeGateway.ExchangeGatewayException ex) {
+                reportError = "El resultado no pudo leerse.";
+            }
+        }
+        return WardView.orderDetail(
+                principal(request), csrf(request), takeNotice(request), order, orders.context(orderId),
+                reading, reportError, orders.acknowledgement(orderId).orElse(null));
+    }
+
+    @PostMapping("/ward/orders/{orderId}/preparation")
+    public ResponseEntity<Void> prepareCritical(@PathVariable String orderId, HttpServletRequest request) {
+        if (!clinician(request) || !csrfOk(request)) {
+            notice(request, "no-autorizado");
+            return redirect("/ward/orders/" + orderId);
+        }
+        LabOrderView order = orders.find(orderId).orElse(null);
+        if (order == null || order.destinationOrderId() == null || order.destinationOrderId().isBlank()) {
+            notice(request, "entrada-invalida");
+            return redirect("/ward/orders/" + orderId);
+        }
+        Map<String, Object> context = orders.context(orderId);
+        Object episode = context.get("episode_id");
+        try {
+            Map<String, Object> prepared = criticalLab.prepare(Map.of(
+                    "orderId", order.destinationOrderId(),
+                    "organizationId", organizationId,
+                    "episodeId", episode == null ? "" : String.valueOf(episode),
+                    "actorId", principal(request).userId()));
+            orders.rememberProposal(
+                    orderId,
+                    String.valueOf(prepared.get("proposalId")),
+                    String.valueOf(prepared.get("proposalHash")),
+                    String.valueOf(prepared.getOrDefault("proposal", "")),
+                    String.valueOf(prepared.getOrDefault("phase", "")),
+                    String.valueOf(prepared.getOrDefault("protocolIds", "")));
+            notice(request, "PENDING_REVIEW".equals(prepared.get("phase")) ? "agente-preparado" : "agente-no-disponible");
+        } catch (InpatientRejection ex) {
+            notice(request, noticeFor(ex));
+        }
+        return redirect("/ward/orders/" + orderId);
+    }
+
+    @PostMapping("/ward/orders/{orderId}/decision")
+    public ResponseEntity<Void> decideCritical(
+            @PathVariable String orderId, @RequestParam String decision, HttpServletRequest request) {
+        if (!clinician(request) || !csrfOk(request) || (!"approved".equals(decision) && !"rejected".equals(decision))) {
+            notice(request, "no-autorizado");
+            return redirect("/ward/orders/" + orderId);
+        }
+        Map<String, Object> context = orders.context(orderId);
+        if (context.get("proposal_id") == null) {
+            notice(request, "aprobacion-invalida");
+            return redirect("/ward/orders/" + orderId);
+        }
+        if (orders.acknowledgement(orderId).isPresent()) {
+            notice(request, "ya-registrado");
+            return redirect("/ward/orders/" + orderId);
+        }
+        try {
+            Map<String, Object> recorded = criticalLab.decide(Map.of(
+                    "proposalId", context.get("proposal_id"),
+                    "proposalHash", context.get("proposal_hash"),
+                    "decision", decision,
+                    "actorId", principal(request).userId(),
+                    "organizationId", organizationId,
+                    "idempotencyKey", UUID.randomUUID().toString()));
+            if (!"recorded".equals(recorded.get("outcome"))) {
+                notice(request, "aprobacion-invalida");
+                return redirect("/ward/orders/" + orderId);
+            }
+            orders.rememberProposal(
+                    orderId,
+                    String.valueOf(context.get("proposal_id")),
+                    String.valueOf(context.get("proposal_hash")),
+                    String.valueOf(context.get("proposal_summary")),
+                    "approved".equals(decision) ? "APPROVED" : "REJECTED",
+                    String.valueOf(context.get("protocol_ids")));
+            if ("rejected".equals(decision)) {
+                notice(request, "rechazada");
+                return redirect("/ward/orders/" + orderId);
+            }
+            Map<String, Object> applied = criticalLab.apply(Map.of(
+                    "proposalId", context.get("proposal_id"),
+                    "proposalHash", context.get("proposal_hash"),
+                    "organizationId", organizationId,
+                    "actorId", principal(request).userId()));
+            String outcome = String.valueOf(applied.get("outcome"));
+            if ("created".equals(outcome) || "already_created".equals(outcome)) {
+                if (orders.acknowledgement(orderId).isEmpty()) {
+                    orders.insertAcknowledgement(
+                            orderId,
+                            String.valueOf(context.get("proposal_id")),
+                            String.valueOf(context.get("proposal_hash")),
+                            "Reconocer hemoglobina crítica",
+                            principal(request).userId(),
+                            OffsetDateTime.now(ZoneOffset.UTC).toString());
+                }
+                notice(request, "decision-aprobada");
+            } else {
+                notice(request, "rechazada");
+            }
+        } catch (InpatientRejection ex) {
+            notice(request, noticeFor(ex));
+        }
+        return redirect("/ward/orders/" + orderId);
+    }
+
+    @PostMapping("/ward/orders/{orderId}/acknowledgement")
+    public ResponseEntity<Void> acknowledge(@PathVariable String orderId, HttpServletRequest request) {
+        return finishTask(request, orderId, true);
+    }
+
+    @PostMapping("/ward/orders/{orderId}/escalation")
+    public ResponseEntity<Void> escalate(@PathVariable String orderId, HttpServletRequest request) {
+        return finishTask(request, orderId, false);
+    }
+
+    private ResponseEntity<Void> finishTask(HttpServletRequest request, String orderId, boolean acknowledge) {
+        if (!clinician(request) || !csrfOk(request)) {
+            notice(request, "no-autorizado");
+            return redirect("/ward/orders/" + orderId);
+        }
+        Map<String, Object> row = orders.acknowledgement(orderId).orElse(null);
+        if (row == null || !"open".equals(row.get("status"))) {
+            notice(request, "ya-registrado");
+            return redirect("/ward/orders/" + orderId);
+        }
+        String at = OffsetDateTime.now(ZoneOffset.UTC).toString();
+        if (acknowledge) {
+            orders.markAcknowledged(orderId, at);
+            notice(request, "reconocido");
+        } else {
+            orders.markEscalated(orderId, at);
+            notice(request, "escalado");
+        }
+        return redirect("/ward/orders/" + orderId);
+    }
+
     private ResponseEntity<Void> mutate(HttpServletRequest request, String episodeId, Runnable action, String success) {
         if (!clinician(request) || !csrfOk(request)) {
             notice(request, "no-autorizado");
@@ -374,6 +638,7 @@ public class WardController {
         return switch (ex.code()) {
             case "version_conflict" -> "version-conflicto";
             case "coordinator_unavailable", "coordinator_unconfigured", "coordinator_rejected" -> "coordinador-no-disponible";
+            case "critical_agent_unavailable", "critical_agent_unconfigured", "critical_agent_rejected" -> "agente-no-disponible";
             case "invalid_input" -> "entrada-invalida";
             default -> "entrada-invalida";
         };
