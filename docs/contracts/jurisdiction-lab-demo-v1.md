@@ -31,6 +31,8 @@ Patients, organizations, permits, reviews, and evidence stay in the selected jur
 
 The model receives the minimized chart for the server-selected profile. Cited evidence stored for a new review is copied from that chart: source, resource id, code, value, UCUM system and code, status, provenance reference, profile id, and validation version. It is not parsed from the generated text. The summary row remains pending until a human decision, and that decision does not rewrite it.
 
+A local demonstration may run one container per profile. The MCP host list is `127.0.0.1`, `localhost`, `federation-pe`, and `federation-es`. The Docker names stay bound to one source. A request parameter cannot switch the profile. Decision: [ADR-105](../adr/ADR-105-platform-001-local-demonstration.md).
+
 The same connector may also return dated observations tagged `longitudinal-series`. The summary minimizer ignores that tag and still requires the original undated seed. Those dated observations belong to [longitudinal-lab-comparison-v1](longitudinal-lab-comparison-v1.md). They do not change this summary contract.
 
 Later regulatory work, not this contract, includes GDPR roles and rights, ENS controls, EHDS obligations, and RENHICE operational integration.

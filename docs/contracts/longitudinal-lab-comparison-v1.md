@@ -39,4 +39,6 @@ The model receives the code, the verified values and unit, the clinical dates, t
 
 A new review can store one longitudinal evidence row. The dashboard shows that row when it exists: prior result, recent result, calculated change, both dates, both sources, the generated text, and the review state. A human decision does not rewrite the summary or the evidence. Historical reviews stay readable when the table is absent.
 
+The MCP client may call `127.0.0.1`, `localhost`, `federation-pe`, or `federation-es`. The two Docker names are bound to `pe-lab-demo` and `es-lab-demo` respectively. Any other host is denied. That list does not let a caller choose the jurisdiction. Decision: [ADR-105](../adr/ADR-105-platform-001-local-demonstration.md).
+
 This is not a diagnosis, a production alert, or a RENHICE, HCDSNS, or EHDS conformance claim.

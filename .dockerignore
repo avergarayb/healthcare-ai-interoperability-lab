@@ -1,0 +1,12 @@
+*
+!services/
+services/*
+!services/mini-his-simulator/
+!services/mini-his-simulator/**
+!services/mini-lis-service/
+!services/mini-lis-service/**
+!services/fhir-integration-service/
+!services/fhir-integration-service/**
+**/target
+**/.git
+**/.env

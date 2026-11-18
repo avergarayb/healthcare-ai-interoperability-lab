@@ -1,0 +1,219 @@
+name: platform-001
+
+x-federation-env: &federation-env
+  JURISDICTION_LAB_ENABLED: "true"
+  EXTERNAL_FHIR_ENABLED: "false"
+  FEDERATION_SECURITY_AUDIT_STORE_PATH: /var/lab/federation-audit/security-audit.sqlite
+
+x-ai-env: &ai-env
+  AI_SERVICE_HOST: 127.0.0.1
+  AI_SERVICE_PORT: "8090"
+  AI_CLINICAL_CONTEXT_MODE: federated
+  AI_FEDERATION_REQUESTING_ORGANIZATION_ID: org-mini-his
+  AI_FEDERATION_PATIENT_SYSTEM_KEY: mini-his
+  LLM_EXPERIMENTAL_ENABLED: "false"
+  FOLLOWUP_AGENT_ENABLED: "false"
+  HUMAN_REVIEW_DEVELOPMENT_AUTH_ENABLED: "false"
+  LAB_REVIEW_IAM_ENABLED: "true"
+  LAB_REVIEW_IAM_ALLOW_HTTP_LOOPBACK: "true"
+  LAB_REVIEW_IAM_ISSUER: http://127.0.0.1:18340/realms/platform-001
+  LAB_REVIEW_IAM_DISCOVERY_URL: http://127.0.0.1:18340/realms/platform-001/.well-known/openid-configuration
+  LAB_REVIEW_IAM_JWKS_URI: http://127.0.0.1:18340/realms/platform-001/protocol/openid-connect/certs
+  LAB_REVIEW_IAM_CLIENT_ID: lab-review-web
+  LAB_REVIEW_IAM_BINDINGS_PATH: /run/secrets/bindings
+  LAB_REVIEW_IAM_SESSION_DB: /var/lab/iam/session.sqlite3
+  LAB_SUMMARY_REVIEW_DB: /var/lab/review/lab-summary.sqlite3
+  PLATFORM_REVIEW_DB: /var/lab/review/lab-summary.sqlite3
+  AI_REVIEW_DB_PATH: /var/lab/followup/review.sqlite3
+  HUMAN_SESSION_DB_PATH: /var/lab/human/session.sqlite3
+  INSTITUTIONAL_KNOWLEDGE_DB_PATH: /var/lab/knowledge/institutional.sqlite3
+  PLATFORM_IAM_UPSTREAM: keycloak:8080
+  PLATFORM_IAM_LISTEN: "18340"
+
+x-java-health: &java-health
+  test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8081'"]
+  interval: 10s
+  timeout: 5s
+  retries: 18
+  start_period: 90s
+
+x-ai-health: &ai-health
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 20s
+
+x-log: &log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
+    entrypoint: [/bin/bash, -ec]
+    command:
+      - |
+        if [ -x /usr/sbin/ip ]; then /usr/sbin/ip route del default || true; fi
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(</run/secrets/bootstrap_password)"
+        exec /opt/keycloak/bin/kc.sh start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: platform-001-bootstrap
+      KC_HOSTNAME: http://127.0.0.1:18340
+      KC_HOSTNAME_STRICT: "true"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_DB: dev-file
+      KC_CACHE: local
+      KC_LOG_LEVEL: WARN
+      KC_HTTP_ACCESS_LOG_ENABLED: "false"
+    ports: ["127.0.0.1:18340:8080"]
+    volumes:
+      - platform-keycloak:/opt/keycloak/data
+      - type: bind
+        source: ${PLATFORM_RUN_DIR:?Run directory required}/realm.json
+        target: /opt/keycloak/data/import/realm.json
+        read_only: true
+    secrets: [bootstrap_password]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+    mem_limit: 1g
+    cpus: 1.5
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [lab]
+
+  federation-pe:
+    image: platform-001-federation:0.1.0
+    build:
+      context: ../..
+      dockerfile: services/fhir-integration-service/Dockerfile
+    environment:
+      <<: *federation-env
+      JURISDICTION_LAB_PROFILE: pe-lab-demo-v1
+    ports: ["127.0.0.1:18481:8081"]
+    volumes: [platform-pe-data:/var/lab]
+    secrets: [federation_token]
+    healthcheck: *java-health
+    mem_limit: 1g
+    cpus: 1.0
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [lab]
+
+  federation-es:
+    image: platform-001-federation:0.1.0
+    build:
+      context: ../..
+      dockerfile: services/fhir-integration-service/Dockerfile
+    environment:
+      <<: *federation-env
+      JURISDICTION_LAB_PROFILE: es-lab-demo-v1
+    ports: ["127.0.0.1:18482:8081"]
+    volumes: [platform-es-data:/var/lab]
+    secrets: [federation_token]
+    healthcheck: *java-health
+    mem_limit: 1g
+    cpus: 1.0
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [lab]
+
+  ai-pe:
+    image: platform-001-ai:0.1.0
+    build:
+      context: ../../services/ai-service
+      dockerfile: Dockerfile
+    environment:
+      <<: *ai-env
+      PLATFORM_PROFILE: pe-lab-demo-v1
+      PLATFORM_FEDERATION_URL: http://federation-pe:8081
+      MODEL_BOUNDARY_BASE_URL: http://federation-pe:8081
+      AI_FEDERATION_SOURCES: pe-lab-demo
+      AI_FEDERATION_PATIENT_IDENTIFIER_SYSTEM: https://lab.local/jurisdiction/pe/patient
+      LAB_REVIEW_IAM_REDIRECT_URI: http://127.0.0.1:18493/lab-review-iam/callback
+    ports: ["127.0.0.1:18493:8090"]
+    volumes:
+      - platform-pe-data:/var/lab
+      - ./:/opt/platform:ro
+    secrets: [federation_token, boundary_token, signing_secret, bindings]
+    depends_on:
+      federation-pe:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck: *ai-health
+    mem_limit: 768m
+    cpus: 1.0
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [lab]
+
+  ai-es:
+    image: platform-001-ai:0.1.0
+    build:
+      context: ../../services/ai-service
+      dockerfile: Dockerfile
+    environment:
+      <<: *ai-env
+      PLATFORM_PROFILE: es-lab-demo-v1
+      PLATFORM_FEDERATION_URL: http://federation-es:8081
+      MODEL_BOUNDARY_BASE_URL: http://federation-es:8081
+      AI_FEDERATION_SOURCES: es-lab-demo
+      AI_FEDERATION_PATIENT_IDENTIFIER_SYSTEM: https://lab.local/jurisdiction/es/patient
+      LAB_REVIEW_IAM_REDIRECT_URI: http://127.0.0.1:18495/lab-review-iam/callback
+    ports: ["127.0.0.1:18495:8090"]
+    volumes:
+      - platform-es-data:/var/lab
+      - ./:/opt/platform:ro
+    secrets: [federation_token, boundary_token, signing_secret, bindings]
+    depends_on:
+      federation-es:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck: *ai-health
+    mem_limit: 768m
+    cpus: 1.0
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging: *log
+    networks: [lab]
+
+networks:
+  lab:
+    name: platform-001
+
+secrets:
+  federation_token:
+    file: ${PLATFORM_RUN_DIR:?Run directory required}/federation-token
+  boundary_token:
+    file: ${PLATFORM_RUN_DIR:?Run directory required}/boundary-token
+  signing_secret:
+    file: ${PLATFORM_RUN_DIR:?Run directory required}/signing-secret
+  bindings:
+    file: ${PLATFORM_RUN_DIR:?Run directory required}/bindings.json
+  bootstrap_password:
+    file: ${PLATFORM_RUN_DIR:?Run directory required}/bootstrap-password.txt
+
+volumes:
+  platform-keycloak:
+  platform-pe-data:
+  platform-es-data:
