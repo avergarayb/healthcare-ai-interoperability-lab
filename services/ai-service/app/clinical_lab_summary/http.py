@@ -299,7 +299,10 @@ def _detail(case, access):
     parts.append("</section>")
     if evidence:
         parts.append(_clinical_evidence(evidence))
-    parts.append(_observations(case["sources"], verified=bool(evidence)))
+    longitudinal = case.get("longitudinal_evidence") or []
+    if longitudinal:
+        parts.append(_longitudinal(longitudinal[0]))
+    parts.append(_observations(case["sources"], verified=bool(evidence or longitudinal)))
     parts.append(_decision_block(case, access))
     parts.append(_audit(case))
     return "".join(parts)
@@ -324,6 +327,25 @@ def _clinical_evidence(evidence):
         "No se reconstruyen desde el texto del modelo.</p>"
         "<div class=\"table-scroll\"><table><caption>Evidencia citada</caption>"
         + "".join(rows) + "</table></div></section>")
+
+
+def _longitudinal(item):
+    return (
+        "<section class=\"panel\"><h2>Comparación longitudinal</h2><dl>"
+        + _pair("Resultado anterior", item["prior_value"] + " " + item["ucum_code"])
+        + _pair("Fecha anterior", item["prior_date"])
+        + _pair("Fuente anterior", item["prior_provenance"])
+        + _pair("Resultado reciente", item["recent_value"] + " " + item["ucum_code"])
+        + _pair("Fecha reciente", item["recent_date"])
+        + _pair("Fuente reciente", item["recent_provenance"])
+        + _pair("Cambio calculado", item["absolute_difference"] + " " + item["ucum_code"])
+        + _pair("Dirección", item["direction"])
+        + _pair("Código", item["code"])
+        + _pair("UCUM", item["ucum_system"] + " " + item["ucum_code"])
+        + _pair("Comparabilidad", item["comparability"])
+        + "</dl><p>El cambio lo calculó el motor determinista. "
+        "El texto del modelo no es la fuente de estos valores.</p></section>"
+    )
 
 
 def _observations(sources, verified=False):

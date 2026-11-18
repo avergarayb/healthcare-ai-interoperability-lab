@@ -11,6 +11,8 @@ EXTERNAL_OPERATION_ID = "external-fhir-lab-summary-v1"
 EXTERNAL_POLICY_REF = "external-fhir-lab-summary-policy-v1"
 JURISDICTION_OPERATION_ID = "jurisdiction-lab-summary-v1"
 JURISDICTION_POLICY_REFS = frozenset({"pe-lab-demo-policy-v1", "es-lab-demo-policy-v1"})
+LONGITUDINAL_OPERATION_ID = "longitudinal-lab-comparison-v1"
+LONGITUDINAL_POLICY_REFS = frozenset({"pe-longitudinal-lab-policy-v1", "es-longitudinal-lab-policy-v1"})
 CAPABILITY = "structured_output+usage_report"
 SCOPES = {
     ("openai-sdk-a", "openai", "gpt-6-luna"),

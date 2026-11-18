@@ -190,6 +190,31 @@ def dispatch_jurisdiction(client, generation, profile, grant=None):
     return _generate_once(client, generation)
 
 
+class LongitudinalDispatchGrant:
+    """One pass for the dated comparison. A summary grant cannot spend it."""
+
+    def __init__(self):
+        self._open = True
+
+    def consume(self):
+        if self._open is not True:
+            return False
+        self._open = False
+        return True
+
+
+def dispatch_longitudinal(client, generation, profile, grant=None):
+    """One comparison generateContent call. Summary and external grants cannot spend it."""
+    from app.longitudinal_lab.generation import require_longitudinal_generation
+
+    if type(grant) is not LongitudinalDispatchGrant or grant.consume() is not True:
+        raise ProviderError("egress_blocked")
+    require_longitudinal_generation(generation, profile)
+    if generation.get("max_output_tokens") != 256:
+        raise ProviderError("not_configured")
+    return _generate_once(client, generation)
+
+
 def _generate_once(client, generation):
     require_official_client(client)
     config = types.GenerateContentConfig(

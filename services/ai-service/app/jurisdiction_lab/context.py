@@ -52,6 +52,8 @@ def minimize_envelope(envelope, profile):
             continue
         if resource["resourceType"] != "Observation":
             continue
+        if _longitudinal_series(resource):
+            continue
         facts.append(_observation(entry, resource, profile))
     if not seen_patient or len(facts) != len(profile.observations):
         raise ProviderError("context_incomplete")
@@ -137,6 +139,14 @@ def _several(sources):
         return False
     keys = [item.get("sourceKey") for item in sources if isinstance(item, dict)]
     return sum(key in {"pe-lab-demo", "es-lab-demo"} for key in keys) > 1
+
+
+def _longitudinal_series(resource):
+    meta = resource.get("meta") if isinstance(resource.get("meta"), dict) else {}
+    tags = meta.get("tag") if isinstance(meta.get("tag"), list) else []
+    return any(
+        isinstance(tag, dict) and tag.get("system") == VALIDATION_TAG and tag.get("code") == "longitudinal-series"
+        for tag in tags)
 
 
 def _reject_official(resource):

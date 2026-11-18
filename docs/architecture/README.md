@@ -157,6 +157,7 @@ The follow-up flows above obtain clinical facts through Java. Model Boundary v1,
 - [Clinical Read API v1 contract](../contracts/clinical-read-v1.md)
 - [Clinical Federation v1 contract](../contracts/clinical-federation-v1.md)
 - [External FHIR R4 v1](../contracts/external-fhir-r4-v1.md) — opt-in read of one public synthetic sandbox. The summary uses the neutral gateway with an intercepted provider transport. A live send stays closed. It is not an Epic or Oracle integration. Decision: [ADR-102](../adr/ADR-102-external-fhir-model-gateway-v1.md).
+- [Longitudinal laboratory comparison v1](../contracts/longitudinal-lab-comparison-v1.md) — dated synthetic pair for one patient, compared by a deterministic engine and described by one intercepted model call. It reuses Clinical Federation and does not diagnose. Decision: [ADR-104](../adr/ADR-104-longitudinal-lab-comparison-v1.md).
 - [AI clinical federation consumer](../contracts/ai-clinical-federation-v1.md)
 - [Federated protocol evaluation v1](../contracts/federated-protocol-evaluation-v1.md)
 - [Cross-organization laboratory result review v1](../contracts/cross-org-lab-result-review-v1.md)
