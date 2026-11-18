@@ -1,12 +1,17 @@
 $ErrorActionPreference = "Stop"
 $Here = $PSScriptRoot
-$Repo = (Resolve-Path (Join-Path $Here "..\..")).Path
 if (-not $env:PLATFORM_RUN_DIR) {
     $env:PLATFORM_RUN_DIR = Join-Path $env:TEMP "platform-001\run"
 }
 $Destination = Join-Path $env:PLATFORM_RUN_DIR "backup"
-New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-docker compose -f (Join-Path $Here "compose.yaml") cp ai-pe:/var/lab/platform-last.json $Destination
+New-Item -ItemType Directory -Force -Path (Join-Path $Destination "pe") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Destination "es") | Out-Null
+$compose = Join-Path $Here "compose.yaml"
+docker compose -f $compose cp ai-pe:/var/lab/ledger/platform-last.json (Join-Path $Destination "pe\platform-last.json")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-docker compose -f (Join-Path $Here "compose.yaml") cp ai-pe:/var/lab/backup $Destination
+docker compose -f $compose cp ai-pe:/var/lab/ledger/backup (Join-Path $Destination "pe\backup")
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+docker compose -f $compose cp ai-es:/var/lab/ledger/platform-last.json (Join-Path $Destination "es\platform-last.json")
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+docker compose -f $compose cp ai-es:/var/lab/ledger/backup (Join-Path $Destination "es\backup")
 exit $LASTEXITCODE

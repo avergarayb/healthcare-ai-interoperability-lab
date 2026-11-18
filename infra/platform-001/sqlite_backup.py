@@ -14,11 +14,14 @@ def copy_sqlite(source: Path, destination_dir: Path) -> Path:
     target = (destination_dir / source.name).resolve()
     if target == source or destination_dir.resolve() == source.parent:
         raise ValueError("backup_overlaps_source")
-    target.write_bytes(source.read_bytes())
-    for suffix in ("-wal", "-shm"):
-        extra = Path(str(source) + suffix)
-        if extra.is_file():
-            (destination_dir / extra.name).write_bytes(extra.read_bytes())
+    source_uri = source.as_uri() + "?mode=ro"
+    source_conn = sqlite3.connect(source_uri, uri=True)
+    dest_conn = sqlite3.connect(target)
+    try:
+        source_conn.backup(dest_conn)
+    finally:
+        dest_conn.close()
+        source_conn.close()
     return target
 
 

@@ -34,6 +34,8 @@ MIGRATION_V6 = Path(__file__).parent / "migrations/006_lab_result_summary_permit
 MIGRATION_V7 = Path(__file__).parent / "migrations/007_external_fhir_summary_permit.sql"
 MIGRATION_V8 = Path(__file__).parent / "migrations/008_jurisdiction_lab_summary_permit.sql"
 MIGRATION_V9 = Path(__file__).parent / "migrations/009_longitudinal_lab_comparison_permit.sql"
+_PROCESS_OWNERS = {}
+_PROCESS_OWNERS_GUARD = RLock()
 CONTRACT = "enterprise-ai-processing-ledger-v1"
 CONTRACT_V2 = "enterprise-ai-processing-ledger-v2"
 CONTRACT_V3 = "enterprise-ai-processing-ledger-v3"
@@ -124,11 +126,48 @@ class DerivedDeliveryQuery:
     derived_delivery_revision: int
 
 
+def _require_lock_platform():
+    """Fail closed before any file work when this process has no kernel lock."""
+    if os.name == "nt":
+        return
+    if os.name != "posix":
+        raise ExecutionError()
+    try:
+        import fcntl
+    except ImportError:
+        raise ExecutionError() from None
+    if not hasattr(fcntl, "LOCK_EX") or not hasattr(fcntl, "LOCK_NB"):
+        raise ExecutionError()
+
+
+def _lock_exclusive(fd):
+    """One non-blocking exclusive lock. The kernel drops it when the fd closes."""
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        return
+    import fcntl
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _release_lock(fd):
+    try:
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            return
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        return
+
+
 class SQLiteExecutionLedger:
     def __init__(self, root, authority, clock, *, fault=None):
-        # This increment is approved/operationally tested on Windows only.
-        # Reject every other platform before path, schema or ownership work.
-        require(os.name == "nt", unavailable=True)
+        # Windows uses a kernel byte lock. Linux uses flock on a local file.
+        # Any other platform still fails before a path or a schema is touched.
+        _require_lock_platform()
         self.root, self.authority, self.clock = Path(root), authority, clock
         self.path, self.owner_path = self.root / "processing.sqlite3", self.root / "processing.owner"
         self.barrier, self._slots = RLock(), BoundedSemaphore(4)
@@ -196,19 +235,28 @@ class SQLiteExecutionLedger:
 
     def _acquire_owner(self):
         fd = None
+        identity = None
         try:
-            require(os.name == "nt", unavailable=True)
             self._safe(self.owner_path)
             fd = os.open(self.owner_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
             os.set_inheritable(fd, False)
             self._safe(self.owner_path, exists=True)
             opened, named = os.fstat(fd), self.owner_path.stat()
-            require((opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino), unavailable=True)
-            import msvcrt
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-            self._fd, self._identity = fd, (opened.st_dev, opened.st_ino)
+            identity = (opened.st_dev, opened.st_ino)
+            require(identity == (named.st_dev, named.st_ino), unavailable=True)
+            _lock_exclusive(fd)
+            with _PROCESS_OWNERS_GUARD:
+                require(identity not in _PROCESS_OWNERS, unavailable=True)
+                _PROCESS_OWNERS[identity] = fd
+            self._fd, self._identity = fd, identity
+            fd = None
         except (OSError, ValueError, ExecutionError, ImportError):
+            if identity is not None and fd is not None:
+                with _PROCESS_OWNERS_GUARD:
+                    if _PROCESS_OWNERS.get(identity) is fd:
+                        _PROCESS_OWNERS.pop(identity, None)
             if fd is not None:
+                _release_lock(fd)
                 os.close(fd)
             raise ExecutionError() from None
 
@@ -225,6 +273,10 @@ class SQLiteExecutionLedger:
             if self._fd is not None:
                 require(not self._live, "lease_invalid")
                 fd, self._fd = self._fd, None
+                with _PROCESS_OWNERS_GUARD:
+                    if _PROCESS_OWNERS.get(self._identity) is fd:
+                        _PROCESS_OWNERS.pop(self._identity, None)
+                _release_lock(fd)
                 os.close(fd)  # Kernel releases ownership; do not unlink a live lock path.
 
     def _actor(self, access, roles):
@@ -533,7 +585,10 @@ class SQLiteExecutionLedger:
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA trusted_schema=OFF")
             connection.execute("PRAGMA busy_timeout=100")
-            if not write:
+            if write:
+                connection.execute("PRAGMA synchronous=FULL")
+                require(int(connection.execute("PRAGMA synchronous").fetchone()[0]) == 2, unavailable=True)
+            else:
                 connection.execute("PRAGMA query_only=ON")
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             self._validate(connection)
@@ -601,6 +656,9 @@ class SQLiteExecutionLedger:
                 with closing(sqlite3.connect(self.path, timeout=0.1)) as c:
                     c.execute("PRAGMA foreign_keys=ON")
                     require(c.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() == "wal", unavailable=True)
+                    c.execute("PRAGMA synchronous=FULL")
+                    require(int(c.execute("PRAGMA synchronous").fetchone()[0]) == 2, unavailable=True)
+                    c.execute("PRAGMA busy_timeout=100")
                     c.execute("BEGIN IMMEDIATE")
                     try:
                         for statement in self._sql.split(";"):

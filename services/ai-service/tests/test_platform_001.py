@@ -122,6 +122,11 @@ def test_compose_keeps_the_demo_closed():
     assert "/usr/sbin/ip route del default" in entry
     assert '"/usr/sbin/ip", "route", "del", "default"' in (ROOT / "services" / "ai-service" / "docker" / "entrypoint.py").read_text(encoding="utf-8")
     assert "cap_add: [NET_ADMIN]" in text
+    assert "PLATFORM_IN_CONTAINER" in text
+    assert "PLATFORM_LEDGER_ROOT: /var/lab/ledger" in text
+    assert "PLATFORM_TOKEN_FILE: /run/secrets/federation_token" in text
+    assert "platform-pe-data:/var/lab" in text
+    assert "platform-es-data:/var/lab" in text
     ai = (ROOT / "services" / "ai-service" / "docker" / "entrypoint.py").read_text(encoding="utf-8")
     assert "GEMINI_API_KEY" in ai
     assert "print(os.environ" not in ai
