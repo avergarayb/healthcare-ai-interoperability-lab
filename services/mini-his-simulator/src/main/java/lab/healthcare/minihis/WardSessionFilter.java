@@ -19,7 +19,7 @@ public class WardSessionFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return !path.startsWith("/ward") || "/ward/login".equals(path);
+        return !path.startsWith("/ward") || "/ward/login".equals(path) || path.startsWith("/ward/app.");
     }
 
     @Override
@@ -28,7 +28,7 @@ public class WardSessionFilter extends OncePerRequestFilter {
         HttpSession session = request.getSession(false);
         Object principal = session == null ? null : session.getAttribute("wardPrincipal");
         if (!(principal instanceof WardPrincipal)) {
-            response.sendRedirect("/ward/login");
+            response.sendRedirect("/ward/login?aviso=sesion");
             return;
         }
         chain.doFilter(request, response);

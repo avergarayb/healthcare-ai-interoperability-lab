@@ -131,6 +131,37 @@ public class InpatientStore {
         jdbc.update("DELETE FROM hospitalization");
     }
 
+    public List<Map<String, Object>> episodes() {
+        ensure();
+        return jdbc.queryForList("""
+                SELECT h.episode_id, h.patient_id, h.status, h.opened_at, h.documentation_status,
+                       p.given_name, p.family_name
+                FROM hospitalization h
+                JOIN patient p ON p.patient_id = h.patient_id
+                ORDER BY h.opened_at DESC
+                """);
+    }
+
+    public List<Map<String, Object>> allTasks() {
+        ensure();
+        return jdbc.queryForList("""
+                SELECT t.task_id, t.episode_id, t.title, t.status, t.kind, t.created_at, h.patient_id
+                FROM episode_task t
+                JOIN hospitalization h ON h.episode_id = t.episode_id
+                ORDER BY t.created_at DESC
+                """);
+    }
+
+    public List<Map<String, Object>> recentAudit() {
+        ensure();
+        return jdbc.queryForList("""
+                SELECT recorded_at, actor_id, action, outcome, detail, episode_id
+                FROM inpatient_audit
+                ORDER BY audit_id DESC
+                LIMIT 50
+                """);
+    }
+
     public List<Map<String, Object>> patients() {
         return jdbc.queryForList("""
                 SELECT patient_id, family_name, given_name

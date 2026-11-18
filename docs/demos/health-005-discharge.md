@@ -4,7 +4,7 @@ Demostración de laboratorio de `inpatient-discharge-coordinator-v1`. El pacient
 
 ## Qué se muestra
 
-Una persona entra a Mini HIS, abre una hospitalización, registra el contexto y pide una preparación. La pantalla muestra las herramientas leídas, los protocolos citados y el borrador. Una tarea de planta abierta deja el checklist incompleto. Después de resolverla, una preparación nueva puede quedar completa. Aprobar el borrador no cierra el episodio. Las tareas de seguimiento se crean una sola vez. El cierre, si se usa, es un botón distinto.
+Una persona entra a Mini HIS, abre una hospitalización, registra el contexto y pide una preparación. La ficha usa pestañas, estados en español y el borrador en texto, con los protocolos citados y su fragmento. No muestra el JSON de la propuesta. Una tarea de planta abierta deja la preparación incompleta. Después de resolverla, una preparación nueva puede quedar completa. Aprobar el borrador no cierra el episodio. Las tareas de seguimiento se crean una sola vez. El cierre, si se usa, es un botón distinto, en la auditoría.
 
 ## Operación local
 
@@ -27,6 +27,8 @@ Usuarios de la sesión: `clinica` puede operar; `auditor` solo consulta. La orga
 El 18 de noviembre de 2026, en loopback, una sesión de clínico abrió el episodio sintético `ENC-6D551E662BF3` para `MHS-PAT-001`. Con la tarea de planta abierta, el borrador quedó `checklistComplete` falso y citó la tarea, los cinco protocolos vigentes y los tipos FHIR del chart. Tras resolverla, una preparación nueva quedó completa, sin cerrar el episodio. La aprobación dejó el estado `open` y la documentación `accepted`. Dos solicitudes de seguimiento crearon una sola tarea. El transporte fue el borrador local interceptado.
 
 Esa pasada habilita la demostración local. No es un alta hospitalaria ni una certificación.
+
+La misma tarde, la ficha se recorrió de nuevo con la interfaz de pestañas. El episodio sintético `ENC-243DB3DBB74A` quedó abierto, con la documentación aceptada y una sola tarea de seguimiento. La preparación incompleta citó la tarea de planta. Tras resolverla, el borrador nuevo citó los protocolos vigentes y la aprobación no cerró el episodio. Un segundo seguimiento no duplicó la tarea. El auditor no vio las acciones de escritura.
 
 ## Límite
 

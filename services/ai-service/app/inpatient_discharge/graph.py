@@ -150,7 +150,11 @@ class DischargeGraph:
             "statements": draft["statements"],
             "pending": draft["pending"],
             "proposedTasks": draft["proposedTasks"],
-            "protocols": draft["protocols"],
+            "protocols": [
+                {"id": item["id"], "version": item["version"], "section": item["section"], "text": item["text"]}
+                for item in self._protocols
+            ],
+            "modelMode": "intercepted" if type(self._transport) is InterceptedTransport else "blocked",
             "abstentions": draft["abstentions"],
             "fhirTypes": sorted({item["resource"]["resourceType"] for item in project_chart(self._chart)["entry"]}),
             "closesEncounter": False,

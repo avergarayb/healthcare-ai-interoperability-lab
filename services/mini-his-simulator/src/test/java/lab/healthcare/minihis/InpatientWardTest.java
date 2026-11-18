@@ -64,16 +64,18 @@ class InpatientWardTest {
         String page = mvc.perform(get("/ward/episodes/" + episodeId).session(session))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        assertThat(page).contains("Checklist incompleto");
+        assertThat(page).contains("Preparación incompleta");
         assertThat(page).contains("Pendiente de enfermeria");
-        assertThat(page).doesNotContain("Checklist completo");
+        assertThat(page).doesNotContain("Preparación completa");
+        assertThat(page).doesNotContain("\"phase\"");
 
         mvc.perform(post("/ward/episodes/" + episodeId + "/notes").session(session)
                 .param("csrf", csrf).param("version", "3").param("body", "Nota tardia."))
                 .andExpect(status().is(303));
         String conflict = mvc.perform(get("/ward/episodes/" + episodeId).session(session))
                 .andReturn().getResponse().getContentAsString();
-        assertThat(conflict).contains("version-conflicto");
+        assertThat(conflict).contains("La versión del episodio cambió");
+        assertThat(conflict).doesNotContain("\"phase\"");
 
         Map<String, Object> chart = store.chart(episodeId);
         assertThat(chart.get("status")).isEqualTo("open");
@@ -102,6 +104,12 @@ class InpatientWardTest {
         assertThat(tasks).isEqualTo(1);
 
         MockHttpSession auditor = login("auditor");
+        String auditorPage = mvc.perform(get("/ward/episodes/" + episodeId).session(auditor))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(auditorPage).doesNotContain("Cerrar episodio");
+        assertThat(auditorPage).doesNotContain("name=\"decision\"");
+        assertThat(auditorPage).doesNotContain("Registrar nota");
         mvc.perform(post("/ward/episodes/" + episodeId + "/close").session(auditor)
                 .param("csrf", csrf(auditor)).param("version", "6"))
                 .andExpect(status().is(303));

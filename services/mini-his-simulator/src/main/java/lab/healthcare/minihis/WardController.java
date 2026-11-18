@@ -53,15 +53,8 @@ public class WardController {
     }
 
     @GetMapping(path = "/ward/login", produces = MediaType.TEXT_HTML_VALUE)
-    public String loginPage() {
-        return page("Ingreso", """
-                <form method="post" action="/ward/login">
-                  <label>Usuario <input name="username" autocomplete="username" required></label>
-                  <label>Clave <input name="password" type="password" autocomplete="current-password" required></label>
-                  <button type="submit">Entrar</button>
-                </form>
-                <p>Sesión de laboratorio para org-mini-his. No cierra episodios por sí sola.</p>
-                """);
+    public String loginPage(@RequestParam(name = "aviso", required = false) String notice) {
+        return WardView.login("credenciales".equals(notice) || "sesion".equals(notice) ? notice : "");
     }
 
     @PostMapping("/ward/login")
@@ -69,7 +62,7 @@ public class WardController {
             @RequestParam String username, @RequestParam String password, HttpServletRequest request) {
         WardPrincipal principal = principalFor(username, password);
         if (principal == null) {
-            return redirect("/ward/login");
+            return redirect("/ward/login?aviso=credenciales");
         }
         HttpSession session = request.getSession(true);
         session.invalidate();
@@ -91,16 +84,22 @@ public class WardController {
     @GetMapping(path = "/ward/patients", produces = MediaType.TEXT_HTML_VALUE)
     public String patients(HttpServletRequest request) {
         store.ensure();
-        StringBuilder rows = new StringBuilder();
-        for (Map<String, Object> patient : store.patients()) {
-            String id = String.valueOf(patient.get("patient_id"));
-            rows.append("<li><a href=\"/ward/patients/").append(esc(id)).append("\">")
-                    .append(esc(id)).append(" ")
-                    .append(esc(String.valueOf(patient.get("given_name")))).append(" ")
-                    .append(esc(String.valueOf(patient.get("family_name"))))
-                    .append("</a></li>");
-        }
-        return shell(request, "Pacientes", "<ul>" + rows + "</ul>");
+        return WardView.patients(principal(request), csrf(request), takeNotice(request), store.patients());
+    }
+
+    @GetMapping(path = "/ward/episodes", produces = MediaType.TEXT_HTML_VALUE)
+    public String episodes(HttpServletRequest request) {
+        return WardView.episodes(principal(request), csrf(request), takeNotice(request), store.episodes());
+    }
+
+    @GetMapping(path = "/ward/tasks", produces = MediaType.TEXT_HTML_VALUE)
+    public String tasks(HttpServletRequest request) {
+        return WardView.tasks(principal(request), csrf(request), takeNotice(request), store.allTasks());
+    }
+
+    @GetMapping(path = "/ward/audit", produces = MediaType.TEXT_HTML_VALUE)
+    public String audit(HttpServletRequest request) {
+        return WardView.auditIndex(principal(request), csrf(request), takeNotice(request), store.recentAudit());
     }
 
     @GetMapping(path = "/ward/patients/{patientId}", produces = MediaType.TEXT_HTML_VALUE)
@@ -108,14 +107,9 @@ public class WardController {
         try {
             Map<String, Object> patient = store.requirePatient(patientId);
             WardPrincipal principal = principal(request);
-            String body = "<h1>" + esc(patientId) + " " + esc(String.valueOf(patient.get("given_name")))
-                    + " " + esc(String.valueOf(patient.get("family_name"))) + "</h1>"
-                    + clinicianForm(principal, "/ward/patients/" + patientId + "/episodes", csrf(request), """
-                    <button type="submit">Abrir hospitalización</button>
-                    """);
-            return shell(request, "Paciente", body);
+            return WardView.patient(principal, csrf(request), takeNotice(request), patient);
         } catch (InpatientRejection ex) {
-            return shell(request, "Paciente", "<p>Paciente no disponible.</p>");
+            return WardView.missing(principal(request), csrf(request), takeNotice(request), "Paciente");
         }
     }
 
@@ -138,9 +132,9 @@ public class WardController {
     public String episode(@PathVariable String episodeId, HttpServletRequest request) {
         try {
             Map<String, Object> episode = store.episode(episodeId);
-            return shell(request, "Episodio", renderEpisode(episode, request));
+            return WardView.episode(principal(request), csrf(request), takeNotice(request), episode, store.requirePatient(String.valueOf(episode.get("patient_id"))));
         } catch (InpatientRejection ex) {
-            return shell(request, "Episodio", "<p>Episodio no disponible.</p>");
+            return WardView.missing(principal(request), csrf(request), takeNotice(request), "Episodio");
         }
     }
 
@@ -318,161 +312,14 @@ public class WardController {
         return redirect("/ward/episodes/" + episodeId);
     }
 
-    private String renderEpisode(Map<String, Object> episode, HttpServletRequest request) {
-        WardPrincipal principal = principal(request);
-        String episodeId = String.valueOf(episode.get("episode_id"));
-        String patientId = String.valueOf(episode.get("patient_id"));
-        int version = ((Number) episode.get("version")).intValue();
-        String csrf = csrf(request);
-        StringBuilder html = new StringBuilder();
-        html.append("<h1>Episodio ").append(esc(episodeId)).append("</h1>");
-        html.append("<p>Paciente ").append(esc(patientId)).append(". Organización ")
-                .append(esc(String.valueOf(episode.get("organization_id"))))
-                .append(". Estado ").append(esc(String.valueOf(episode.get("status"))))
-                .append(". Versión ").append(version)
-                .append(". Documentación ").append(esc(String.valueOf(episode.get("documentation_status"))))
-                .append(".</p>");
-        html.append("<p>La aprobación de un borrador no cierra la hospitalización.</p>");
-        html.append("<h2>Línea de tiempo</h2><ul>");
-        for (Map<String, Object> event : rows(episode.get("timeline"))) {
-            html.append("<li>").append(esc(String.valueOf(event.get("at")))).append(" ")
-                    .append(esc(String.valueOf(event.get("label")))).append("</li>");
-        }
-        html.append("</ul><h2>Checklist</h2><ul>");
-        Map<String, Object> checklist = rowsMap(episode.get("checklist"));
-        for (String item : List.of("notes", "results", "allergies", "medications", "pending", "documentation")) {
-            html.append("<li>").append(esc(item)).append(": ")
-                    .append(Boolean.TRUE.equals(checklist.get(item)) ? "completo" : "pendiente")
-                    .append("</li>");
-        }
-        html.append("</ul><p id=\"checklist-state\">")
-                .append(Boolean.TRUE.equals(checklist.get("complete")) ? "Checklist completo" : "Checklist incompleto")
-                .append("</p>");
-        html.append("<h2>Notas</h2><ul>");
-        for (Map<String, Object> note : rows(episode.get("notes"))) {
-            html.append("<li>").append(esc(String.valueOf(note.get("note_id")))).append(": ")
-                    .append(esc(String.valueOf(note.get("body")))).append("</li>");
-        }
-        html.append("</ul>");
-        html.append(clinicianForm(principal, "/ward/episodes/" + episodeId + "/notes", csrf, """
-                <input type="hidden" name="version" value="%d">
-                <label>Nota <input name="body" required></label>
-                <button type="submit">Registrar nota</button>
-                """.formatted(version)));
-        html.append("<h2>Alergias sintéticas</h2><ul>");
-        for (Map<String, Object> allergy : rows(episode.get("allergies"))) {
-            html.append("<li>").append(esc(String.valueOf(allergy.get("substance")))).append("</li>");
-        }
-        html.append("</ul>");
-        html.append(clinicianForm(principal, "/ward/patients/" + patientId + "/allergies", csrf, """
-                <input type="hidden" name="episodeId" value="%s">
-                <label>Sustancia <input name="substance" required></label>
-                <button type="submit">Registrar alergia</button>
-                """.formatted(esc(episodeId))));
-        html.append("<h2>Medicación documentada</h2><ul>");
-        for (Map<String, Object> medication : rows(episode.get("medications"))) {
-            html.append("<li>").append(esc(String.valueOf(medication.get("name")))).append(" ")
-                    .append(esc(String.valueOf(medication.get("documented_status")))).append("</li>");
-        }
-        html.append("</ul>");
-        html.append(clinicianForm(principal, "/ward/patients/" + patientId + "/medications", csrf, """
-                <input type="hidden" name="episodeId" value="%s">
-                <label>Nombre <input name="name" required></label>
-                <label>Estado <select name="status"><option value="active">active</option><option value="stopped">stopped</option></select></label>
-                <button type="submit">Registrar medicación</button>
-                """.formatted(esc(episodeId))));
-        html.append("<h2>Resultados</h2><ul>");
-        for (Map<String, Object> result : rows(episode.get("results"))) {
-            html.append("<li>").append(esc(String.valueOf(result.get("result_id")))).append(" ")
-                    .append(esc(String.valueOf(result.get("display_name")))).append(" ")
-                    .append(esc(String.valueOf(result.get("value_text")))).append(" ")
-                    .append(esc(String.valueOf(result.get("unit")))).append("</li>");
-        }
-        html.append("</ul>");
-        StringBuilder options = new StringBuilder();
-        for (Map<String, Object> result : rows(episode.get("availableResults"))) {
-            options.append("<option value=\"").append(esc(String.valueOf(result.get("result_id")))).append("\">")
-                    .append(esc(String.valueOf(result.get("display_name")))).append("</option>");
-        }
-        html.append(clinicianForm(principal, "/ward/episodes/" + episodeId + "/results", csrf, """
-                <input type="hidden" name="version" value="%d">
-                <label>Resultado <select name="resultId">%s</select></label>
-                <button type="submit">Asociar resultado</button>
-                """.formatted(version, options)));
-        html.append("<h2>Tareas</h2><ul>");
-        for (Map<String, Object> task : rows(episode.get("tasks"))) {
-            html.append("<li>").append(esc(String.valueOf(task.get("task_id")))).append(" ")
-                    .append(esc(String.valueOf(task.get("kind")))).append(" ")
-                    .append(esc(String.valueOf(task.get("status")))).append(" ")
-                    .append(esc(String.valueOf(task.get("title"))));
-            if ("ward".equals(task.get("kind")) && "open".equals(task.get("status"))) {
-                html.append(clinicianForm(principal, "/ward/episodes/" + episodeId + "/tasks/" + task.get("task_id") + "/resolve", csrf,
-                        "<input type=\"hidden\" name=\"version\" value=\"" + version + "\"><button type=\"submit\">Resolver</button>"));
-            }
-            html.append("</li>");
-        }
-        html.append("</ul>");
-        html.append(clinicianForm(principal, "/ward/episodes/" + episodeId + "/tasks", csrf, """
-                <input type="hidden" name="version" value="%d">
-                <label>Tarea <input name="title" required></label>
-                <button type="submit">Registrar pendiente</button>
-                """.formatted(version)));
-        html.append("<h2>Preparación de alta</h2>");
-        html.append(clinicianForm(principal, "/ward/episodes/" + episodeId + "/prepare", csrf,
-                "<button type=\"submit\">Solicitar preparación</button>"));
-        Map<String, Object> proposal = rowsMap(episode.get("proposal"));
-        if (!proposal.isEmpty()) {
-            html.append("<pre id=\"proposal\">").append(esc(String.valueOf(proposal.get("body_json")))).append("</pre>");
-            html.append(clinicianForm(principal, "/ward/episodes/" + episodeId + "/decision", csrf, """
-                    <button name="decision" value="approved" type="submit">Aprobar borrador</button>
-                    <button name="decision" value="rejected" type="submit">Rechazar</button>
-                    <button name="decision" value="changes_requested" type="submit">Pedir corrección</button>
-                    """));
-            html.append(clinicianForm(principal, "/ward/episodes/" + episodeId + "/follow-ups", csrf, """
-                    <input type="hidden" name="version" value="%d">
-                    <button type="submit">Crear tareas de seguimiento autorizadas</button>
-                    """.formatted(version)));
-        }
-        html.append("<h2>Auditoría del episodio</h2><ul id=\"audit\">");
-        for (Map<String, Object> row : rows(episode.get("audit"))) {
-            html.append("<li>").append(esc(String.valueOf(row.get("recorded_at")))).append(" ")
-                    .append(esc(String.valueOf(row.get("actor_id")))).append(" ")
-                    .append(esc(String.valueOf(row.get("action")))).append(" ")
-                    .append(esc(String.valueOf(row.get("outcome")))).append("</li>");
-        }
-        html.append("</ul>");
-        html.append(clinicianForm(principal, "/ward/episodes/" + episodeId + "/close", csrf, """
-                <input type="hidden" name="version" value="%d">
-                <button type="submit">Cerrar episodio</button>
-                """.formatted(version)));
-        return html.toString();
+    private static String takeNotice(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session == null) return "";
+        Object code = session.getAttribute("wardNotice");
+        session.removeAttribute("wardNotice");
+        return code instanceof String text && NOTICES.contains(text) ? text : "";
     }
 
-    private String clinicianForm(WardPrincipal principal, String action, String csrf, String fields) {
-        if (principal == null || !"clinician".equals(principal.role())) {
-            return "";
-        }
-        return "<form method=\"post\" action=\"" + esc(action) + "\"><input type=\"hidden\" name=\"csrf\" value=\""
-                + esc(csrf) + "\">" + fields + "</form>";
-    }
-
-    private String shell(HttpServletRequest request, String title, String body) {
-        WardPrincipal principal = principal(request);
-        String notice = noticeText(request);
-        String who = principal == null ? "" : "<p>" + esc(principal.userId()) + " / " + esc(principal.role())
-                + " / " + esc(principal.organizationId()) + "</p><form method=\"post\" action=\"/ward/logout\"><input type=\"hidden\" name=\"csrf\" value=\""
-                + esc(csrf(request)) + "\"><button type=\"submit\">Salir</button></form>";
-        return page(title, who + notice + body);
-    }
-
-    private static String page(String title, String body) {
-        return """
-                <!DOCTYPE html>
-                <html lang="es"><head><meta charset="utf-8"><title>%s</title>
-                <style>body{font-family:sans-serif;margin:2rem;max-width:52rem}form{margin:.5rem 0}label{display:block}</style>
-                </head><body><nav><a href="/ward/patients">Pacientes</a></nav>%s</body></html>
-                """.formatted(esc(title), body);
-    }
 
     private WardPrincipal principalFor(String username, String presented) {
         if (password.isBlank() || presented == null) {
@@ -522,18 +369,6 @@ public class WardController {
         }
     }
 
-    private static String noticeText(HttpServletRequest request) {
-        HttpSession session = request.getSession(false);
-        if (session == null) {
-            return "";
-        }
-        Object code = session.getAttribute("wardNotice");
-        session.removeAttribute("wardNotice");
-        if (!(code instanceof String text) || !NOTICES.contains(text)) {
-            return "";
-        }
-        return "<p id=\"notice\">" + esc(text) + "</p>";
-    }
 
     private static String noticeFor(InpatientRejection ex) {
         return switch (ex.code()) {
@@ -548,17 +383,4 @@ public class WardController {
         return ResponseEntity.status(303).location(URI.create(path)).build();
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> rows(Object value) {
-        return value instanceof List<?> list ? (List<Map<String, Object>>) list : List.of();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> rowsMap(Object value) {
-        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
-    }
-
-    private static String esc(String value) {
-        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
-    }
 }
