@@ -64,6 +64,12 @@ from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.gemini_provider import GeminiProvider
 from app.institutional_knowledge import attach_institutional_knowledge
 from app.institutional_knowledge_http import retrieve_institutional_knowledge_http
+from app.inpatient_discharge.http import (
+    authorize_follow_ups,
+    decide_discharge,
+    discharge_audit,
+    prepare_discharge,
+)
 from app.llm_provider import LLMProvider
 from app.models import AgentContextResult
 from app.service_auth import authenticate
@@ -464,6 +470,27 @@ async def close_follow_up_review_case(
         review_case_id,
         await request.body(),
     )
+
+
+@app.post("/internal/discharge/prepare")
+async def discharge_prepare(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return prepare_discharge(request, settings, await request.body())
+
+
+@app.post("/internal/discharge/decisions")
+async def discharge_decision(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return decide_discharge(request, settings, await request.body())
+
+
+@app.post("/internal/discharge/follow-ups")
+async def discharge_follow_ups(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return authorize_follow_ups(request, settings, await request.body())
+
+
+@app.get("/internal/discharge/proposals/{proposal_id}/audit")
+def discharge_proposal_audit(
+    proposal_id: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return discharge_audit(request, settings, proposal_id)
 
 
 @app.post("/internal/knowledge/retrieve")

@@ -16,11 +16,13 @@ public class MiniHisStore {
 
     private final JdbcTemplate jdbc;
     private final MiniHisSchema schema;
+    private final InpatientStore inpatient;
     private final Clock clock = Clock.systemUTC();
 
-    public MiniHisStore(JdbcTemplate jdbc, MiniHisSchema schema) {
+    public MiniHisStore(JdbcTemplate jdbc, MiniHisSchema schema, InpatientStore inpatient) {
         this.jdbc = jdbc;
         this.schema = schema;
+        this.inpatient = inpatient;
     }
 
     public void ensureReady() {
@@ -35,6 +37,7 @@ public class MiniHisStore {
     @Transactional
     public SeedCounts reset() {
         schema.migrateExistingRows();
+        inpatient.clearAll();
         jdbc.update("DELETE FROM lab_order");
         jdbc.update("DELETE FROM clinical_event");
         jdbc.update("DELETE FROM patient_identifier");

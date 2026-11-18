@@ -25,6 +25,8 @@ DEMO-DEPLOY-001 añade un Compose distinto, `demo-deploy-001`, para preparar una
 
 DEMO-CATALOG-001 añade el catálogo de tres demostraciones. El perfil hospitalario no publica puertos. Un caso nuevo obtiene un permiso nuevo. No se borran volúmenes históricos. Guía: [demo-catalog-001](demos/demo-catalog-001.md). Decisión: [ADR-109](adr/ADR-109-demo-catalog-001.md).
 
+HEALTH-005 añade `inpatient-discharge-coordinator-v1` sobre Mini HIS. La preparación cita protocolos sintéticos y no cierra el episodio. HEALTH-004 no está en `origin/main`. Guía: [health-005-discharge](demos/health-005-discharge.md). Contrato: [inpatient-discharge-coordinator-v1](contracts/inpatient-discharge-coordinator-v1.md). Decisión: [ADR-110](adr/ADR-110-inpatient-discharge-coordinator-v1.md).
+
 CLINICAL-002 añade `longitudinal-lab-comparison-v1` sobre esa misma federación. La serie fechada va etiquetada como `longitudinal-series` y no sustituye la semilla del resumen. El motor calcula la diferencia; el modelo solo la describe con transporte Gemini interceptado y un permiso distinto. No diagnostica. Contrato: [longitudinal-lab-comparison-v1](contracts/longitudinal-lab-comparison-v1.md). Decisión: [ADR-104](adr/ADR-104-longitudinal-lab-comparison-v1.md).
 
 Cursor es el ejecutor del laboratorio desde TRANSITION-002. Codex construyó las tareas integradas hasta TASK-C02 y no continúa este repositorio en esta etapa; pasa a otros proyectos, en particular CNL. No hay handoff entre personas. El mismo repositorio y workspace se conservan. Cada sesión lee `AGENTS.md`, este handoff, [la transición](agent-transition-codex-to-cursor.md) y los contratos aplicables, verifica Git y reporta paso a paso. Commit, push y PR siguen exigiendo autorización expresa del Product Owner.
