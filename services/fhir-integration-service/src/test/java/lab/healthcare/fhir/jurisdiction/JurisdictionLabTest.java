@@ -40,11 +40,25 @@ class JurisdictionLabTest {
         assertThat(peruvian.path("truncated").asBoolean()).isFalse();
         assertThat(peruvian.path("sources")).hasSize(1);
         assertThat(peruvian.path("entries").toString()).contains("718-7").contains("internal-demo-rules");
+        assertThat(peruvian.path("entries").toString())
+                .contains("pe-obs-718-7")
+                .contains("pe-long-718-7-20261001")
+                .contains("2026-10-01T08:00:00Z")
+                .contains("12.8")
+                .contains("pe-long-718-7-20261115")
+                .contains("2026-11-15T08:00:00Z")
+                .contains("longitudinal-series");
         assertThat(peruvian.path("entries").toString()).doesNotContain("gob.pe/minsa");
 
         ObjectNode spanish = (ObjectNode) service.query("mini-his", request(spain, List.of(spain.sourceKey())));
         assertThat(spanish.path("status").asText()).isEqualTo("complete");
         assertThat(spanish.path("entries").toString()).contains("2345-7").contains("es-lab-demo-v1");
+        assertThat(spanish.path("entries").toString())
+                .contains("es-obs-2345-7")
+                .contains("es-long-2345-7-20261001")
+                .contains("95")
+                .contains("es-long-2345-7-20261115")
+                .contains("longitudinal-series");
         assertThat(spanish.path("entries").toString()).doesNotContain("PE-PAT-001");
 
         assertThatThrownBy(() -> service.query("mini-his", request(peru, List.of(peru.sourceKey(), spain.sourceKey()))))

@@ -35,6 +35,8 @@ class NeutralModelGateway:
         self._external_inflight = set()
         self._jurisdiction_spent = set()
         self._jurisdiction_inflight = set()
+        self._longitudinal_spent = set()
+        self._longitudinal_inflight = set()
 
     def __repr__(self):
         return "NeutralModelGateway(closed)"
@@ -303,6 +305,8 @@ class NeutralModelGateway:
                 raise ProviderError("replay_denied")
             if authorization_id in self._external_spent or authorization_id in self._clinical_spent or authorization_id in self._spent:
                 raise ProviderError("replay_denied")
+            if authorization_id in self._longitudinal_spent or authorization_id in self._longitudinal_inflight:
+                raise ProviderError("replay_denied")
             self._jurisdiction_inflight.add(authorization_id)
         try:
             response = adapter.invoke_once(minimized)
@@ -323,6 +327,75 @@ class NeutralModelGateway:
             raise ProviderError("review_unavailable") from None
         self._resolver.consume(access, authorization_id)
         return JurisdictionResult(
+            True, "accepted", deployment.deployment_id, access.organization_id,
+            response.input_tokens, response.output_tokens, reservation,
+            response.estimated_microusd, False, "estimated",
+            response.provider_request_id, response.response_status, summary)
+
+    def execute_longitudinal_comparison(self, access, authorization_id, budget_microusd, resource_id,
+                                        deployment_id, chart, consent, profile, before_consume):
+        """One dated comparison. Summary, external, clinical, and vacation consents cannot enter."""
+        from app.longitudinal_lab.consent import OperationalLongitudinalConsent, bind_longitudinal_consent
+        from app.longitudinal_lab.context import require_model_context, validate_summary
+        from app.longitudinal_lab.model import LongitudinalResult, arm_longitudinal_adapter
+        from app.longitudinal_lab.policy import DEPLOYMENT_ID
+        from app.longitudinal_lab.series import OPERATION_ID as LONGITUDINAL_OPERATION
+        from app.longitudinal_lab.series import series_for
+
+        series = series_for(profile)
+        if type(consent) is not OperationalLongitudinalConsent or not callable(before_consume):
+            raise ProviderError("egress_blocked")
+        if deployment_id != DEPLOYMENT_ID or consent._policy_ref != series.policy_ref:
+            raise ProviderError("model_denied")
+        minimized = require_model_context(chart, profile)
+        deployment = self._registry.get(deployment_id)
+        bind_longitudinal_consent(
+            consent, access, deployment, resource_id, budget_microusd, authorization_id)
+        decision = self._resolver.resolve(
+            access, authorization_id, deployment, resource_id, budget_microusd,
+            operation_id=LONGITUDINAL_OPERATION, policy_ref=series.policy_ref)
+        if decision.allowed is not True or decision.reason != "accepted":
+            raise ProviderError(decision.reason)
+        if (decision.deployment_id != deployment.deployment_id
+                or decision.provider_id != deployment.identity.provider_id
+                or decision.model_id != deployment.identity.model_id
+                or decision.organization_id != access.organization_id):
+            raise ProviderError("remote_not_authorized")
+        hold = self._resolver.confirm_hold(
+            access, authorization_id, deployment, resource_id, budget_microusd,
+            operation_id=LONGITUDINAL_OPERATION, policy_ref=series.policy_ref)
+        if hold != "accepted":
+            raise ProviderError(hold)
+        adapter = arm_longitudinal_adapter(
+            consent, access, deployment, resource_id, authorization_id, profile)
+        reservation = adapter.estimate(deployment)
+        if reservation != deployment.reservation_microusd or budget_microusd < reservation:
+            raise ProviderError("budget_exceeded")
+        with self._lock:
+            if authorization_id in self._longitudinal_spent or authorization_id in self._longitudinal_inflight:
+                raise ProviderError("replay_denied")
+            if authorization_id in self._jurisdiction_spent or authorization_id in self._external_spent or authorization_id in self._clinical_spent or authorization_id in self._spent:
+                raise ProviderError("replay_denied")
+            self._longitudinal_inflight.add(authorization_id)
+        try:
+            response = adapter.invoke_once(minimized)
+        except ProviderError as error:
+            with self._lock:
+                self._longitudinal_inflight.discard(authorization_id)
+                self._longitudinal_spent.add(authorization_id)
+            raise ProviderError(error.reason, getattr(error, "diagnostic", None)) from None
+        with self._lock:
+            self._longitudinal_inflight.discard(authorization_id)
+            self._longitudinal_spent.add(authorization_id)
+        summary = validate_summary(minimized, response.parsed, profile)
+        try:
+            before_consume(summary)
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError("review_unavailable") from None
+        self._resolver.consume(access, authorization_id)
+        return LongitudinalResult(
             True, "accepted", deployment.deployment_id, access.organization_id,
             response.input_tokens, response.output_tokens, reservation,
             response.estimated_microusd, False, "estimated",

@@ -185,6 +185,7 @@ def read_review(path, review_id):
         "summary": summary,
         "sources": _sources(summary),
         "clinical_evidence": _load_clinical_evidence(path, review_id),
+        "longitudinal_evidence": _load_longitudinal_evidence(path, review_id),
         "summary_sha256": hashlib.sha256(row[4].encode("utf-8")).hexdigest(),
         "receipt": _receipt(path, row[1]),
         "decision": None if decision is None else {
@@ -520,6 +521,79 @@ def _load_clinical_evidence(path, review_id):
     ]
 
 
+def record_longitudinal_evidence(path, review_id, evidence):
+    """Store the calculated comparison. The generated summary is not a source."""
+    columns = (
+        "organization_id", "patient_id", "jurisdiction", "profile_id", "profile_version",
+        "code", "code_system", "prior_resource_id", "recent_resource_id", "prior_date", "recent_date",
+        "prior_value", "recent_value", "ucum_system", "ucum_code", "absolute_difference", "direction",
+        "percent_difference", "prior_provenance", "recent_provenance", "comparability", "specimen", "method",
+    )
+    if not isinstance(evidence, dict) or any(not isinstance(evidence.get(column), str) or evidence[column] == "" for column in columns):
+        raise ProviderError("review_unavailable")
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS lab_summary_longitudinal_evidence (
+                    review_id TEXT PRIMARY KEY,
+                    organization_id TEXT NOT NULL,
+                    patient_id TEXT NOT NULL,
+                    jurisdiction TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    profile_version TEXT NOT NULL,
+                    code TEXT NOT NULL,
+                    code_system TEXT NOT NULL,
+                    prior_resource_id TEXT NOT NULL,
+                    recent_resource_id TEXT NOT NULL,
+                    prior_date TEXT NOT NULL,
+                    recent_date TEXT NOT NULL,
+                    prior_value TEXT NOT NULL,
+                    recent_value TEXT NOT NULL,
+                    ucum_system TEXT NOT NULL,
+                    ucum_code TEXT NOT NULL,
+                    absolute_difference TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    percent_difference TEXT NOT NULL,
+                    prior_provenance TEXT NOT NULL,
+                    recent_provenance TEXT NOT NULL,
+                    comparability TEXT NOT NULL,
+                    specimen TEXT NOT NULL,
+                    method TEXT NOT NULL
+                )
+                """)
+            connection.execute(
+                "INSERT INTO lab_summary_longitudinal_evidence (review_id, " + ", ".join(columns) + ") "
+                "VALUES (" + ", ".join(["?"] * (len(columns) + 1)) + ")",
+                (review_id, *(evidence[column] for column in columns)))
+            connection.commit()
+    except (OSError, sqlite3.Error, TypeError, ValueError, KeyError):
+        raise ProviderError("review_unavailable") from None
+
+
+def _load_longitudinal_evidence(path, review_id):
+    connection = _read_only(path)
+    try:
+        if not _table_exists(connection, "lab_summary_longitudinal_evidence"):
+            return []
+        rows = connection.execute(
+            "SELECT organization_id, patient_id, jurisdiction, profile_id, profile_version, code, "
+            "code_system, prior_resource_id, recent_resource_id, prior_date, recent_date, prior_value, "
+            "recent_value, ucum_system, ucum_code, absolute_difference, direction, percent_difference, "
+            "prior_provenance, recent_provenance, comparability, specimen, method "
+            "FROM lab_summary_longitudinal_evidence WHERE review_id=?",
+            (review_id,)).fetchall()
+    finally:
+        connection.close()
+    keys = (
+        "organization_id", "patient_id", "jurisdiction", "profile_id", "profile_version", "code",
+        "code_system", "prior_resource_id", "recent_resource_id", "prior_date", "recent_date",
+        "prior_value", "recent_value", "ucum_system", "ucum_code", "absolute_difference", "direction",
+        "percent_difference", "prior_provenance", "recent_provenance", "comparability", "specimen", "method",
+    )
+    return [dict(zip(keys, row)) for row in rows]
+
+
 def _sources(summary):
     found = []
     for statement in summary.get("statements") or []:
@@ -558,6 +632,11 @@ def _receipt(path, authorization_id):
             return None
     elif operation == "jurisdiction-lab-summary-v1":
         if authorization_id not in {"pe-lab-demo-001", "es-lab-demo-001"} or receipt.get("phase") != "intercepted":
+            return None
+        if receipt.get("validation_class") != "internal-demo-rules" or receipt.get("official_conformance") is not False:
+            return None
+    elif operation == "longitudinal-lab-comparison-v1":
+        if authorization_id not in {"pe-longitudinal-001", "es-longitudinal-001"} or receipt.get("phase") != "intercepted":
             return None
         if receipt.get("validation_class") != "internal-demo-rules" or receipt.get("official_conformance") is not False:
             return None

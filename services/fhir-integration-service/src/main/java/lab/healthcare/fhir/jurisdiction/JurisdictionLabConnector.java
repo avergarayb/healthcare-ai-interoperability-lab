@@ -55,6 +55,20 @@ public final class JurisdictionLabConnector implements ClinicalConnector {
             JurisdictionLabValidator.stamp(profile, copy);
             accepted.add(copy);
         }
+        for (ObjectNode resource : LongitudinalSeries.resources(profile, json)) {
+            if (!resourceType.equals(resource.path("resourceType").asText())) {
+                continue;
+            }
+            ObjectNode copy = resource.deepCopy();
+            JurisdictionLabValidator.stamp(profile, copy);
+            if (!"final".equals(copy.path("status").asText()) || copy.path("effectiveDateTime").asText().isBlank()) {
+                throw ClinicalReadException.external("response_rejected");
+            }
+            copy.withArray("/meta/tag").addObject()
+                    .put("system", JurisdictionProfile.VALIDATION_TAG)
+                    .put("code", LongitudinalSeries.TAG);
+            accepted.add(copy);
+        }
         if (accepted.isEmpty()) {
             throw ClinicalReadException.notFound();
         }
