@@ -1,0 +1,13 @@
+mini-his:
+  sqlite-path: target/oidc-acceptance.sqlite
+  oidc:
+    enabled: true
+    client-enabled: true
+    issuer: http://127.0.0.1:18340/realms/hospital-lab
+    audience: mini-his-web
+    acceptance: true
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true

@@ -5,6 +5,7 @@ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.proc.JWSVerificationKeySelector;
 import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier;
 import com.nimbusds.jwt.proc.DefaultJWTProcessor;
 
@@ -42,6 +43,24 @@ final class HospitalTokenVerifier {
             throw ex;
         } catch (Exception ex) {
             throw new HospitalRejection("invalid_token", 401);
+        }
+    }
+
+    static String delegation(String token) {
+        if (token == null || token.length() > 4000 || token.chars().filter(ch -> ch == '.').count() != 2) {
+            return "";
+        }
+        try {
+            JWTClaimsSet claims = SignedJWT.parse(token).getJWTClaimsSet();
+            Object party = claims.getClaim("azp");
+            boolean partyOk = "mini-his-web".equals(party) || "mini-lis-web".equals(party);
+            if (!"Bearer".equals(claims.getClaim("typ")) || claims.getAudience() == null
+                    || !claims.getAudience().contains("hospital-ai") || !partyOk) {
+                return "";
+            }
+            return token;
+        } catch (Exception ex) {
+            return "";
         }
     }
 

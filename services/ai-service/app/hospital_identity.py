@@ -1,9 +1,9 @@
-"""Hospital OIDC identity for a human decision.
+"""Delegated human authority for a hospital decision.
 
-The service token only proves that Mini HIS or Mini LIS called this process.
-The ID token proves the person. Organization and role come from the server
-binding, and the signed token must carry the same organization and role.
-A field posted by the browser cannot choose either.
+The service token only proves that Mini HIS called this process. The access
+token, audience hospital-ai, proves the person and the permission. An ID token
+issued to the web client is not an access token. Organization and role come
+from the server binding and must also be in the signed access token.
 """
 import json
 from dataclasses import dataclass
@@ -33,11 +33,28 @@ class HospitalIdentity:
         return "oidc-" + self.subject.replace("-", "")[:20]
 
 
+RESOURCE_AUDIENCE = "hospital-ai"
+_AUTHORIZED_PARTIES = {"mini-his-web", "mini-lis-web"}
+
+
 def bindings():
     return json.loads(files("app").joinpath("hospital_bindings.json").read_text(encoding="utf-8"))
 
 
+def bearer(headers):
+    """Read one access token. An identity header from the browser is ignored."""
+    value = headers.get("authorization", "")
+    if not isinstance(value, str) or not value.startswith("Bearer ") or value.count(" ") != 1:
+        return ""
+    token = value[7:]
+    if token.count(".") != 2 or len(token) > 4000:
+        return ""
+    return token
+
+
 def verify_token(token, *, issuer, audience, bindings_map, key=None, jwks_uri=""):
+    if audience != RESOURCE_AUDIENCE:
+        raise HospitalRejected("invalid_token", 401)
     if not isinstance(token, str) or token.count(".") != 2 or len(token) > 4000:
         raise HospitalRejected("invalid_token", 401)
     if not issuer.startswith("http://127.0.0.1:") and not issuer.startswith("https://"):
@@ -56,6 +73,8 @@ def verify_token(token, *, issuer, audience, bindings_map, key=None, jwks_uri=""
         raise HospitalRejected("identity_unavailable", 503) from None
     except (jwt.exceptions.InvalidTokenError, jwt.exceptions.PyJWTError):
         raise HospitalRejected("invalid_token", 401) from None
+    if claims.get("typ") != "Bearer" or claims.get("azp") not in _AUTHORIZED_PARTIES:
+        raise HospitalRejected("invalid_token", 401)
     username = claims.get("preferred_username")
     bound = bindings_map.get(username) if isinstance(username, str) else None
     if bound is None or claims.get("organization") != bound.get("organization"):
@@ -95,7 +114,9 @@ def authority(headers, settings, *, key=None):
     """Return the identity, or a response dict when the human token is required."""
     if not settings.hospital_oidc_required:
         return None
-    token = headers.get("x-hospital-identity", "")
+    token = bearer(headers)
+    if token == "":
+        return {"error": "unauthorized", "status": 401}
     try:
         return verify_token(
             token, issuer=settings.hospital_oidc_issuer, audience=settings.hospital_oidc_audience,

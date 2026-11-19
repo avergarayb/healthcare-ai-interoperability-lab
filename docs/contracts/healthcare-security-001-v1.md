@@ -6,7 +6,8 @@
 
 - Emisor previsto: `http://127.0.0.1:18340/realms/hospital-lab` en el Keycloak ya desplegado.
 - Clientes públicos con PKCE: `mini-his-web` y `mini-lis-web`.
-- Redirecciones exactas: `http://127.0.0.1:8095/login/oauth2/code/hospital` y `http://127.0.0.1:8096/login/oauth2/code/bench`.
+- Recurso del AI Service: `hospital-ai`. El access token lleva esa audiencia y `typ=Bearer`. El ID token no sirve para esa llamada.
+- Redirecciones exactas de aceptación: `https://127.0.0.1:8445/login/oauth2/code/hospital` y `https://127.0.0.1:8444/login/oauth2/code/bench`. `8443` está ocupado por otro proceso local y no se reutiliza.
 - La vinculación servidor es `infra/healthcare-security-001/bindings.json`.
 
 ## Autorización

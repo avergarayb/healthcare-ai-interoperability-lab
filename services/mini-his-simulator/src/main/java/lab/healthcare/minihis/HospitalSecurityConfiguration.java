@@ -12,11 +12,14 @@ import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.client.registration.ClientRegistrations;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
-import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
@@ -37,7 +40,8 @@ public class HospitalSecurityConfiguration {
     @Order(1)
     @ConditionalOnProperty(name = "mini-his.oidc.client-enabled", havingValue = "true")
     SecurityFilterChain hospitalOidc(
-            HttpSecurity http, ClientRegistrationRepository registrations, SecurityEvents events,
+            HttpSecurity http, ClientRegistrationRepository registrations, OAuth2AuthorizedClientRepository clients,
+            SecurityEvents events,
             @Value("${mini-his.oidc.issuer}") String issuer,
             @Value("${mini-his.oidc.audience}") String audience,
             @Value("${mini-his.oidc.bindings:}") String bindingsPath) throws Exception {
@@ -46,7 +50,7 @@ public class HospitalSecurityConfiguration {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/ward/login", "/login/**", "/oauth2/**").permitAll()
                         .anyRequest().authenticated())
-                .oauth2Login(oauth -> oauth.successHandler(success(bindings, issuer, audience, events)))
+                .oauth2Login(oauth -> oauth.successHandler(success(bindings, issuer, audience, events, clients)))
                 .logout(logout -> logout.logoutUrl("/logout").invalidateHttpSession(true).deleteCookies("JSESSIONID"))
                 .sessionManagement(session -> session.sessionFixation().changeSessionId())
                 .csrf(csrf -> {
@@ -81,20 +85,20 @@ public class HospitalSecurityConfiguration {
     ClientRegistrationRepository hospitalClients(
             @Value("${mini-his.oidc.issuer}") String issuer,
             @Value("${mini-his.oidc.client-id:mini-his-web}") String clientId) {
-        ClientRegistration registration = ClientRegistration.withRegistrationId("hospital")
+        ClientRegistration registration = ClientRegistrations.fromIssuerLocation(issuer)
+                .registrationId("hospital")
                 .clientId(clientId)
                 .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
-                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
-                .scope("openid")
-                .issuerUri(issuer)
+                .scope("openid", "profile")
                 .clientSettings(ClientRegistration.ClientSettings.builder().requireProofKey(true).build())
                 .build();
         return new InMemoryClientRegistrationRepository(registration);
     }
 
     private static AuthenticationSuccessHandler success(
-            Map<String, HospitalBindings.Binding> bindings, String issuer, String audience, SecurityEvents events) {
+            Map<String, HospitalBindings.Binding> bindings, String issuer, String audience, SecurityEvents events,
+            OAuth2AuthorizedClientRepository clients) {
         return (HttpServletRequest request, HttpServletResponse response, Authentication authentication) -> {
             if (!(authentication.getPrincipal() instanceof OidcUser user)) {
                 response.sendRedirect("/ward/login?aviso=no-autorizado");
@@ -103,6 +107,7 @@ public class HospitalSecurityConfiguration {
             try {
                 WardPrincipal principal = HospitalIdentity.accept(
                         user.getClaims(), bindings, issuer, audience, Instant.now());
+                String access = HospitalTokenVerifier.delegation(accessToken(authentication, request, clients));
                 HttpSession previous = request.getSession(false);
                 if (previous != null) {
                     previous.invalidate();
@@ -110,9 +115,8 @@ public class HospitalSecurityConfiguration {
                 HttpSession session = request.getSession(true);
                 session.setAttribute("wardPrincipal", principal);
                 session.setAttribute("csrf", UUID.randomUUID().toString());
-                String token = user.getIdToken().getTokenValue();
-                if (token != null && token.length() <= 4000 && token.chars().filter(ch -> ch == '.').count() == 2) {
-                    session.setAttribute("hospitalIdToken", token);
+                if (!access.isBlank()) {
+                    session.setAttribute("hospitalAccessToken", access);
                 }
                 events.record(principal.userId(), principal.role(), principal.organizationId(), "login", "/showcase", "accepted");
                 response.sendRedirect("/showcase");
@@ -121,6 +125,19 @@ public class HospitalSecurityConfiguration {
                 response.sendRedirect("/ward/login?aviso=no-autorizado");
             }
         };
+    }
+
+    private static String accessToken(
+            Authentication authentication, HttpServletRequest request, OAuth2AuthorizedClientRepository clients) {
+        if (!(authentication instanceof OAuth2AuthenticationToken oauth)) {
+            return "";
+        }
+        OAuth2AuthorizedClient client = clients.loadAuthorizedClient(
+                oauth.getAuthorizedClientRegistrationId(), authentication, request);
+        if (client == null || client.getAccessToken() == null) {
+            return "";
+        }
+        return client.getAccessToken().getTokenValue();
     }
 
     private static Map<String, HospitalBindings.Binding> bindingsFrom(String path) throws IOException {

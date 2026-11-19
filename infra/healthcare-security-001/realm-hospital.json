@@ -27,8 +27,47 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "fullScopeAllowed": true,
-      "redirectUris": ["http://127.0.0.1:8095/login/oauth2/code/hospital"],
-      "webOrigins": ["http://127.0.0.1:8095"],
+      "redirectUris": ["https://127.0.0.1:8445/login/oauth2/code/hospital"],
+      "webOrigins": ["https://127.0.0.1:8445"],
+      "attributes": {"pkce.code.challenge.method": "S256"},
+      "protocolMappers": [
+        {
+          "name": "organization",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "organization",
+            "claim.name": "organization",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "hospital-ai-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "hospital-ai",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "mini-lis-web",
+      "name": "Mini LIS Web",
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": ["https://127.0.0.1:8444/login/oauth2/code/bench"],
+      "webOrigins": ["https://127.0.0.1:8444"],
       "attributes": {"pkce.code.challenge.method": "S256"},
       "protocolMappers": [
         {
@@ -47,42 +86,24 @@
       ]
     },
     {
-      "clientId": "mini-lis-web",
-      "name": "Mini LIS Web",
+      "clientId": "hospital-ai",
+      "name": "Hospital AI resource",
       "publicClient": true,
       "protocol": "openid-connect",
-      "standardFlowEnabled": true,
+      "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
-      "fullScopeAllowed": true,
-      "redirectUris": ["http://127.0.0.1:8096/login/oauth2/code/bench"],
-      "webOrigins": ["http://127.0.0.1:8096"],
-      "attributes": {"pkce.code.challenge.method": "S256"},
-      "protocolMappers": [
-        {
-          "name": "organization",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-attribute-mapper",
-          "config": {
-            "user.attribute": "organization",
-            "claim.name": "organization",
-            "jsonType.label": "String",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "userinfo.token.claim": "false"
-          }
-        }
-      ]
+      "fullScopeAllowed": false
     }
   ],
   "users": [
-    {"username": "medico.his", "enabled": true, "firstName": "Medico", "lastName": "Sintetico", "realmRoles": ["clinician"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
-    {"username": "revisor.his", "enabled": true, "firstName": "Revisor", "lastName": "Sintetico", "realmRoles": ["clinical-reviewer"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
-    {"username": "auditor.his", "enabled": true, "firstName": "Auditor", "lastName": "Sintetico", "realmRoles": ["auditor"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
-    {"username": "operador.his", "enabled": true, "firstName": "Operador", "lastName": "Sintetico", "realmRoles": ["operator"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
-    {"username": "recepcion.lis", "enabled": true, "firstName": "Recepcion", "lastName": "Sintetica", "realmRoles": ["receptionist"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
-    {"username": "tecnico.lis", "enabled": true, "firstName": "Tecnico", "lastName": "Sintetico", "realmRoles": ["lab-technician"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
-    {"username": "validador.lis", "enabled": true, "firstName": "Validador", "lastName": "Sintetico", "realmRoles": ["lab-validator"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]}
+    {"username": "medico.his", "enabled": true, "email": "medico.his@hospital.lab.example", "emailVerified": true, "firstName": "Medico", "lastName": "Sintetico", "realmRoles": ["clinician"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "revisor.his", "enabled": true, "email": "revisor.his@hospital.lab.example", "emailVerified": true, "firstName": "Revisor", "lastName": "Sintetico", "realmRoles": ["clinical-reviewer"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "auditor.his", "enabled": true, "email": "auditor.his@hospital.lab.example", "emailVerified": true, "firstName": "Auditor", "lastName": "Sintetico", "realmRoles": ["auditor"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "operador.his", "enabled": true, "email": "operador.his@hospital.lab.example", "emailVerified": true, "firstName": "Operador", "lastName": "Sintetico", "realmRoles": ["operator"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "recepcion.lis", "enabled": true, "email": "recepcion.lis@hospital.lab.example", "emailVerified": true, "firstName": "Recepcion", "lastName": "Sintetica", "realmRoles": ["receptionist"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "tecnico.lis", "enabled": true, "email": "tecnico.lis@hospital.lab.example", "emailVerified": true, "firstName": "Tecnico", "lastName": "Sintetico", "realmRoles": ["lab-technician"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "validador.lis", "enabled": true, "email": "validador.lis@hospital.lab.example", "emailVerified": true, "firstName": "Validador", "lastName": "Sintetico", "realmRoles": ["lab-validator"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]}
   ]
 }

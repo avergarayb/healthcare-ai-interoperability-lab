@@ -4,10 +4,10 @@ Identidad y autorización de las cinco demostraciones en el laboratorio. No es c
 
 ## Arquitectura
 
-El navegador entra a Mini HIS o Mini LIS. Spring Security inicia Authorization Code con PKCE, `state` y el control de sesión del cliente OIDC. Keycloak es el mismo proceso que ya atiende Perú y España. El realm nuevo es `hospital-lab`. El ID token queda en la sesión del servidor. El navegador solo tiene la cookie de sesión.
+El navegador entra a Mini HIS o Mini LIS por HTTPS. Spring Security inicia Authorization Code con PKCE. El ID token abre la sesión web y su audiencia es el cliente. El access token, con audiencia `hospital-ai`, queda en la sesión del servidor y es lo que Mini HIS presenta al AI Service junto con el token de máquina. Un ID token enviado como si fuera un access token se rechaza. Keycloak es el mismo proceso que ya atiende Perú y España. El realm nuevo es `hospital-lab`. El navegador solo tiene la cookie de sesión.
 
 ```text
-Navegador --cookie--> Mini HIS / Mini LIS --token de servicio + ID token--> AI Service
+Navegador --cookie--> Mini HIS / Mini LIS --token de servicio + access token hospital-ai--> AI Service
                               \--OIDC--> Keycloak realm hospital-lab
 AI Service --token de servicio--> Federación clínica
 ```
@@ -45,19 +45,20 @@ Variables de aceptación:
 - `MINI_LIS_OIDC_CLIENT_ENABLED=true`
 - `MINI_LIS_OIDC_ISSUER` con el mismo emisor
 - `HOSPITAL_OIDC_REQUIRED=true`
-- `HOSPITAL_OIDC_ISSUER`, `HOSPITAL_OIDC_AUDIENCE=mini-his-web` y `HOSPITAL_OIDC_JWKS_URI` en el AI Service
+- `HOSPITAL_OIDC_ISSUER`, `HOSPITAL_OIDC_AUDIENCE=hospital-ai` y `HOSPITAL_OIDC_JWKS_URI` en el AI Service
+- `MINI_HIS_OIDC_ACCEPTANCE=true` y `MINI_LIS_OIDC_ACCEPTANCE=true` para exigir HTTPS en las rutas del navegador
 
 Si el cliente OIDC está apagado, la clave local sigue existiendo y no cuenta como aceptación.
 
 ## Sesión
 
-La cookie es `HttpOnly` y `SameSite=Lax`. Dura 30 minutos. `Secure` queda apagado en HTTP de loopback y se enciende con `MINI_HIS_COOKIE_SECURE=true` detrás de `infra/healthcare-security-001/Caddyfile`, que solo escucha en `127.0.0.1:8443` y `127.0.0.1:8444`. El cierre de sesión invalida la cookie si el CSRF coincide. Un CSRF ausente no cierra la sesión. El ingreso OIDC rota la sesión.
+La cookie es `HttpOnly` y `SameSite=Lax`. Dura 30 minutos. `Secure` queda apagado en HTTP de loopback y se enciende con `MINI_HIS_COOKIE_SECURE=true` detrás de `infra/healthcare-security-001/Caddyfile`. El proxy escucha en `127.0.0.1:8445` y `127.0.0.1:8444` porque `8443` ya lo usa otro contenedor local, que no se detuvo. El cierre de sesión invalida la cookie si el CSRF coincide. Un CSRF ausente no cierra la sesión. El ingreso OIDC rota la sesión. Los usuarios sintéticos llevan un correo `usuario@hospital.lab.example` verificado para que Keycloak 26 no detenga el ingreso en el perfil.
 
 Los formularios siguen enviando el campo `csrf`. En el perfil OIDC, Spring Security también lo exige. En el perfil local, la comprobación sigue en el controlador. No se desactiva el CSRF de la aplicación para hacer pasar un formulario.
 
 ## Tokens de servicio
 
-`X-Service-Token` autentica a Mini HIS o Mini LIS frente al AI Service. `X-Hospital-Identity` lleva el ID token y solo lo agrega el servidor. El navegador no llama los endpoints internos. Un token de servicio sin ID token, con OIDC exigido, responde 401 y no decide.
+`X-Service-Token` autentica a Mini HIS frente al AI Service. `Authorization: Bearer` lleva el access token de audiencia `hospital-ai` y solo lo agrega el servidor. El ID token no se reenvía. El navegador no llama los endpoints internos. Un token de servicio sin access token, o un ID token en su lugar, responde 401 y no hay decisión.
 
 ## Auditoría
 
@@ -67,6 +68,12 @@ Mini HIS crea `security_event` si no existe. Mini LIS la agrega con Flyway `V5__
 
 La matriz negativa de token cubre firma ajena, caducidad, emisor, audiencia, organización ajena y rol que no coincide con la vinculación. Mini HIS cubre anónimo, clave local rechazada, auditor, organización ajena, IDOR de paciente, orden y episodio, CSRF y cierre de sesión. AI Service cubre la decisión con actor falsificado, el hash distinto, la reutilización y la caída del JWKS. Esas pruebas no sustituyen un recorrido de navegador con el realm importado.
 
+## Lo comprobado en el Keycloak en ejecución
+
+`hospital-lab` se creó por la Admin API, sin reiniciar Keycloak y sin tocar el volumen. `platform-001` siguió respondiendo y sus clientes no cambiaron: sigue `lab-review-web`. El access token real de `mini-his-web` trae `typ=Bearer`, `azp=mini-his-web`, audiencia `hospital-ai`, usuario, organización y rol. El ID token trae `typ=ID` y audiencia `mini-his-web`. Un ID token no autoriza al AI Service.
+
+`http://127.0.0.1:8095/ward/login` responde 403 cuando la aceptación HTTPS está encendida. `https://127.0.0.1:8445/ward/login` responde 200 y muestra el ingreso OIDC. El navegador integrado no completó el login: el certificado interno de Caddy deja la página en error y no se forzó la confianza del sistema. Las cinco demostraciones clínicas no se recorrieron con sesión OIDC. La sesión local no se usa para declararlas aceptadas.
+
 ## Límites
 
-El realm no quedó importado en el Keycloak en ejecución durante esta entrega, así que el recorrido de navegador de las cinco demostraciones con una sesión OIDC real queda pendiente. La sesión local no se usa para declarar ese recorrido como aceptado. No hay certificación, no hay exposición pública y una caída de Keycloak no publica ni aprueba: la operación responde denegada o no disponible.
+El resultado queda parcial. No hay certificación, no hay exposición pública y una caída de Keycloak no publica ni aprueba: la operación responde denegada o no disponible. El puerto `8443` sigue ocupado por otro contenedor y no se detuvo.

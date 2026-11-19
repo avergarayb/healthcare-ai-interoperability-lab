@@ -63,7 +63,7 @@ public class DischargeCoordinator {
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
                     .header("Content-Type", "application/json");
             if (identityToken != null && identityToken.chars().filter(ch -> ch == '.').count() == 2) {
-                builder.header("X-Hospital-Identity", identityToken);
+                builder.header("Authorization", "Bearer " + identityToken);
             }
             HttpRequest request = builder.build();
             return read(client.send(request, HttpResponse.BodyHandlers.ofString()));

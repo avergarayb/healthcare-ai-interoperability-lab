@@ -655,7 +655,7 @@ public class WardController {
 
     private static String identityToken(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
-        Object value = session == null ? null : session.getAttribute("hospitalIdToken");
+        Object value = session == null ? null : session.getAttribute("hospitalAccessToken");
         return value instanceof String token && token.chars().filter(ch -> ch == '.').count() == 2 ? token : "";
     }
 

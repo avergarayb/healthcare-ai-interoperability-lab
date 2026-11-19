@@ -8,9 +8,11 @@ Aceptado para el laboratorio. No certifica un producto clínico ni autoriza expo
 
 Mini HIS y Mini LIS aceptan el ingreso web con Authorization Code y PKCE contra el Keycloak que ya existe, en un realm nuevo `hospital-lab`. No se crea otro proveedor ni otro sistema de Human Review. Los realms y clientes de Perú y España no se modifican.
 
-La organización y el rol salen de `infra/healthcare-security-001/bindings.json`. El token firmado tiene que traer el mismo emisor, la audiencia del cliente, la misma organización y el mismo rol. Un formulario, una cabecera o un parámetro no eligen la organización. Un usuario con varios roles no hereda permisos de otra organización: cada aplicación solo acepta los roles de su lista.
+La organización y el rol salen de `infra/healthcare-security-001/bindings.json`. El ID token autentica al usuario en Mini HIS o Mini LIS y su audiencia es el cliente web. No autoriza una llamada al AI Service. Esa llamada lleva el access token, con audiencia `hospital-ai`, tipo `Bearer` y `azp` del cliente web, además del token de servicio. El AI Service comprueba firma, emisor, audiencia del recurso, caducidad, sujeto, rol y organización. Un ID token firmado para `mini-his-web` se rechaza.
 
-Con OIDC encendido, la clave local no abre sesión. Con OIDC apagado, la sesión local sigue disponible para depuración y para las pruebas anteriores, y no es la aceptación. El navegador no recibe el token de servicio ni el ID token en `localStorage`. Mini HIS guarda el ID token en la sesión del servidor y lo reenvía al AI Service junto con el token de servicio. El token de servicio solo identifica a la máquina. La decisión humana exige el ID token y el rol `clinical-reviewer`.
+Con OIDC encendido, la clave local no abre sesión. Con OIDC apagado, la sesión local sigue disponible para depuración y para las pruebas anteriores, y no es la aceptación. El navegador no recibe el token de servicio ni el access token. Mini HIS guarda el access token en la sesión del servidor. La decisión humana exige ese access token y el rol `clinical-reviewer`.
+
+La aceptación web entra por `https://127.0.0.1:8445` y `https://127.0.0.1:8444`. Esas son las únicas redirecciones registradas. El puerto `8443` ya lo ocupa otro contenedor local y no se detuvo. El emisor de Keycloak sigue en el loopback HTTP ya usado por Perú y España; cambiarlo rompería ese realm.
 
 La revisión reutiliza `IamReviewer`, el ledger y la reserva de un solo uso. `hl7-reviewer` permanece únicamente en la ruta de desarrollo.
 

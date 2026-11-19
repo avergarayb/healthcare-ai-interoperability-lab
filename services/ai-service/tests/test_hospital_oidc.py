@@ -15,16 +15,18 @@ from starlette.requests import Request
 
 
 ISSUER = "http://127.0.0.1:18340/realms/hospital-lab"
-AUDIENCE = "mini-his-web"
+AUDIENCE = "hospital-ai"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
-def _token(username, organization, roles, *, issuer=ISSUER, audience=AUDIENCE, expires=None, key=KEY):
+def _token(username, organization, roles, *, issuer=ISSUER, audience=AUDIENCE, expires=None, key=KEY, typ="Bearer", azp="mini-his-web"):
     now = datetime.now(timezone.utc)
     return jwt.encode({
         "iss": issuer,
         "aud": audience,
         "sub": "subject-" + username,
+        "typ": typ,
+        "azp": azp,
         "preferred_username": username,
         "organization": organization,
         "realm_access": {"roles": roles},
@@ -51,10 +53,10 @@ def _settings(**overrides):
 
 
 def _request(token="", service="hospital-service-token"):
-    headers = {b"x-service-token": service.encode()}
+    headers = [(b"x-service-token", service.encode())]
     if token:
-        headers[b"x-hospital-identity"] = token.encode()
-    return Request({"type": "http", "headers": list(headers.items()), "method": "POST", "path": "/"})
+        headers.append((b"authorization", b"Bearer " + token.encode()))
+    return Request({"type": "http", "headers": headers, "method": "POST", "path": "/"})
 
 
 def test_token_negative_matrix_and_bindings_match_the_repository():
@@ -71,6 +73,8 @@ def test_token_negative_matrix_and_bindings_match_the_repository():
         (_token("revisor.his", "org-mini-his", ["clinical-reviewer"], key=other), "invalid_token", 401),
         (_token("revisor.his", "org-mini-his", ["clinical-reviewer"], expires=datetime.now(timezone.utc) - timedelta(minutes=1)), "invalid_token", 401),
         (_token("revisor.his", "org-mini-his", ["clinical-reviewer"], issuer="http://127.0.0.1:9/realms/other"), "invalid_token", 401),
+        (_token("revisor.his", "org-mini-his", ["clinical-reviewer"], audience="mini-his-web", typ="ID"), "invalid_token", 401),
+        (_token("revisor.his", "org-mini-his", ["clinical-reviewer"], typ="ID"), "invalid_token", 401),
         (_token("revisor.his", "org-mini-his", ["clinical-reviewer"], audience="mini-lis-web"), "invalid_token", 401),
         (_token("revisor.his", "org-pe-lab-demo", ["clinical-reviewer"]), "organization_denied", 403),
         (_token("reviewer-pe", "org-pe-lab-demo", ["clinical-reviewer"]), "organization_denied", 403),
@@ -127,7 +131,7 @@ def test_service_token_alone_cannot_approve_and_a_forged_actor_is_ignored(tmp_pa
     from app.hospital_identity import authority
     closed_issuer = "http://127.0.0.1:9/realms/hospital-lab"
     unavailable = authority(
-        {"x-hospital-identity": _token("revisor.his", "org-mini-his", ["clinical-reviewer"], issuer=closed_issuer)},
+            {"authorization": "Bearer " + _token("revisor.his", "org-mini-his", ["clinical-reviewer"], issuer=closed_issuer)},
         _settings(hospital_oidc_issuer=closed_issuer, hospital_oidc_jwks_uri=closed_issuer + "/protocol/openid-connect/certs"))
     assert unavailable["status"] == 503
     assert unavailable["error"] == "identity_unavailable"

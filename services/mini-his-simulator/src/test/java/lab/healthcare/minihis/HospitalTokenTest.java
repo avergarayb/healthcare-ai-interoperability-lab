@@ -29,7 +29,7 @@ class HospitalTokenTest {
         RSAKey other = new RSAKeyGenerator(2048).keyID("other").generate();
         Map<String, HospitalBindings.Binding> bindings = HospitalBindings.load(
                 HospitalTokenTest.class.getResourceAsStream("/hospital-bindings.json"));
-        Instant now = Instant.parse("2026-11-19T12:00:00Z");
+        Instant now = Instant.now();
         String token = token(key, "revisor.his", "org-mini-his", List.of("clinical-reviewer"), now.plusSeconds(300), ISSUER, AUDIENCE);
 
         WardPrincipal principal = HospitalTokenVerifier.verify(token, new JWKSet(key.toPublicJWK()), bindings, ISSUER, AUDIENCE, now);
@@ -67,6 +67,32 @@ class HospitalTokenTest {
                 .containsExactly(code, status);
     }
 
+    @Test
+    void anIdTokenIsNotForwardedAsAnAccessToken() throws Exception {
+        RSAKey key = new RSAKeyGenerator(2048).keyID("lab").generate();
+        Instant now = Instant.parse("2026-11-19T12:00:00Z");
+        String identity = signed(key, "revisor.his", "mini-his-web", "ID", now.plusSeconds(300));
+        String access = signed(key, "revisor.his", "hospital-ai", "Bearer", now.plusSeconds(300));
+        assertThat(HospitalTokenVerifier.delegation(identity)).isEmpty();
+        assertThat(HospitalTokenVerifier.delegation(access)).isEqualTo(access);
+        assertThat(access).doesNotContain("eyJ-secret");
+    }
+
+    private static String signed(RSAKey key, String username, String audience, String type, Instant expires) throws Exception {
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .issuer(ISSUER)
+                .audience(audience)
+                .subject("subject-" + username)
+                .claim("typ", type)
+                .claim("azp", "mini-his-web")
+                .claim("preferred_username", username)
+                .expirationTime(Date.from(expires))
+                .build();
+        SignedJWT jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(), claims);
+        jwt.sign(new RSASSASigner(key));
+        return jwt.serialize();
+    }
+
     private static String token(
             RSAKey key, String username, String organization, List<String> roles, Instant expires, String issuer, String audience)
             throws Exception {
@@ -77,7 +103,7 @@ class HospitalTokenTest {
                 .claim("preferred_username", username)
                 .claim("organization", organization)
                 .claim("realm_access", Map.of("roles", roles))
-                .issueTime(Date.from(Instant.parse("2026-11-19T11:00:00Z")))
+                .issueTime(Date.from(Instant.now().minusSeconds(30)))
                 .expirationTime(Date.from(expires))
                 .build();
         SignedJWT jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID()).build(), claims);

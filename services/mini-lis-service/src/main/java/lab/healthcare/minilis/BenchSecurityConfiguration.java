@@ -17,6 +17,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.registration.ClientRegistrations;
 import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
@@ -79,13 +80,12 @@ public class BenchSecurityConfiguration {
     ClientRegistrationRepository benchClients(
             @Value("${mini-lis.oidc.issuer}") String issuer,
             @Value("${mini-lis.oidc.client-id:mini-lis-web}") String clientId) {
-        return new InMemoryClientRegistrationRepository(ClientRegistration.withRegistrationId("bench")
+        return new InMemoryClientRegistrationRepository(ClientRegistrations.fromIssuerLocation(issuer)
+                .registrationId("bench")
                 .clientId(clientId)
                 .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
-                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
-                .scope("openid")
-                .issuerUri(issuer)
+                .scope("openid", "profile")
                 .clientSettings(ClientRegistration.ClientSettings.builder().requireProofKey(true).build())
                 .build());
     }
