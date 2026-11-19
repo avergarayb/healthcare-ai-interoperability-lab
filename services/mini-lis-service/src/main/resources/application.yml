@@ -12,6 +12,7 @@ spring:
 
 mini-lis:
   service-token: ${MINI_LIS_SERVICE_TOKEN:lab-mini-lis-dev}
+  bench-password: ${MINI_LIS_BENCH_PASSWORD:}
   allow-external-bind: ${MINI_LIS_ALLOW_EXTERNAL_BIND:false}
   hl7:
     enabled: ${MINI_LIS_HL7_ENABLED:false}

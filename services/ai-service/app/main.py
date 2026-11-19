@@ -64,6 +64,7 @@ from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.gemini_provider import GeminiProvider
 from app.institutional_knowledge import attach_institutional_knowledge
 from app.institutional_knowledge_http import retrieve_institutional_knowledge_http
+from app.critical_lab.http import apply_critical, decide_critical, prepare_critical
 from app.inpatient_discharge.http import (
     authorize_follow_ups,
     decide_discharge,
@@ -499,3 +500,18 @@ async def retrieve_institutional_knowledge(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     return retrieve_institutional_knowledge_http(request, settings, await request.body())
+
+
+@app.post("/internal/critical-lab/prepare")
+async def critical_lab_prepare(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return prepare_critical(request, settings, await request.body())
+
+
+@app.post("/internal/critical-lab/decisions")
+async def critical_lab_decision(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return decide_critical(request, settings, await request.body())
+
+
+@app.post("/internal/critical-lab/apply")
+async def critical_lab_apply(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return apply_critical(request, settings, await request.body())

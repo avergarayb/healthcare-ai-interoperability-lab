@@ -38,6 +38,8 @@ public class MiniHisStore {
     public SeedCounts reset() {
         schema.migrateExistingRows();
         inpatient.clearAll();
+        jdbc.update("DELETE FROM lab_acknowledgement");
+        jdbc.update("DELETE FROM lab_order_context");
         jdbc.update("DELETE FROM lab_order");
         jdbc.update("DELETE FROM clinical_event");
         jdbc.update("DELETE FROM patient_identifier");

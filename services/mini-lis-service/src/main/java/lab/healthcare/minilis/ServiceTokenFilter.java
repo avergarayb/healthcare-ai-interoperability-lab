@@ -31,7 +31,8 @@ class ServiceTokenFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return path != null && (path.equals("/health") || path.startsWith("/health/"));
+        return path != null && (path.equals("/health") || path.startsWith("/health/")
+                || path.equals("/bench") || path.startsWith("/bench/"));
     }
 
     @Override

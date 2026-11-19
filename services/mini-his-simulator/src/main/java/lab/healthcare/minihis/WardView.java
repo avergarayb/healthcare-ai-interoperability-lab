@@ -432,9 +432,174 @@ final class WardView {
                 """.formatted(head(), esc(title), session, nav(active), alert(notice), body);
     }
 
+    static String orders(WardPrincipal principal, String csrf, String notice, List<LabOrderView> orders) {
+        StringBuilder rows = new StringBuilder();
+        for (LabOrderView order : orders) {
+            rows.append("<tr><td data-label=\"Orden\"><a href=\"/ward/orders/").append(esc(order.orderId())).append("\">")
+                    .append(esc(order.orderId())).append("</a></td><td data-label=\"Paciente\">")
+                    .append(esc(order.patientId())).append("</td><td data-label=\"Prueba\">")
+                    .append(esc(order.testDescription())).append("</td><td data-label=\"Fecha\">")
+                    .append(esc(order.requestedAt())).append("</td><td data-label=\"Estado\">")
+                    .append(esc(orderStatus(order.localStatus()))).append("</td><td data-label=\"Intercambio\">")
+                    .append(esc(order.correlationId() == null ? "Sin correlación" : order.correlationId()))
+                    .append("</td></tr>");
+        }
+        if (rows.isEmpty()) {
+            rows.append("<tr><td colspan=\"6\">No hay órdenes de laboratorio.</td></tr>");
+        }
+        String form = "clinician".equals(principal.role())
+                ? "<p><a class=\"btn btn-primary\" href=\"/ward/orders/new\">Nueva orden</a></p>"
+                : "";
+        return layout("Órdenes de laboratorio", "orders", principal, csrf, notice, form + """
+                <section class="card"><table>
+                  <thead><tr><th>Orden</th><th>Paciente</th><th>Prueba</th><th>Fecha</th><th>Estado</th><th>Intercambio</th></tr></thead>
+                  <tbody>%s</tbody></table></section>
+                """.formatted(rows));
+    }
+
+    static String orderForm(WardPrincipal principal, String csrf, String notice, List<Map<String, Object>> patients, List<Map<String, Object>> episodes) {
+        StringBuilder people = new StringBuilder();
+        for (Map<String, Object> patient : patients) {
+            people.append("<option value=\"").append(esc(String.valueOf(patient.get("patient_id")))).append("\">")
+                    .append(esc(String.valueOf(patient.get("given_name")))).append(" ")
+                    .append(esc(String.valueOf(patient.get("family_name")))).append("</option>");
+        }
+        StringBuilder stays = new StringBuilder("<option value=\"\">Sin episodio</option>");
+        for (Map<String, Object> episode : episodes) {
+            stays.append("<option value=\"").append(esc(String.valueOf(episode.get("episode_id")))).append("\">")
+                    .append(esc(String.valueOf(episode.get("episode_id")))).append("</option>");
+        }
+        return layout("Nueva orden de laboratorio", "orders", principal, csrf, notice, """
+                <form method="post" action="/ward/orders">
+                  <input type="hidden" name="csrf" value="%s">
+                  <label>Paciente <select name="patientId" required>%s</select></label>
+                  <label>Episodio <select name="episodeId">%s</select></label>
+                  <label>Prueba <select name="testCode" required><option value="718-7">Hemoglobina (718-7)</option></select>
+                    <span class="help">Código ya usado por el laboratorio. La unidad de la demostración es g/dL.</span></label>
+                  <label>Indicación sintética <input name="indication" maxlength="200" required></label>
+                  <label>Fecha solicitada <input name="requestedOn" type="date" required></label>
+                  <button class="btn btn-primary" type="submit">Guardar y enviar</button>
+                </form>
+                """.formatted(esc(csrf), people, stays));
+    }
+
+    static String orderDetail(
+            WardPrincipal principal,
+            String csrf,
+            String notice,
+            LabOrderView order,
+            Map<String, Object> context,
+            CriticalHemoglobinRule.Reading reading,
+            String reportError,
+            Map<String, Object> acknowledgement) {
+        String episode = text(context.get("episode_id"));
+        String indication = text(context.get("indication"));
+        String result = reading.value().isBlank()
+                ? (reportError.isBlank() ? "El resultado todavía no está disponible." : reportError)
+                : reading.value() + " " + reading.unit();
+        String alert = reading.critical()
+                ? "Regla de simulación " + CriticalHemoglobinRule.ID + " " + CriticalHemoglobinRule.VERSION
+                + ". El valor está por debajo de 7.0 g/dL."
+                : "Esta lectura no activa la regla de simulación.";
+        String proposal = text(context.get("proposal_summary"));
+        String task = acknowledgement == null
+                ? "Sin tarea de reconocimiento."
+                : text(acknowledgement.get("title")) + " · " + taskStatus(text(acknowledgement.get("status")));
+        String phase = text(context.get("proposal_phase"));
+        if (acknowledgement != null && "acknowledged".equals(text(acknowledgement.get("status")))) {
+            phase = "APPROVED";
+        }
+        boolean clinician = "clinician".equals(principal.role());
+        String send = clinician && !"submitted".equals(order.localStatus())
+                ? form("/ward/orders/" + order.orderId() + "/submission", csrf, "<button class=\"btn btn-primary\" type=\"submit\">Enviar orden</button>")
+                : "";
+        String prepare = clinician && reading.critical() && order.destinationOrderId() != null
+                ? form("/ward/orders/" + order.orderId() + "/preparation", csrf, "<button class=\"btn btn-teal\" type=\"submit\">Preparar reconocimiento</button>")
+                : "";
+        String review = "";
+        if (clinician && context.get("proposal_id") != null && acknowledgement == null) {
+            review = form("/ward/orders/" + order.orderId() + "/decision", csrf,
+                    "<input type=\"hidden\" name=\"decision\" value=\"approved\"><button class=\"btn btn-primary\" type=\"submit\">Aprobar</button>")
+                    + form("/ward/orders/" + order.orderId() + "/decision", csrf,
+                    "<input type=\"hidden\" name=\"decision\" value=\"rejected\"><button class=\"btn btn-secondary\" type=\"submit\">Rechazar</button>");
+        }
+        String follow = "";
+        if (clinician && acknowledgement != null && "open".equals(acknowledgement.get("status"))) {
+            follow = form("/ward/orders/" + order.orderId() + "/acknowledgement", csrf, "<button class=\"btn btn-primary\" type=\"submit\">Registrar reconocimiento</button>")
+                    + form("/ward/orders/" + order.orderId() + "/escalation", csrf, "<button class=\"btn btn-secondary\" type=\"submit\">Escalamiento simulado</button>");
+        }
+        return layout("Orden " + order.orderId(), "orders", principal, csrf, notice, """
+                <section class="hero">
+                  <p class="kicker">Laboratorio</p>
+                  <h1>%s</h1>
+                  <div class="meta"><span class="status">%s</span><span class="chip">%s</span><span class="chip">LIS %s</span></div>
+                </section>
+                <section class="grid">
+                  <article class="card"><h2>Orden</h2>
+                    <p>Paciente %s</p><p>Episodio %s</p><p>Indicación %s</p><p>Prueba %s</p></article>
+                  <article class="card"><h2>Resultado</h2><p>%s</p><p>%s</p></article>
+                </section>
+                <section class="card"><h2>Propuesta</h2><p>%s</p><p class="muted">Protocolos %s</p><div class="actions">%s%s%s%s</div></section>
+                <section class="card"><h2>Tarea y auditoría</h2><p>%s</p>
+                  <details class="tech"><summary>Trazabilidad</summary>
+                    <p>Correlación %s</p><p>Fase %s</p><p>Propuesta %s</p>
+                  </details></section>
+                """.formatted(
+                esc(order.testDescription()),
+                esc(orderStatus(order.localStatus())),
+                esc(order.patientId()),
+                esc(order.destinationOrderId() == null ? "sin correlación" : order.destinationOrderId()),
+                esc(order.patientId()),
+                esc(episode.isBlank() ? "No vinculado" : episode),
+                esc(indication.isBlank() ? "Sin indicación" : indication),
+                esc(order.testCode()),
+                esc(result),
+                esc(alert),
+                esc(proposal.isBlank() ? "El agente todavía no preparó una propuesta." : proposal),
+                esc(text(context.get("protocol_ids")).isBlank() ? "sin cita" : text(context.get("protocol_ids"))),
+                send, prepare, review, follow,
+                esc(task),
+                esc(order.correlationId() == null ? "pendiente" : order.correlationId()),
+                esc(phaseLabel(phase)),
+                esc(text(context.get("proposal_id")).isBlank() ? "sin identificador" : text(context.get("proposal_id")))));
+    }
+
+    private static String orderStatus(String status) {
+        return switch (status) {
+            case "recorded" -> "Registrada";
+            case "submitted" -> "Enviada";
+            case "failed" -> "No enviada";
+            default -> status;
+        };
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String taskStatus(String status) {
+        return switch (status) {
+            case "open" -> "pendiente";
+            case "acknowledged" -> "reconocida";
+            case "escalated" -> "escalada";
+            default -> status;
+        };
+    }
+
+    private static String phaseLabel(String phase) {
+        return switch (phase) {
+            case "" -> "sin fase";
+            case "PENDING_REVIEW" -> "Pendiente de revisión";
+            case "APPROVED" -> "Aprobada";
+            case "REJECTED" -> "Rechazada";
+            default -> phase;
+        };
+    }
+
     private static String nav(String active) {
         return link("patients", "/ward/patients", "Pacientes", active)
                 + link("episodes", "/ward/episodes", "Episodios", active)
+                + link("orders", "/ward/orders", "Órdenes", active)
                 + link("tasks", "/ward/tasks", "Tareas", active)
                 + link("audit", "/ward/audit", "Revisión y auditoría", active);
     }
@@ -459,7 +624,7 @@ final class WardView {
     private static String alert(String code) {
         if (code == null || code.isBlank()) return "";
         String tone = switch (code) {
-            case "version-conflicto", "no-autorizado", "coordinador-no-disponible", "entrada-invalida", "aprobacion-invalida", "sesion", "credenciales" -> "warning";
+            case "version-conflicto", "no-autorizado", "coordinador-no-disponible", "entrada-invalida", "aprobacion-invalida", "sesion", "credenciales", "orden-no-enviada", "agente-no-disponible", "rechazada" -> "warning";
             default -> "ok";
         };
         return "<p class=\"notice\" id=\"notice\" data-tone=\"" + tone + "\">" + esc(message(code)) + "</p>";
@@ -479,6 +644,15 @@ final class WardView {
             case "seguimiento-creado" -> "Las tareas de seguimiento autorizadas quedaron registradas.";
             case "episodio-cerrado" -> "La hospitalización quedó cerrada.";
             case "episodio-abierto" -> "La hospitalización quedó abierta.";
+            case "orden-registrada" -> "La orden quedó registrada.";
+            case "orden-enviada" -> "La orden quedó enviada al intercambio.";
+            case "orden-no-enviada" -> "El intercambio no aceptó la orden. El estado quedó como no enviada.";
+            case "agente-preparado" -> "La propuesta quedó pendiente de revisión humana.";
+            case "agente-no-disponible" -> "El agente no respondió. El evento crítico no se elimina.";
+            case "decision-aprobada" -> "La aprobación quedó registrada y la tarea interna fue creada.";
+            case "rechazada" -> "La propuesta fue rechazada. No se creó la tarea.";
+            case "reconocido" -> "El reconocimiento quedó registrado.";
+            case "escalado" -> "El escalamiento simulado quedó registrado. No se envió ningún mensaje.";
             case "version-conflicto" -> "La versión del episodio cambió. Actualice la ficha antes de continuar.";
             case "no-autorizado" -> "Esta operación no está autorizada para su rol.";
             case "coordinador-no-disponible" -> "El coordinador de alta no respondió. No se creó un borrador.";

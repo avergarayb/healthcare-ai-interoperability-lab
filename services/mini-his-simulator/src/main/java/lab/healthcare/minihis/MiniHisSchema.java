@@ -108,6 +108,30 @@ public class MiniHisSchema {
                     destination_organization_id TEXT
                 )
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS lab_order_context (
+                    order_id TEXT PRIMARY KEY,
+                    episode_id TEXT,
+                    indication TEXT,
+                    proposal_id TEXT,
+                    proposal_hash TEXT,
+                    proposal_summary TEXT,
+                    proposal_phase TEXT,
+                    protocol_ids TEXT
+                )
+                """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS lab_acknowledgement (
+                    order_id TEXT PRIMARY KEY,
+                    proposal_id TEXT NOT NULL,
+                    proposal_hash TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('open', 'acknowledged', 'escalated')),
+                    actor_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    acknowledged_at TEXT
+                )
+                """);
         addColumnIfAbsent("consultation", "care_class", "TEXT");
         addColumnIfAbsent("clinical_result", "status", "TEXT");
         backfillSyntheticCareClass();
