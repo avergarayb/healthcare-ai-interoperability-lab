@@ -100,7 +100,7 @@ public class ShowcaseController {
     }
 
     private List<ShowcaseCatalog.Step> steps(String demoId) {
-        LabOrderView order = latestOrder();
+        LabOrderView order = "demo-004".equals(demoId) ? criticalOrder() : latestOrder();
         Map<String, Object> context = order == null ? Map.of() : orders.context(order.orderId());
         Map<String, Object> task = order == null ? null : orders.acknowledgement(order.orderId()).orElse(null);
         boolean correlated = order != null && present(order.correlationId());
@@ -182,6 +182,19 @@ public class ShowcaseController {
     private LabOrderView latestOrder() {
         List<LabOrderView> all = orders.listAll();
         return all.isEmpty() ? null : all.get(0);
+    }
+
+    private LabOrderView criticalOrder() {
+        LabOrderView fallback = null;
+        for (LabOrderView order : orders.listAll()) {
+            if (fallback == null) {
+                fallback = order;
+            }
+            if (orders.acknowledgement(order.orderId()).isPresent() || reading(order).critical()) {
+                return order;
+            }
+        }
+        return fallback;
     }
 
     private Reading reading(LabOrderView order) {

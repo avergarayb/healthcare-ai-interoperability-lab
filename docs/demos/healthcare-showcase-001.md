@@ -30,7 +30,7 @@ Requisitos: Java 21, Maven, Python del AI Service y Docker solo para los perfile
 
 Puertos de la presentación local, todos en `127.0.0.1`:
 
-- Mini HIS `8095`, portal incluido.
+- Mini HIS `8095`, portal incluido. `18095` no es otro puerto del producto: solo se usó cuando `8095` ya estaba ocupado.
 - Mini LIS `8096`.
 - Intercambio `8081`. El conector de laboratorio, cuando la presentación usa HL7, es `hl7v2` como en el catálogo.
 - AI Service `8090`.
@@ -72,10 +72,12 @@ No es un producto hospitalario certificado. No hay conexión productiva con Epic
 ## Diagnóstico
 
 - Tarjeta «No disponible»: el proceso de esa fila no respondió en loopback.
-- «Perfil aislado»: DEMO-002 no está levantado o su salud no es local.
+- «Perfil aislado»: DEMO-002 no tiene una salud HTTP en loopback que responda 2xx. El proxy longitudinal publicado redirige a HTTPS con un nombre de laboratorio; esa comprobación no sigue redirecciones ni acepta su certificado de prueba. La revisión OIDC de Perú y España se abre en su propio perfil, no desde Mini HIS.
 - Orden «No enviada»: el intercambio no aceptó el envío. El protocolo tiene que ser `hl7v2` cuando la presentación usa HL7.
 - El auditor no puede preparar un episodio.
 
 ## Evidencia de esta entrega
 
-La prueba del portal comprueba las cinco tarjetas, el perfil aislado, el rechazo de una URL ajena, dos episodios consecutivos y el rechazo del auditor. La pasada de navegador abre el portal en loopback. No repite los volúmenes históricos ni presenta como ejecutado un perfil que estaba detenido.
+La prueba del portal comprueba las cinco tarjetas, el perfil aislado, el rechazo de una URL ajena, dos episodios consecutivos y el rechazo del auditor.
+
+La aceptación en navegador, sobre `127.0.0.1:8095`, recorrió el alta, el intercambio y el resultado crítico con los procesos locales. DEMO-004 elige la orden con alerta o reconocimiento cuando hay varias. DEMO-001 abre la ficha y no lanza `lab-result-summary-v1`: ese agente sigue en el perfil de catálogo, con un permiso nuevo por ejecución. DEMO-002 se comprobó en el perfil ya levantado de plataforma, con OIDC de Perú y de España, sin leer esos datos desde Mini HIS y sin repetir un permiso consumido. El portal sigue diciendo «Perfil aislado» mientras su salud HTTP local no responda.
