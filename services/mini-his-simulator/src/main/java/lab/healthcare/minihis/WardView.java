@@ -601,7 +601,8 @@ final class WardView {
                 + link("episodes", "/ward/episodes", "Episodios", active)
                 + link("orders", "/ward/orders", "Órdenes", active)
                 + link("tasks", "/ward/tasks", "Tareas", active)
-                + link("audit", "/ward/audit", "Revisión y auditoría", active);
+                + link("audit", "/ward/audit", "Revisión y auditoría", active)
+                + link("portal", "/showcase", "Portal", active);
     }
 
     private static String link(String key, String href, String label, String active) {
