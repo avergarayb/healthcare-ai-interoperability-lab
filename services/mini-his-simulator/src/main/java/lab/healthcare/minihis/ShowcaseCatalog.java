@@ -8,7 +8,10 @@ final class ShowcaseCatalog {
     private ShowcaseCatalog() {
     }
 
-    record Step(String label, String href, boolean done, String evidence) {
+    record Step(String label, String href, boolean done, String evidence, String openLabel) {
+        Step(String label, String href, boolean done, String evidence) {
+            this(label, href, done, evidence, "Pendiente");
+        }
     }
 
     record Card(String id, String name, String problem, String systems, String capabilities, String availability,

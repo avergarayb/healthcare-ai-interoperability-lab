@@ -60,7 +60,12 @@ class ShowcasePortalTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("no es el OIDC")));
         mvc.perform(get("/showcase/demo-004"))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Pendiente")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Consultar en Mini LIS")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("/ward/orders/new")));
+        mvc.perform(get("/showcase/demo-003"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Verificar en Federación")));
+        mvc.perform(get("/showcase/demo-001"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/showcase/demo-001/case")));
     }
 
     @Test
@@ -76,6 +81,15 @@ class ShowcasePortalTest {
                         .param("csrf", String.valueOf(auditor.getAttribute("csrf"))))
                 .andExpect(status().is3xxRedirection());
         assertThat(store.episodes()).hasSize(before + 2);
+        mvc.perform(post("/showcase/demo-001/case").session(auditor)
+                        .param("csrf", String.valueOf(auditor.getAttribute("csrf"))))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/ward/login?aviso=no-autorizado"));
+        MockHttpSession clinicianAgain = login("clinica");
+        mvc.perform(post("/showcase/demo-001/case").session(clinicianAgain)
+                        .param("csrf", String.valueOf(clinicianAgain.getAttribute("csrf"))))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrlPattern("/showcase/demo-001/case?aviso=*"));
     }
 
     private String prepare(MockHttpSession session) throws Exception {

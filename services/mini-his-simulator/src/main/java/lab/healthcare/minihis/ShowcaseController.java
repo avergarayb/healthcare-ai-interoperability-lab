@@ -35,12 +35,14 @@ public class ShowcaseController {
     private final String aiHealth;
     private final String longitudinalHealth;
     private final String lisBench;
+    private final LabSummaryClient summaries;
 
     public ShowcaseController(
             ShowcaseProbe probe,
             LabOrderStore orders,
             InpatientStore inpatient,
             ExchangeGateway exchange,
+            LabSummaryClient summaries,
             @Value("${mini-his.organization-id}") String organizationId,
             @Value("${showcase.lis-health}") String lisHealth,
             @Value("${showcase.fhir-health}") String fhirHealth,
@@ -57,6 +59,7 @@ public class ShowcaseController {
         this.aiHealth = aiHealth;
         this.longitudinalHealth = longitudinalHealth;
         this.lisBench = lisBench;
+        this.summaries = summaries;
     }
 
     @GetMapping(path = "/showcase", produces = MediaType.TEXT_HTML_VALUE)
@@ -108,12 +111,7 @@ public class ShowcaseController {
         EpisodeView episode = latestEpisode();
         String bench = probe.up(lisHealth) ? lisBench : "/showcase/demo-004";
         return switch (demoId) {
-            case "demo-001" -> List.of(
-                    step("Abrir el paciente sintético", "/ward/patients/MHS-PAT-001", false, "MHS-PAT-001"),
-                    step("Consultar la ficha", "/ward/patients/MHS-PAT-001", false, "La ficha no ejecuta el resumen."),
-                    step("Ejecutar el resumen", "/showcase/demo-001", false,
-                            "El resumen usa un permiso nuevo del perfil de catálogo. Esta pantalla no lo lanza."),
-                    step("Revisar la decisión", "/ward/audit", false, "La revisión de ese perfil no es esta sesión."));
+            case "demo-001" -> summarySteps();
             case "demo-002" -> List.of(
                     step("Abrir el perfil de Perú", "/showcase/demo-002", false, "org-pe-lab-demo queda en su propio despliegue."),
                     step("Abrir el perfil de España", "/showcase/demo-002", false, "org-es-lab-demo no comparte permisos con Perú."),
@@ -124,10 +122,12 @@ public class ShowcaseController {
                     step("Enviar el intercambio", "/ward/orders", correlated, correlated ? order.correlationId() : "Sin correlación."),
                     step("Ver el resultado correlacionado", order == null ? "/ward/orders" : "/ward/orders/" + order.orderId(),
                             reading.present(), reading.present() ? reading.summary() : "El resultado todavía no está en el intercambio."),
-                    step("Federación", "/showcase/demo-003", false, "La federación no se marca completa desde esta pantalla."));
+                    step("Federación", "/showcase/demo-003", false,
+                            "El portal no guarda el resultado de la federación.", "Verificar en Federación"));
             case "demo-004" -> List.of(
                     step("Crear orden", "/ward/orders/new", order != null, order == null ? "Sin orden." : order.orderId()),
-                    step("Procesar muestra", bench, false, "El estado de la muestra se comprueba en Mini LIS."),
+                    step("Procesar muestra", bench, false,
+                            "La muestra se registra en Mini LIS. Este portal no lee ese estado.", "Consultar en Mini LIS"),
                     step("Publicar resultado", order == null ? "/ward/orders" : "/ward/orders/" + order.orderId(),
                             reading.present(), reading.present() ? reading.summary() : "Sin resultado publicado."),
                     step("Consultar alerta", order == null ? "/ward/orders" : "/ward/orders/" + order.orderId(),
@@ -230,8 +230,30 @@ public class ShowcaseController {
                 String.valueOf(episode.get("documentation_status")));
     }
 
+    private List<ShowcaseCatalog.Step> summarySteps() {
+        Map<String, Object> summary = summaries.latest();
+        String href = present(summary.get("caseId"))
+                ? "/showcase/demo-001/case/" + summary.get("caseId") : "/showcase/demo-001/case";
+        boolean ran = "PENDING_REVIEW".equals(String.valueOf(summary.get("phase"))) || summary.get("decision") instanceof Map<?, ?>;
+        boolean decided = summary.get("decision") instanceof Map<?, ?> decision && present(decision.get("decision"));
+        String decisionText = "La revisión la registra el revisor de laboratorio.";
+        if (decided) {
+            Map<?, ?> decision = (Map<?, ?>) summary.get("decision");
+            decisionText = decision.get("decision") + " por " + decision.get("reviewer");
+        }
+        return List.of(
+                step("Abrir el paciente sintético", "/ward/patients/MHS-PAT-001", ran, "MHS-PAT-001"),
+                step("Consultar la ficha", href, ran, ran ? "El caso incluye la ficha sintética." : "Todavía no hay un caso de resumen."),
+                step("Ejecutar el resumen", href, ran, ran ? text(summary.get("caseId")) : "Cada caso crea un permiso nuevo."),
+                step("Revisar la decisión", href, decided, decisionText));
+    }
+
     private static ShowcaseCatalog.Step step(String label, String href, boolean done, String evidence) {
-        return new ShowcaseCatalog.Step(label, href, done, evidence == null || evidence.isBlank() ? "Sin evidencia." : evidence);
+        return step(label, href, done, evidence, "Pendiente");
+    }
+
+    private static ShowcaseCatalog.Step step(String label, String href, boolean done, String evidence, String openLabel) {
+        return new ShowcaseCatalog.Step(label, href, done, evidence == null || evidence.isBlank() ? "Sin evidencia." : evidence, openLabel);
     }
 
     private static boolean known(String demoId) {

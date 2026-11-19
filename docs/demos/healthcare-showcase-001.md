@@ -8,7 +8,7 @@ Mini HIS pinta las tarjetas y comprueba salud solo en loopback. Un destino que n
 
 | Demostración | Dónde se recorre | Dependencias para decir Disponible |
 | --- | --- | --- |
-| DEMO-001 Resumen | Ficha de `MHS-PAT-001` y el perfil de catálogo | Intercambio y AI Service |
+| DEMO-001 Resumen | `/showcase/demo-001/case` ejecuta `lab-result-summary-v1` | Intercambio y AI Service |
 | DEMO-002 Longitudinal | Perfil aislado Perú/España | Solo si responde su propia salud local |
 | DEMO-003 HL7/FHIR | Órdenes de Mini HIS y banco de Mini LIS | Mini LIS e intercambio |
 | DEMO-004 Resultado crítico | Mini HIS, Mini LIS y el agente ya existente | Mini LIS, intercambio y AI Service |
@@ -21,8 +21,9 @@ Si falta una dependencia, la tarjeta dice «No disponible». DEMO-002 dice «Per
 1. Portal `/showcase`.
 2. Cada tarjeta abre `/showcase/demo-00N`.
 3. Los pasos enlazan a `/ward/patients/MHS-PAT-001`, `/ward/orders/new`, `/ward/episodes` o al banco de Mini LIS cuando su salud responde.
-4. Un paso dice «Comprobado» solo si la base local tiene la orden, la correlación, el resultado, la propuesta, la tarea, el episodio o la documentación que ese paso nombra.
-5. Perú y España no se marcan comprobados desde esta base.
+4. Un paso dice «Comprobado» solo si la base local tiene la orden, la correlación, el resultado, la propuesta, la tarea, el episodio, la documentación o el caso de resumen que ese paso nombra.
+5. La federación de DEMO-003 dice «Verificar en Federación» y la muestra de DEMO-004 dice «Consultar en Mini LIS». El portal no guarda esos estados, así que no los marca comprobados.
+6. Perú y España no se marcan comprobados desde esta base. DEMO-002 permanece «Perfil aislado».
 
 ## Preparación del entorno
 
@@ -55,7 +56,7 @@ Detención: `hospital-down` o `infra/demo-deploy-001/down.sh` según el perfil. 
 
 Unos ocho minutos para las cinco tarjetas, o una sola demostración si la audiencia quiere profundidad.
 
-1. Resumen. El problema es reunir dos resultados. La ficha muestra al paciente. El texto del agente sale del perfil de catálogo, con un permiso nuevo, y una persona lo acepta.
+1. Resumen. El clínico abre `/showcase`, entra a DEMO-001 y prepara un caso. El servicio ejecuta `lab-result-summary-v1` con un permiso nuevo, lee la federación por MCP y deja el texto interceptado para que `hl7-reviewer` lo decida. Esa identidad es de desarrollo, no OIDC. El auditor no ejecuta ni decide.
 2. Longitudinal. Perú y España siguen separados. La diferencia la calcula el motor. La identidad es el OIDC de ese perfil.
 3. HL7. La orden nace en Mini HIS. La correlación es la evidencia. El mensaje bruto no se muestra como ficha clínica.
 4. Crítico. La orden, la muestra, la publicación y la regla `sim-hemoglobin-low` 1.0. Luego el agente y la aprobación de una tarea.
@@ -63,7 +64,7 @@ Unos ocho minutos para las cinco tarjetas, o una sola demostración si la audien
 
 ## Casos repetidos
 
-En la ficha de alta, «Preparar episodio» llama a la apertura ya existente y genera otro identificador. No reutiliza una autorización consumida y no borra episodios. El resumen del catálogo sigue creando un permiso nuevo por ejecución de `hospital`.
+En la ficha de alta, «Preparar episodio» llama a la apertura ya existente y genera otro identificador. No reutiliza una autorización consumida y no borra episodios. El resumen del portal crea un ledger y un permiso por caso. Repetir el mismo caso responde que el permiso ya se consumió. Un caso nuevo no reutiliza el anterior. El perfil de catálogo sigue creando su propio permiso por ejecución de `hospital`.
 
 ## Límites
 
@@ -80,4 +81,4 @@ No es un producto hospitalario certificado. No hay conexión productiva con Epic
 
 La prueba del portal comprueba las cinco tarjetas, el perfil aislado, el rechazo de una URL ajena, dos episodios consecutivos y el rechazo del auditor.
 
-La aceptación en navegador, sobre `127.0.0.1:8095`, recorrió el alta, el intercambio y el resultado crítico con los procesos locales. DEMO-004 elige la orden con alerta o reconocimiento cuando hay varias. DEMO-001 abre la ficha y no lanza `lab-result-summary-v1`: ese agente sigue en el perfil de catálogo, con un permiso nuevo por ejecución. DEMO-002 se comprobó en el perfil ya levantado de plataforma, con OIDC de Perú y de España, sin leer esos datos desde Mini HIS y sin repetir un permiso consumido. El portal sigue diciendo «Perfil aislado» mientras su salud HTTP local no responda.
+La aceptación en navegador, sobre `127.0.0.1:8095`, recorrió las cinco demostraciones con los procesos locales. DEMO-001 preparó el caso `sum-54038fb4201b`, leyó la federación con `read_federated_lab_chart` (correlación `FED-CC28D18D4893492E`) y dejó la revisión `7bde87d6-3632-44ed-8110-8fdc2e34c88b` en `approved` por `hl7-reviewer`, autenticador de desarrollo. El resultado vigente del laboratorio fue 6.2 g/dL y el histórico 12.8 g/dL quedó aparte. Repetir ese permiso respondió que ya estaba consumido. El caso `sum-80af8e0630fa` quedó pendiente, con otra correlación y otra revisión. El auditor no puede ejecutar ni decidir. Con el AI Service detenido, DEMO-001, DEMO-004 y DEMO-005 dijeron «No disponible» y la ficha dijo que el servicio no estaba disponible. DEMO-003 siguió disponible y su federación dice «Verificar en Federación». DEMO-004 mantiene la muestra como «Consultar en Mini LIS» y el resto del recorrido crítico comprobado. DEMO-002 sigue «Perfil aislado»; su recorrido OIDC ya se aceptó en el perfil de plataforma, sin repetir un permiso consumido.

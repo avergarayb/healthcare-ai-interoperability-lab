@@ -64,6 +64,13 @@ from app.followup_review_sqlite import SQLiteFollowUpReviewCaseRepository
 from app.gemini_provider import GeminiProvider
 from app.institutional_knowledge import attach_institutional_knowledge
 from app.institutional_knowledge_http import retrieve_institutional_knowledge_http
+from app.clinical_lab_summary.showcase_http import (
+    decide_summary,
+    latest_summary,
+    prepare_summary,
+    read_summary,
+    replay_summary,
+)
 from app.critical_lab.http import apply_critical, decide_critical, prepare_critical
 from app.inpatient_discharge.http import (
     authorize_follow_ups,
@@ -515,3 +522,30 @@ async def critical_lab_decision(request: Request, settings: Settings = Depends(g
 @app.post("/internal/critical-lab/apply")
 async def critical_lab_apply(request: Request, settings: Settings = Depends(get_settings)) -> Response:
     return apply_critical(request, settings, await request.body())
+
+
+@app.post("/internal/lab-summary/cases")
+async def lab_summary_prepare(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return prepare_summary(request, settings, await request.body())
+
+
+@app.get("/internal/lab-summary/cases/latest")
+def lab_summary_latest(request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return latest_summary(request, settings)
+
+
+@app.get("/internal/lab-summary/cases/{case_id}")
+def lab_summary_read(case_id: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return read_summary(request, settings, case_id)
+
+
+@app.post("/internal/lab-summary/cases/{case_id}/decision")
+async def lab_summary_decision(
+    case_id: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return decide_summary(request, settings, case_id, await request.body())
+
+
+@app.post("/internal/lab-summary/cases/{case_id}/replay")
+async def lab_summary_replay(
+    case_id: str, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    return replay_summary(request, settings, case_id, await request.body())
