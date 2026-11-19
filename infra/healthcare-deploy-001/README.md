@@ -45,12 +45,14 @@ sh scripts/restore-test.sh
 
 | Superficie | URL |
 |---|---|
-| Keycloak, solo realm y recursos | `https://127.0.0.1:18443` |
+| Keycloak, solo realm y recursos | `https://127.0.0.1:18543` |
 | Mini HIS | `https://127.0.0.1:18445` |
 | Mini LIS | `https://127.0.0.1:18444` |
 | AI Service | `https://127.0.0.1:18490` |
 
-El certificado es la autoridad interna de Caddy. El navegador de prueba debe confiarla de forma explícita. No se instala en el almacén del sistema.
+El certificado es la autoridad interna de Caddy. El navegador de prueba debe confiarla de forma explícita. No se instala en el almacén del sistema. El puerto `18443` pertenece a `demo-deploy-001`. Caddy escucha en `127.0.0.1` y `caddy-edge` reenvía las direcciones del contenedor para que el puerto publicado complete TLS.
+
+En Docker Desktop, el 19 de noviembre de 2026, las imágenes se construyeron y el perfil `hospital` llegó a salud real. El motor después dejó de responder en `192.168.65.7:2376`. Los recorridos de navegador y el restore de los datos integrados no se ejecutaron. La VM Ubuntu sigue bloqueada. El detalle está en `docs/deploy/healthcare-deploy-001.md`.
 
 ## Respaldo
 

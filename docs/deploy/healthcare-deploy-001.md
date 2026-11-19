@@ -27,7 +27,7 @@ Perú y España no comparten esta red. Siguen en `infra/demo-deploy-001`, con re
 
 | Servicio | Imagen | Puerto interno | Datos | Publicado |
 |---|---|---|---|---|
-| Caddy 2.10.2 | `caddy:2.10.2-alpine` | 18443, 18445, 18444, 18490 | volumen de la CA | `127.0.0.1` |
+| Caddy 2.10.2 | `caddy:2.10.2-alpine` | 18543, 18445, 18444, 18490 | volumen de la CA | `127.0.0.1` |
 | Keycloak 26.8.1 | imagen fijada por digest | 8080 | PostgreSQL | no |
 | PostgreSQL Keycloak | `postgres:16.10-alpine` | 5432 | volumen | no |
 | Mini HIS | Java 21, Temurin, jar existente | 8095 HTTP, SQLite | volumen | no |
@@ -36,7 +36,7 @@ Perú y España no comparten esta red. Siguen en `infra/demo-deploy-001`, con re
 | AI Service | Python 3.13 | 8090 | SQLite de ledger y revisión | no |
 | PostgreSQL Mini LIS | `postgres:16.10-alpine` | 5432 | volumen | no |
 
-El proxy de emisor es `socat` en Alpine, unido al espacio de red de Mini HIS o Mini LIS. Escucha `127.0.0.1:18443` y entrega el flujo a Caddy. El emisor del token y la URL que valida el servicio son la misma.
+El proxy de emisor es `socat` en Alpine, unido al espacio de red de Mini HIS o Mini LIS. Escucha `127.0.0.1:18543` y entrega el flujo a Caddy. El emisor del token y la URL que valida el servicio son la misma. Caddy ata sus sitios a `127.0.0.1`, porque un cliente que llega por la dirección del puente no completa el handshake del certificado de esa IP. `caddy-edge` reenvía las direcciones IPv4 del contenedor hacia ese loopback. El puerto de host `18443` pertenece a `demo-deploy-001`; este paquete usa `18543`.
 
 Variables de modelo: `CRITICAL_LAB_MODEL_MODE=intercepted` y `DISCHARGE_MODEL_MODE=intercepted`. El entrypoint del AI Service retira `GEMINI_API_KEY` y `OPENAI_API_KEY` si aparecen en el entorno.
 
@@ -133,10 +133,10 @@ Entorno: Windows, Docker Desktop, motor `linux` 29.4.0, 4 CPU y 5.788 GiB visibl
 | WSL Ubuntu | BLOCKED. No está instalada |
 | Motor de contenedores | Linux, sobre Docker Desktop. No es una VM Ubuntu |
 | Build del proxy de emisor | PASS. Imagen `healthcare-deploy-loopback-proxy:0.1.0` desde Alpine 3.22.1 |
-| Builds de Mini HIS, Mini LIS, intercambio y AI | No ejecutados |
+| Builds de Mini HIS, Mini LIS, intercambio y AI | PASS en la continuación |
 | Compose y puertos loopback | PASS. `scripts/verify.sh` |
 | Red interna de prueba | PASS. El contenedor de la red alcanzó a su vecino y no abrió `1.1.1.1:443` |
-| OIDC, HTTPS de navegador y DEMO-001 a DEMO-005 | BLOCKED. El perfil hospitalario no se arrancó |
+| OIDC, HTTPS de navegador y DEMO-001 a DEMO-005 | El perfil llegó a salud real y después el motor dejó de responder. Ver la continuación |
 | Backup del ensayo | PASS. 1218 bytes, SHA-256 `4642ccbfb07269f187927890318e13844a8470e62f2db896cdbf75dd22a8239d` |
 | Restauración aislada | PASS. 15 segundos. Marcador `synthetic-order-kept` en PostgreSQL y en la copia SQLite |
 | Rollback | PASS del ensayo sobre un volumen nuevo. No se revirtió una migración Flyway en un volumen en uso |
@@ -144,5 +144,13 @@ Entorno: Windows, Docker Desktop, motor `linux` 29.4.0, 4 CPU y 5.788 GiB visibl
 | Egress de los servicios clínicos | No observado |
 | Cifrado de respaldos | No. Solo quedan fuera de Git |
 
-El estado de la entrega es **PARTIAL**. Falta una VM Ubuntu, la construcción de las imágenes de aplicación, el arranque del perfil y los cinco recorridos.
+## Continuación: integración en Docker Desktop
+
+Se construyeron las cuatro imágenes de aplicación y el proxy, todas `linux/amd64`, salida 0. Mini HIS tardó 46 s y pesa 155641870 bytes. Mini LIS tardó 42 s y pesa 147248975 bytes. El intercambio tardó 80 s y pesa 203980689 bytes. AI Service tardó 2 s sobre caché y pesa 84978196 bytes. El proxy tardó 3 s, pesa 4344951 bytes y su usuario es `proxy`. Las imágenes Java y la de AI declaran usuario `root`: es el Dockerfile existente, sin cambio de lógica clínica. Ningún Dockerfile copia `.env` ni secretos.
+
+Antes de arrancar, `docker stats` sumaba unos 4269 MiB de 5927 MiB. El mayor consumidor ajeno era `careflow-local-control-plane`, unos 2,58 GiB. No se detuvo. El perfil `hospital` llegó a healthcheck sano: Keycloak y sus dos PostgreSQL, Mini LIS, intercambio, Mini HIS y AI Service. Caddy estaba sano. Una sonda HTTPS con la raíz de este paquete, sin desactivar la validación, obtuvo 200 en `https://127.0.0.1:18543/realms/hospital-lab/.well-known/openid-configuration` y 404 en `/admin`. Mini HIS respondió 200 en `/ward/login`. Mini LIS en `/bench/orders` redirigió al emisor.
+
+Después el motor dejó de ser alcanzable. El registro de Docker Desktop repite `connect tcp 192.168.65.7:2376: no route to host`. Un ping a esa dirección agotó el tiempo. `vmmemWSL` ocupaba 4161–4336 MiB. El handshake TLS del host hacia los cuatro puertos publicados quedó en `TimeoutError`. No se reinició Docker Desktop: eso habría detenido los proyectos que debían conservarse. No se ejecutaron el navegador, DEMO-001 a DEMO-005, el respaldo de los almacenes reales, la restauración aislada de esos datos, el rollback de este perfil ni el egress de los contenedores clínicos durante un recorrido. El ensayo de 1218 bytes sigue siendo el único restore demostrado. Los respaldos no están cifrados.
+
+La VM Ubuntu independiente sigue **BLOCKED**. No se instaló. El estado de la entrega sigue **PARTIAL**. Para terminar los recorridos hace falta que el motor de 5,8 GiB vuelva a enrutar, con margen además de los proyectos ya residentes. Un fallo de memoria o de ruta del motor no es un defecto de la lógica clínica.
 
