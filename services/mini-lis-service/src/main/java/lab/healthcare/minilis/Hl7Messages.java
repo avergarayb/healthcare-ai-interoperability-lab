@@ -136,6 +136,10 @@ public final class Hl7Messages {
     }
 
     public synchronized String oml(OmlPayload payload) {
+        return oml(payload, "");
+    }
+
+    public synchronized String oml(OmlPayload payload, String identifierSystem) {
         try {
             ca.uhn.hl7v2.model.v251.message.OML_O21 message = new ca.uhn.hl7v2.model.v251.message.OML_O21();
             message.initQuickstart("OML", "O21", "P");
@@ -152,6 +156,10 @@ public final class Hl7Messages {
             terser.set("/MSH-12", VERSION);
             terser.set("/MSH-18", "UNICODE UTF-8");
             setPatient(terser, "/PATIENT/PID", payload.organizationId(), payload.externalPatientId(), payload.familyName(), payload.givenName(), payload.birthDate(), payload.administrativeSex());
+            if (identifierSystem != null && !identifierSystem.isBlank()) {
+                terser.set("/PATIENT/PID-3-4-2", identifierSystem);
+                terser.set("/PATIENT/PID-3-4-3", "URI");
+            }
             terser.set("/ORDER/ORC-1", "NW");
             terser.set("/ORDER/ORC-2-1", payload.placerOrderId());
             terser.set("/ORDER/ORC-21-10", payload.organizationId());
@@ -328,6 +336,48 @@ public final class Hl7Messages {
         ca.uhn.hl7v2.model.v251.message.ORU_R01 oru = new ca.uhn.hl7v2.model.v251.message.ORU_R01();
         oru.initQuickstart("ORU", "R01", "P");
         return oru;
+    }
+
+    public synchronized String encode(Message message) {
+        try {
+            return parser.encode(message);
+        } catch (Exception ex) {
+            throw new IllegalStateException("HL7 message could not be encoded");
+        }
+    }
+
+    public static String assigningOrganization(Terser terser, String pidPrefix) {
+        String namespace = value(terser, pidPrefix + "-3-4-1");
+        return namespace.isEmpty() ? value(terser, pidPrefix + "-3-4") : namespace;
+    }
+
+    /**
+     * CX.4 carries the assigning authority. CX.10 stays an agency or department.
+     * An empty result means the sender did not assert an identifier system.
+     * Null means the authority and a legacy system disagree or the universal id is not a URI.
+     */
+    public static String patientIdentifierSystem(Terser terser, String pidPrefix) {
+        String universalId = value(terser, pidPrefix + "-3-4-2");
+        String universalType = value(terser, pidPrefix + "-3-4-3");
+        String agency = value(terser, pidPrefix + "-3-10");
+        boolean legacySystem = systemUri(agency);
+        if (!universalId.isEmpty()) {
+            if (!"URI".equals(universalType) || !systemUri(universalId) || (legacySystem && !universalId.equals(agency))) {
+                return null;
+            }
+            return universalId;
+        }
+        if (!universalType.isEmpty()) {
+            return null;
+        }
+        return legacySystem ? agency : "";
+    }
+
+    private static boolean systemUri(String value) {
+        return value != null
+                && value.length() <= 200
+                && value.startsWith("https://")
+                && value.chars().noneMatch(Character::isWhitespace);
     }
 
     public static String value(Terser terser, String path) {

@@ -82,7 +82,7 @@ Mini HIS usa el sistema `https://lab.local/mini-his/patient` y el valor del iden
 
 La federación de una fuente que no es la del llamador solo resuelve `exchange_patient_link`. El intercambio escribe esa fila al aceptar una orden: sistema y valor del emisor, y el identificador lógico del destino. Sin una orden aceptada no hay fila, el resultado es `identity_unresolved` y Mini LIS no se consulta. Dos coincidencias no eligen un paciente y no escriben enlace. Un paciente resuelto sin recursos clínicos es `complete` con `resourceCount` 0; eso no es una identidad ausente.
 
-HL7 lleva el valor en `PID-3-1`, la organización en `PID-3-4` y el sistema en `PID-3-10` cuando el emisor lo conoce. Si `PID-3-10` falta, una coincidencia previa de organización y valor se reutiliza; dos coincidencias rechazan el mensaje. Un paciente nuevo sin sistema queda en el sistema de la organización del laboratorio, no en un sistema ajeno.
+HL7 lleva el valor en `PID-3-1` y la autoridad asignadora en `PID-3-4`: la organización en `PID-3-4-1`, el sistema en `PID-3-4-2` y el tipo `URI` en `PID-3-4-3`. `PID-3-10` sigue siendo la agencia o el departamento y no identifica al paciente. Sin sistema, una fila se reutiliza solo si ya estaba guardada con el sistema de la organización del laboratorio. Una única fila de otro emisor no se vincula. Un paciente nuevo sin sistema queda en el sistema de la organización del laboratorio, no en un sistema ajeno.
 
 `V6__patient_identifier_system.sql` añade la columna. Las filas de semilla que ya existían recibieron el sistema de su organización.
 

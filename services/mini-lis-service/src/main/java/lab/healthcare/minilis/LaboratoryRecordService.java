@@ -272,6 +272,9 @@ public class LaboratoryRecordService {
         if (system == null || system.isBlank()) {
             ExternalPatient sole = only(searchPatients(order.organizationId(), order.externalPatientId()));
             if (sole != null) {
+                if (!organizationSystem(order.organizationId()).equals(sole.identifierSystem())) {
+                    throw MiniLisException.invalidRequest();
+                }
                 return sole;
             }
             system = organizationSystem(order.organizationId());
