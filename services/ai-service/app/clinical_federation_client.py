@@ -77,6 +77,7 @@ class ClinicalFederationClient:
         self.sources = sources
         self._timeout = timeout_seconds
         self._http = http_client
+        self.last_correlation_id = ""
 
     @classmethod
     def from_settings(
@@ -156,4 +157,5 @@ class ClinicalFederationClient:
             parsed.get("status"),
             len(parsed["sources"]),
         )
+        self.last_correlation_id = str(parsed.get("correlationId") or correlation_id)
         return parsed
