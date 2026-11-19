@@ -64,28 +64,49 @@ public final class MiniLisExchangeConnector implements OrderDestination, ResultS
 
     @Override
     public String resolvePatient(String requestingOrganizationId, PatientIdentity identity) {
+        String system = identity.identifierSystem();
         String query = "/patients?organizationId=" + encode(requestingOrganizationId)
-                + "&externalId=" + encode(identity.identifierValue());
+                + "&externalId=" + encode(identity.identifierValue())
+                + "&identifierSystem=" + encode(system);
         HttpResult found = send("GET", query, null);
-        if (found.status() == 200 && found.body().isArray() && !found.body().isEmpty()) {
-            return found.body().get(0).path("patientId").asText();
+        if (found.status() != 200) {
+            throw ExchangeException.unavailable();
+        }
+        if (ambiguous(found.body(), system)) {
+            throw ExchangeException.rejected();
+        }
+        String selected = selectPatientId(found.body(), system);
+        if (selected != null) {
+            return selected;
         }
         ObjectNode body = json.createObjectNode();
         body.put("organizationId", requestingOrganizationId);
         body.put("externalId", identity.identifierValue());
+        body.put("identifierSystem", system);
         body.put("familyName", identity.familyName());
         body.put("givenName", identity.givenName());
         body.put("birthDate", identity.birthDate().toString());
         body.put("administrativeSex", identity.administrativeSex());
         HttpResult created = send("POST", "/patients", body);
         if (created.status() == 201) {
-            return created.body().path("patientId").asText();
+            String createdId = created.body().path("patientId").asText("");
+            if (system.equals(created.body().path("identifierSystem").asText()) && !createdId.isBlank()) {
+                return createdId;
+            }
+            throw ExchangeException.rejected();
         }
         if (created.status() == 409) {
             HttpResult again = send("GET", query, null);
-            if (again.status() == 200 && again.body().isArray() && !again.body().isEmpty()) {
-                return again.body().get(0).path("patientId").asText();
+            if (again.status() == 200 && ambiguous(again.body(), system)) {
+                throw ExchangeException.rejected();
             }
+            String retry = selectPatientId(again.body(), system);
+            if (retry != null) {
+                return retry;
+            }
+        }
+        if (created.status() == 400) {
+            throw ExchangeException.rejected();
         }
         throw ExchangeException.unavailable();
     }
@@ -168,6 +189,35 @@ public final class MiniLisExchangeConnector implements OrderDestination, ResultS
             }
             throw ExchangeException.unavailable();
         }
+    }
+
+    static String selectPatientId(JsonNode body, String identifierSystem) {
+        if (body == null || !body.isArray() || identifierSystem == null || identifierSystem.isBlank()) {
+            return null;
+        }
+        String id = null;
+        int matches = 0;
+        for (JsonNode node : body) {
+            if (!identifierSystem.equals(node.path("identifierSystem").asText())) {
+                continue;
+            }
+            matches++;
+            id = node.path("patientId").asText("");
+        }
+        return matches == 1 && !id.isBlank() ? id : null;
+    }
+
+    static boolean ambiguous(JsonNode body, String identifierSystem) {
+        if (body == null || !body.isArray() || identifierSystem == null || identifierSystem.isBlank()) {
+            return false;
+        }
+        int matches = 0;
+        for (JsonNode node : body) {
+            if (identifierSystem.equals(node.path("identifierSystem").asText())) {
+                matches++;
+            }
+        }
+        return matches > 1;
     }
 
     private static String encode(String value) {

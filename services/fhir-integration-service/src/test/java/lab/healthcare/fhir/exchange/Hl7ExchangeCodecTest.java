@@ -43,7 +43,12 @@ class Hl7ExchangeCodecTest {
         assertThat(Hl7Messages.value(parsed.terser(), "/ORDER/ORC-21-10")).isEqualTo("org-mini-his");
         assertThat(Hl7Messages.value(parsed.terser(), "/ORDER/ORC-21-1")).isEmpty();
         assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT/PID-3-1")).isEqualTo("MHS-PAT-001");
-        assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT/PID-3-4")).isEqualTo("org-mini-his");
+        assertThat(Hl7Messages.assigningOrganization(parsed.terser(), "/PATIENT/PID")).isEqualTo("org-mini-his");
+        assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT/PID-3-4-2")).isEqualTo("https://lab.local/mini-his/patient");
+        assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT/PID-3-4-3")).isEqualTo("URI");
+        assertThat(Hl7Messages.patientIdentifierSystem(parsed.terser(), "/PATIENT/PID"))
+                .isEqualTo("https://lab.local/mini-his/patient");
+        assertThat(Hl7Messages.value(parsed.terser(), "/PATIENT/PID-3-10")).isEmpty();
         assertThat(Hl7Messages.value(parsed.terser(), "/ORDER/OBSERVATION_REQUEST/OBR-4-1")).isEqualTo("GLU");
         assertThat(Hl7Messages.value(parsed.terser(), "/ORDER/OBSERVATION_REQUEST/OBR-4-2")).isEqualTo("Glucose & load");
         assertThat(er7).contains("\\T\\");

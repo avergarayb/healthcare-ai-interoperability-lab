@@ -89,7 +89,7 @@ An audit failure is fail-closed at this boundary. Failure to initialize or valid
 
 On the caller source, the connector searches that exact identifier system and value. Zero patients is `identity_unresolved`. The service does not search by name, birth date, or text similarity.
 
-On another source, the only correspondence is `exchange_patient_link`: caller system, identifier system, identifier value, destination system, destination logical id. The exchange writes that row when it accepts an order. If the row is absent, the outcome is `identity_unresolved` and that connector is not called. A resolved patient with no clinical resources is `complete` and `resourceCount` 0. That is not an identity miss.
+On another source, the only correspondence is `exchange_patient_link`: caller system, identifier system, identifier value, destination system, destination logical id. The exchange writes that row when it accepts an order, and the destination patient is the one registered under that same organization, identifier system, and value. The same value under another system does not match. Two matches do not choose a patient, no link is written, and a later read stays `identity_unresolved`. If the row is absent, the outcome is `identity_unresolved` and that connector is not called. A resolved patient with no clinical resources is `complete` and `resourceCount` 0. That is not an identity miss.
 
 The link is directional. A Mini LIS identifier does not by itself resolve a Mini HIS patient.
 

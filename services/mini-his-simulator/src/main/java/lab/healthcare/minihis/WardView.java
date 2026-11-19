@@ -20,6 +20,28 @@ final class WardView {
     }
 
     static String login(String notice) {
+        return login(notice, false);
+    }
+
+    static String login(String notice, boolean oidc) {
+        if (oidc) {
+            return """
+                    <!DOCTYPE html>
+                    <html lang="es"><head>%s<title>Ingreso</title></head>
+                    <body><a class="skip" href="#contenido">Saltar al contenido</a>
+                    <main class="login-wrap" id="contenido"><section class="card login-card">
+                      <p class="kicker">Healthcare Lab</p>
+                      <h1>Mini HIS</h1>
+                      <p class="muted">El ingreso de aceptación usa el proveedor OIDC del laboratorio. Esta página no acepta la clave local.</p>
+                      %s
+                      <p><a class="btn btn-primary" href="/oauth2/authorization/hospital">Continuar al proveedor</a></p>
+                    </section></main></body></html>
+                    """.formatted(head(), alert(notice));
+        }
+        return loginForm(notice);
+    }
+
+    private static String loginForm(String notice) {
         return """
                 <!DOCTYPE html>
                 <html lang="es"><head>%s<title>Ingreso</title></head>
@@ -119,6 +141,7 @@ final class WardView {
         String name = patient.get("given_name") + " " + patient.get("family_name");
         int version = ((Number) episode.get("version")).intValue();
         boolean clinician = clinician(principal);
+        boolean reviewer = "clinical-reviewer".equals(principal.role());
         Map<String, Object> checklist = map(episode.get("checklist"));
         boolean complete = Boolean.TRUE.equals(checklist.get("complete"));
         boolean wardOpen = rows(episode.get("tasks")).stream()
@@ -157,7 +180,7 @@ final class WardView {
                 evolution(episode, clinician, csrf, episodeId, version),
                 results(episode, clinician, csrf, episodeId, version),
                 tasksPanel(episode, clinician, csrf, episodeId, version),
-                preparation(episode, clinician, csrf, episodeId, version),
+                preparation(episode, clinician, reviewer, csrf, episodeId, version),
                 auditPanel(episode, clinician, csrf, episodeId, version));
         return layout(name, "episodes", principal, csrf, notice, body);
     }
@@ -285,7 +308,7 @@ final class WardView {
                 + rows + "</tbody></table>" + form + "</section>";
     }
 
-    private static String preparation(Map<String, Object> episode, boolean clinician, String csrf, String episodeId, int version) {
+    private static String preparation(Map<String, Object> episode, boolean clinician, boolean reviewer, String csrf, String episodeId, int version) {
         JsonNode proposal = proposal(episode.get("proposal"));
         String request = clinician ? form("/ward/episodes/" + episodeId + "/prepare", csrf,
                 "<button class=\"btn btn-primary\" type=\"submit\">Solicitar preparación</button>") : "";
@@ -308,7 +331,7 @@ final class WardView {
         boolean accepted = "accepted".equals(String.valueOf(map(episode.get("proposal")).get("checklist_complete")))
                 || "accepted".equals(String.valueOf(episode.get("documentation_status")));
         String review = "";
-        if (clinician && "proposed".equals(episode.get("documentation_status"))) {
+        if (reviewer && "proposed".equals(episode.get("documentation_status"))) {
             review = form("/ward/episodes/" + episodeId + "/decision", csrf, """
                     <div class="actions">
                       <button class="btn btn-primary" name="decision" value="approved" type="submit">Aprobar borrador</button>
@@ -417,10 +440,11 @@ final class WardView {
     }
 
     private static String layout(String title, String active, WardPrincipal principal, String csrf, String notice, String body) {
+        String mode = principal != null && "oidc".equals(principal.sessionMode()) ? "Sesión OIDC" : "Sesión local";
         String session = principal == null ? "" : """
-                <div class="session"><span>%s · %s · %s</span>%s</div>
+                <div class="session"><span>%s · %s · %s · %s</span>%s</div>
                 """.formatted(esc(roleLabel(principal.role())), esc(principal.userId()), esc(principal.organizationId()),
-                form("/ward/logout", csrf, "<button class=\"btn btn-secondary\" type=\"submit\">Cerrar sesión</button>"));
+                esc(mode), form("/ward/logout", csrf, "<button class=\"btn btn-secondary\" type=\"submit\">Cerrar sesión</button>"));
         return """
                 <!DOCTYPE html>
                 <html lang="es"><head>%s<title>%s</title></head><body>
@@ -510,6 +534,7 @@ final class WardView {
             phase = "APPROVED";
         }
         boolean clinician = "clinician".equals(principal.role());
+        boolean reviewer = "clinical-reviewer".equals(principal.role());
         String send = clinician && !"submitted".equals(order.localStatus())
                 ? form("/ward/orders/" + order.orderId() + "/submission", csrf, "<button class=\"btn btn-primary\" type=\"submit\">Enviar orden</button>")
                 : "";
@@ -517,7 +542,7 @@ final class WardView {
                 ? form("/ward/orders/" + order.orderId() + "/preparation", csrf, "<button class=\"btn btn-teal\" type=\"submit\">Preparar reconocimiento</button>")
                 : "";
         String review = "";
-        if (clinician && context.get("proposal_id") != null && acknowledgement == null) {
+        if (reviewer && context.get("proposal_id") != null && acknowledgement == null) {
             review = form("/ward/orders/" + order.orderId() + "/decision", csrf,
                     "<input type=\"hidden\" name=\"decision\" value=\"approved\"><button class=\"btn btn-primary\" type=\"submit\">Aprobar</button>")
                     + form("/ward/orders/" + order.orderId() + "/decision", csrf,
@@ -759,7 +784,13 @@ final class WardView {
     }
 
     private static String roleLabel(String role) {
-        return "auditor".equals(role) ? "Auditor" : "Clínico";
+        return switch (role) {
+            case "auditor" -> "Auditor";
+            case "clinical-reviewer" -> "Revisor clínico";
+            case "operator" -> "Operador técnico";
+            case "clinician" -> "Clínico";
+            default -> "Sin privilegio clínico";
+        };
     }
 
     private static String timeRow(Object at, String title, String detail) {

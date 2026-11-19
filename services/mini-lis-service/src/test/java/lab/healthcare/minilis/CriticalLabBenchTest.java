@@ -100,7 +100,13 @@ class CriticalLabBenchTest {
 
     private LabOrder order(String testCode, String description, String externalPatient) {
         ExternalPatient patient = records.registerPatient(new NewPatient(
-                "org-mini-his", externalPatient, "Quispe", "Ana", LocalDate.parse("1984-03-12"), "female"));
+                "org-mini-his",
+                externalPatient,
+                "https://lab.local/mini-his/patient",
+                "Quispe",
+                "Ana",
+                LocalDate.parse("1984-03-12"),
+                "female"));
         return records.createOrder(new NewOrder(
                 patient.patientId(), "org-mini-his", "HIS-" + externalPatient, testCode, description,
                 OffsetDateTime.parse("2026-03-01T10:00:00Z")));

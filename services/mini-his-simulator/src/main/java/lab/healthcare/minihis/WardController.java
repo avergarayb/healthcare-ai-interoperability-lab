@@ -50,6 +50,8 @@ public class WardController {
     private final CriticalLabClient criticalLab;
     private final String organizationId;
     private final String password;
+    private final boolean oidcEnabled;
+    private final SecurityEvents events;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public WardController(
@@ -60,7 +62,9 @@ public class WardController {
             ExchangeGateway exchange,
             CriticalLabClient criticalLab,
             @Value("${mini-his.organization-id}") String organizationId,
-            @Value("${mini-his.inpatient.ward-password:}") String password) {
+            @Value("${mini-his.inpatient.ward-password:}") String password,
+            @Value("${mini-his.oidc.enabled:false}") boolean oidcEnabled,
+            SecurityEvents events) {
         this.store = store;
         this.coordinator = coordinator;
         this.orders = orders;
@@ -69,18 +73,26 @@ public class WardController {
         this.criticalLab = criticalLab;
         this.organizationId = organizationId;
         this.password = password == null ? "" : password;
+        this.oidcEnabled = oidcEnabled;
+        this.events = events;
     }
 
     @GetMapping(path = "/ward/login", produces = MediaType.TEXT_HTML_VALUE)
     public String loginPage(@RequestParam(name = "aviso", required = false) String notice) {
-        return WardView.login("credenciales".equals(notice) || "sesion".equals(notice) ? notice : "");
+        String shown = "credenciales".equals(notice) || "sesion".equals(notice) || "use-oidc".equals(notice) ? notice : "";
+        return WardView.login(shown, oidcEnabled);
     }
 
     @PostMapping("/ward/login")
     public ResponseEntity<Void> login(
             @RequestParam String username, @RequestParam String password, HttpServletRequest request) {
+        if (oidcEnabled) {
+            events.record("denied", "", organizationId, "login", "/ward/login", "oidc_required");
+            return redirect("/ward/login?aviso=use-oidc");
+        }
         WardPrincipal principal = principalFor(username, password);
         if (principal == null) {
+            events.record("denied", "", organizationId, "login", "/ward/login", "rejected");
             return redirect("/ward/login?aviso=credenciales");
         }
         HttpSession session = request.getSession(true);
@@ -93,7 +105,14 @@ public class WardController {
 
     @PostMapping("/ward/logout")
     public ResponseEntity<Void> logout(HttpServletRequest request) {
+        if (!csrfOk(request)) {
+            return redirect("/ward/patients");
+        }
         HttpSession session = request.getSession(false);
+        WardPrincipal current = principal(request);
+        if (current != null) {
+            events.record(current.userId(), current.role(), current.organizationId(), "logout", "/ward", "accepted");
+        }
         if (session != null) {
             session.invalidate();
         }
@@ -241,7 +260,7 @@ public class WardController {
     @PostMapping("/ward/episodes/{episodeId}/decision")
     public ResponseEntity<Void> decision(
             @PathVariable String episodeId, @RequestParam String decision, HttpServletRequest request) {
-        if (!clinician(request) || !csrfOk(request) || !Set.of("approved", "rejected", "changes_requested").contains(decision)) {
+        if (!reviewer(request) || !csrfOk(request) || !Set.of("approved", "rejected", "changes_requested").contains(decision)) {
             notice(request, "no-autorizado");
             return redirect("/ward/episodes/" + episodeId);
         }
@@ -258,10 +277,14 @@ public class WardController {
             body.put("episodeVersion", stored.get("episode_version"));
             body.put("decision", decision);
             body.put("actorId", principal(request).userId());
-            body.put("role", "clinician");
+            body.put("role", principal(request).role());
             body.put("organizationId", organizationId);
             body.put("idempotencyKey", "dec" + UUID.randomUUID().toString().replace("-", ""));
-            Map<String, Object> result = coordinator.decide(body);
+            if (oidcEnabled && identityToken(request).isBlank()) {
+                notice(request, "no-autorizado");
+                return redirect("/ward/episodes/" + episodeId);
+            }
+            Map<String, Object> result = coordinator.decide(body, identityToken(request));
             if ("approved".equals(result.get("outcome")) && Boolean.FALSE.equals(result.get("episodeClosed"))) {
                 store.markDocumentationAccepted(episodeId, principal(request).userId(), String.valueOf(stored.get("proposal_id")));
             }
@@ -290,7 +313,11 @@ public class WardController {
             body.put("actorId", principal(request).userId());
             body.put("role", "clinician");
             body.put("organizationId", organizationId);
-            Map<String, Object> allowed = coordinator.authorize(body);
+            if (oidcEnabled && identityToken(request).isBlank()) {
+                notice(request, "no-autorizado");
+                return redirect("/ward/episodes/" + episodeId);
+            }
+            Map<String, Object> allowed = coordinator.authorize(body, identityToken(request));
             if (!"authorized".equals(allowed.get("outcome")) && !"already_created".equals(allowed.get("outcome"))) {
                 notice(request, "aprobacion-invalida");
                 return redirect("/ward/episodes/" + episodeId);
@@ -470,7 +497,7 @@ public class WardController {
     @PostMapping("/ward/orders/{orderId}/decision")
     public ResponseEntity<Void> decideCritical(
             @PathVariable String orderId, @RequestParam String decision, HttpServletRequest request) {
-        if (!clinician(request) || !csrfOk(request) || (!"approved".equals(decision) && !"rejected".equals(decision))) {
+        if (!reviewer(request) || !csrfOk(request) || (!"approved".equals(decision) && !"rejected".equals(decision))) {
             notice(request, "no-autorizado");
             return redirect("/ward/orders/" + orderId);
         }
@@ -484,6 +511,10 @@ public class WardController {
             return redirect("/ward/orders/" + orderId);
         }
         try {
+            if (oidcEnabled && identityToken(request).isBlank()) {
+                notice(request, "no-autorizado");
+                return redirect("/ward/orders/" + orderId);
+            }
             Map<String, Object> recorded = criticalLab.decide(Map.of(
                     "proposalId", context.get("proposal_id"),
                     "proposalHash", context.get("proposal_hash"),
@@ -491,7 +522,7 @@ public class WardController {
                     "actorId", principal(request).userId(),
                     "role", principal(request).role(),
                     "organizationId", organizationId,
-                    "idempotencyKey", UUID.randomUUID().toString()));
+                    "idempotencyKey", UUID.randomUUID().toString()), identityToken(request));
             if (!"recorded".equals(recorded.get("outcome"))) {
                 notice(request, "aprobacion-invalida");
                 return redirect("/ward/orders/" + orderId);
@@ -609,9 +640,23 @@ public class WardController {
         return value instanceof WardPrincipal principal ? principal : null;
     }
 
-    private static boolean clinician(HttpServletRequest request) {
+    private boolean clinician(HttpServletRequest request) {
         WardPrincipal principal = principal(request);
-        return principal != null && "clinician".equals(principal.role()) && "org-mini-his".equals(principal.organizationId());
+        return principal != null && "clinician".equals(principal.role()) && organizationId.equals(principal.organizationId());
+    }
+
+    private boolean reviewer(HttpServletRequest request) {
+        WardPrincipal principal = principal(request);
+        if (principal == null || !organizationId.equals(principal.organizationId())) {
+            return false;
+        }
+        return oidcEnabled ? "clinical-reviewer".equals(principal.role()) : "clinician".equals(principal.role());
+    }
+
+    private static String identityToken(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        Object value = session == null ? null : session.getAttribute("hospitalAccessToken");
+        return value instanceof String token && token.chars().filter(ch -> ch == '.').count() == 2 ? token : "";
     }
 
     private static boolean csrfOk(HttpServletRequest request) {

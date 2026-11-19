@@ -1,0 +1,20 @@
+# Loopback only. The browser reaches Mini HIS and Mini LIS over HTTPS.
+# Internal ports stay on 127.0.0.1. Forwarded headers are set by this proxy alone.
+{
+	admin off
+	auto_https disable_redirects
+}
+https://127.0.0.1:8445 {
+	tls internal
+	reverse_proxy 127.0.0.1:8095 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host 127.0.0.1:8445
+	}
+}
+https://127.0.0.1:8444 {
+	tls internal
+	reverse_proxy 127.0.0.1:8096 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host 127.0.0.1:8444
+	}
+}

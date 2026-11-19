@@ -6,6 +6,7 @@ import java.time.OffsetDateTime;
 public record NewPatient(
         String organizationId,
         String externalId,
+        String identifierSystem,
         String familyName,
         String givenName,
         LocalDate birthDate,

@@ -252,6 +252,85 @@ class MiniLisHl7Test {
                 .andExpect(jsonPath("$.error").value("invalid_request"));
     }
 
+    @Test
+    void anOrderUsesTheAssigningAuthorityAndDoesNotBindAnotherIssuerByValue() throws Exception {
+        String hisSystem = "https://lab.local/mini-his/patient";
+        String otherSystem = "https://lab.local/other-system/patient";
+        String organizationSystem = "https://lab.local/mini-lis/organization/org-mini-his/patient";
+        mockMvc.perform(post("/patients")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Service-Token", TOKEN)
+                        .content("""
+                                {"organizationId":"org-mini-his","externalId":"CASE-PID","identifierSystem":"%s","familyName":"Quispe","givenName":"Ana","birthDate":"1984-03-12","administrativeSex":"female"}
+                                """.formatted(hisSystem)))
+                .andExpect(status().isCreated());
+
+        String linked = send(orderFor("MSG-PID-001", "MHS-LAB-PID-1", "CASE-PID", hisSystem));
+        assertThat(ackCode(linked)).isEqualTo("AA");
+        String hisPatient = field(linked, "/RESPONSE/PATIENT/PID-3-1");
+        mockMvc.perform(get("/patients/" + hisPatient).header("X-Service-Token", TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.identifierSystem").value(hisSystem))
+                .andExpect(jsonPath("$.externalId").value("CASE-PID"));
+
+        String other = send(orderFor("MSG-PID-002", "MHS-LAB-PID-2", "CASE-PID", otherSystem));
+        assertThat(ackCode(other)).isEqualTo("AA");
+        assertThat(field(other, "/RESPONSE/PATIENT/PID-3-1")).isNotEqualTo(hisPatient);
+
+        String unbound = send(orderFor("MSG-PID-003", "MHS-LAB-PID-3", "CASE-PID", ""));
+        assertThat(ackCode(unbound)).isEqualTo("AE");
+        assertThat(ackDetail(unbound)).isEqualTo("invalid_request");
+        mockMvc.perform(get("/orders")
+                        .param("requestingOrganizationId", "org-mini-his")
+                        .param("externalRequestId", "MHS-LAB-PID-3")
+                        .header("X-Service-Token", TOKEN))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/patients")
+                        .param("organizationId", "org-mini-his")
+                        .param("externalId", "CASE-PID")
+                        .header("X-Service-Token", TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+
+        String firstOmitted = send(orderFor("MSG-PID-004", "MHS-LAB-PID-4", "CASE-OMIT", ""));
+        assertThat(ackCode(firstOmitted)).isEqualTo("AA");
+        String omittedPatient = field(firstOmitted, "/RESPONSE/PATIENT/PID-3-1");
+        mockMvc.perform(get("/patients/" + omittedPatient).header("X-Service-Token", TOKEN))
+                .andExpect(jsonPath("$.identifierSystem").value(organizationSystem));
+        String secondOmitted = send(orderFor("MSG-PID-005", "MHS-LAB-PID-5", "CASE-OMIT", ""));
+        assertThat(ackCode(secondOmitted)).isEqualTo("AA");
+        assertThat(field(secondOmitted, "/RESPONSE/PATIENT/PID-3-1")).isEqualTo(omittedPatient);
+        String repeatedPlacer = send(orderFor("MSG-PID-009", "MHS-LAB-PID-4", "CASE-OMIT", ""));
+        assertThat(ackDetail(repeatedPlacer)).isEqualTo("duplicate");
+        assertThat(field(repeatedPlacer, "/RESPONSE/PATIENT/PID-3-1")).isEqualTo(omittedPatient);
+
+        String legacy = withField(orderFor("MSG-PID-006", "MHS-LAB-PID-6", "CASE-LEGACY", ""), "/PATIENT/PID-3-10", hisSystem);
+        String acceptedLegacy = send(legacy);
+        assertThat(ackCode(acceptedLegacy)).isEqualTo("AA");
+        mockMvc.perform(get("/patients/" + field(acceptedLegacy, "/RESPONSE/PATIENT/PID-3-1")).header("X-Service-Token", TOKEN))
+                .andExpect(jsonPath("$.identifierSystem").value(hisSystem));
+
+        String contradictory = withField(
+                orderFor("MSG-PID-007", "MHS-LAB-PID-7", "CASE-BOTH", hisSystem),
+                "/PATIENT/PID-3-10",
+                otherSystem);
+        assertThat(ackCode(send(contradictory))).isEqualTo("AE");
+        mockMvc.perform(get("/patients")
+                        .param("organizationId", "org-mini-his")
+                        .param("externalId", "CASE-BOTH")
+                        .header("X-Service-Token", TOKEN))
+                .andExpect(jsonPath("$.length()").value(0));
+
+        String department = withField(
+                orderFor("MSG-PID-008", "MHS-LAB-PID-8", "CASE-DEPT", hisSystem),
+                "/PATIENT/PID-3-10",
+                "LAB-CHEM");
+        String acceptedDepartment = send(department);
+        assertThat(ackCode(acceptedDepartment)).isEqualTo("AA");
+        mockMvc.perform(get("/patients/" + field(acceptedDepartment, "/RESPONSE/PATIENT/PID-3-1")).header("X-Service-Token", TOKEN))
+                .andExpect(jsonPath("$.identifierSystem").value(hisSystem));
+    }
+
     private String send(String er7) throws Exception {
         return MllpExchange.transact("127.0.0.1", server.port(), er7, Duration.ofSeconds(2), Duration.ofSeconds(5));
     }
@@ -264,6 +343,33 @@ class MiniLisHl7Test {
         } catch (Exception ex) {
             target.set("failed");
         }
+    }
+
+    private String orderFor(String controlId, String placer, String externalId, String identifierSystem) {
+        return messages.oml(new Hl7Messages.OmlPayload(
+                "FHIR-EXCHANGE",
+                "fhir-integration-service",
+                "MINI-LIS",
+                "org-mini-lis",
+                SECRET,
+                controlId,
+                "org-mini-his",
+                externalId,
+                "Quispe",
+                "Ana",
+                LocalDate.parse("1984-03-12"),
+                "female",
+                placer,
+                "GLU",
+                "Glucose",
+                "https://lab.local/mini-his/test",
+                OffsetDateTime.parse("2026-03-01T10:00:00Z")), identifierSystem);
+    }
+
+    private String withField(String er7, String path, String value) throws Exception {
+        Hl7Messages.ParsedMessage parsed = messages.parse(er7);
+        parsed.terser().set(path, value);
+        return messages.encode(parsed.message());
     }
 
     private String order(String controlId, String placer, String secret, String organization) {

@@ -7,6 +7,7 @@ from json import JSONDecodeError
 
 from fastapi.responses import JSONResponse
 
+from app.hospital_identity import gate
 from app.service_auth import authenticate
 
 from .graph import BlockedTransport, CriticalLabGraph, InterceptedTransport
@@ -33,9 +34,16 @@ def decide_critical(request, settings, raw, path=None):
     body = _body(raw)
     if body is None:
         return JSONResponse({"outcome": "invalid_approval"}, status_code=400)
+    gated = gate(request.headers, settings, {"clinical-reviewer"})
+    if isinstance(gated, dict):
+        return JSONResponse({"error": gated["error"]}, status_code=gated["status"])
+    if gated is None:
+        actor, role, organization = body.get("actorId"), body.get("role"), body.get("organizationId")
+    else:
+        actor, role, organization = gated.username, gated.role, gated.organization_id
     result = decide(
         _path(path), body.get("proposalId"), body.get("proposalHash"), body.get("decision"),
-        body.get("actorId"), body.get("role"), body.get("organizationId"), body.get("idempotencyKey"))
+        actor, role, organization, body.get("idempotencyKey"))
     return JSONResponse(result, status_code=200 if result["outcome"] == "recorded" else 409)
 
 

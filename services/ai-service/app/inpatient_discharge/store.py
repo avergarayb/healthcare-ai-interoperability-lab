@@ -3,6 +3,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from app.hospital_identity import persistent_actor
+
 
 def prepare(path, authorization_id, episode_id, version, proposal_hash, body):
     with _connect(path) as connection:
@@ -49,7 +51,7 @@ def decide(path, proposal_id, proposal_hash, episode_version, decision, actor_id
             _audit(connection, proposal_id, "decision", "invalid_approval", actor_id)
             connection.commit()
             return {"outcome": "invalid_approval", "episodeClosed": False}
-        if organization_id != "org-mini-his" or actor_id != "clinica":
+        if not persistent_actor(actor_id, organization_id):
             _audit(connection, proposal_id, "decision", "wrong_organization", actor_id)
             connection.commit()
             return {"outcome": "wrong_organization", "episodeClosed": False}
@@ -81,7 +83,7 @@ def authorize(path, proposal_id, proposal_hash, actor_id, organization_id, chart
             (proposal_id,)).fetchone()
         if row is None or row[0] != proposal_hash or row[3] != "approved":
             return {"outcome": "not_approved"}
-        if organization_id != "org-mini-his" or actor_id != "clinica":
+        if not persistent_actor(actor_id, organization_id):
             return {"outcome": "wrong_organization"}
         existing = connection.execute(
             "SELECT body_json FROM discharge_follow_up WHERE proposal_id = ?", (proposal_id,)).fetchone()

@@ -38,7 +38,7 @@ Puertos de la presentación local, todos en `127.0.0.1`:
 
 Esas direcciones se pueden sustituir con `SHOWCASE_LIS_HEALTH`, `SHOWCASE_FHIR_HEALTH`, `SHOWCASE_AI_HEALTH`, `SHOWCASE_LONGITUDINAL_HEALTH` y `SHOWCASE_LIS_BENCH`. Solo se aceptan URLs de loopback.
 
-La clave de la sesión de planta y los tokens de servicio salen del entorno. No se versionan. Usuarios de la sesión local: `clinica` opera y `auditor` consulta. No son OIDC.
+La aceptación enciende OIDC con `MINI_HIS_OIDC_ENABLED` y `MINI_HIS_OIDC_CLIENT_ENABLED`. La clave local queda solo con OIDC apagado y no sustituye esa aceptación. Los tokens de servicio salen del entorno y no se versionan.
 
 Perfiles:
 
@@ -56,7 +56,7 @@ Detención: `hospital-down` o `infra/demo-deploy-001/down.sh` según el perfil. 
 
 Unos ocho minutos para las cinco tarjetas, o una sola demostración si la audiencia quiere profundidad.
 
-1. Resumen. El clínico abre `/showcase`, entra a DEMO-001 y prepara un caso. El servicio ejecuta `lab-result-summary-v1` con un permiso nuevo, lee la federación por MCP y deja el texto interceptado para que `hl7-reviewer` lo decida. Esa identidad es de desarrollo, no OIDC. El auditor no ejecuta ni decide.
+1. Resumen. El clínico abre `/showcase`, entra a DEMO-001 y prepara un caso. El servicio ejecuta `lab-result-summary-v1` con un permiso nuevo y lee la federación por MCP. Con OIDC encendido, decide el revisor autenticado; `hl7-reviewer` solo existe con OIDC apagado. El auditor no ejecuta ni decide.
 2. Longitudinal. Perú y España siguen separados. La diferencia la calcula el motor. La identidad es el OIDC de ese perfil.
 3. HL7. La orden nace en Mini HIS. La correlación es la evidencia. El mensaje bruto no se muestra como ficha clínica.
 4. Crítico. La orden, la muestra, la publicación y la regla `sim-hemoglobin-low` 1.0. Luego el agente y la aprobación de una tarea.

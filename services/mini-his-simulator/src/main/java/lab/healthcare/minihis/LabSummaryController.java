@@ -29,16 +29,19 @@ public class LabSummaryController {
     private final LabOrderStore orders;
     private final LabSummaryClient summaries;
     private final String organizationId;
+    private final boolean oidcEnabled;
 
     public LabSummaryController(
             MiniHisStore patients,
             LabOrderStore orders,
             LabSummaryClient summaries,
-            @Value("${mini-his.organization-id}") String organizationId) {
+            @Value("${mini-his.organization-id}") String organizationId,
+            @Value("${mini-his.oidc.enabled:false}") boolean oidcEnabled) {
         this.patients = patients;
         this.orders = orders;
         this.summaries = summaries;
         this.organizationId = organizationId;
+        this.oidcEnabled = oidcEnabled;
     }
 
     @GetMapping(path = "/showcase/demo-001/case", produces = MediaType.TEXT_HTML_VALUE)
@@ -55,7 +58,10 @@ public class LabSummaryController {
             return redirect("/ward/login?aviso=no-autorizado");
         }
         try {
-            Map<String, Object> created = summaries.prepare(principal(request).userId());
+            if (oidcEnabled && identityToken(request).isBlank()) {
+                return redirect("/showcase/demo-001/case?aviso=unauthorized");
+            }
+            Map<String, Object> created = summaries.prepare(principal(request).userId(), identityToken(request));
             Object caseId = created.get("caseId");
             if (caseId instanceof String id && id.matches("sum-[0-9a-f]{12}")) {
                 return redirect("/showcase/demo-001/case/" + id);
@@ -73,7 +79,8 @@ public class LabSummaryController {
             return redirect("/ward/login");
         }
         try {
-            return ShowcaseView.summaryResult(summaries.read(caseId), clinician(request), csrf(request), safe(notice));
+            return ShowcaseView.summaryResult(
+                    summaries.read(caseId), reviewer(request), clinician(request), csrf(request), safe(notice));
         } catch (InpatientRejection ex) {
             return redirect("/showcase/demo-001/case?aviso=" + safe(ex.code()));
         }
@@ -81,14 +88,17 @@ public class LabSummaryController {
 
     @PostMapping("/showcase/demo-001/case/{caseId:sum-[0-9a-f]{12}}/decision")
     public ResponseEntity<Void> decide(@PathVariable String caseId, @RequestParam String decision, HttpServletRequest request) {
-        if (!clinician(request) || !csrfOk(request)) {
+        if (!reviewer(request) || !csrfOk(request)) {
             return redirect("/ward/login?aviso=no-autorizado");
         }
         if (!"approved".equals(decision) && !"rejected".equals(decision)) {
             return redirect("/showcase/demo-001/case/" + caseId + "?aviso=summary_rejected");
         }
+        if (oidcEnabled && identityToken(request).isBlank()) {
+            return redirect("/showcase/demo-001/case/" + caseId + "?aviso=unauthorized");
+        }
         try {
-            summaries.decide(caseId, decision, principal(request).userId());
+            summaries.decide(caseId, decision, principal(request).userId(), identityToken(request));
             return redirect("/showcase/demo-001/case/" + caseId);
         } catch (InpatientRejection ex) {
             return redirect("/showcase/demo-001/case/" + caseId + "?aviso=" + safe(ex.code()));
@@ -101,7 +111,7 @@ public class LabSummaryController {
             return redirect("/ward/login?aviso=no-autorizado");
         }
         try {
-            summaries.replay(caseId, principal(request).userId());
+            summaries.replay(caseId, principal(request).userId(), identityToken(request));
             return redirect("/showcase/demo-001/case/" + caseId + "?aviso=summary_rejected");
         } catch (InpatientRejection ex) {
             return redirect("/showcase/demo-001/case/" + caseId + "?aviso=" + safe(ex.code()));
@@ -137,6 +147,20 @@ public class LabSummaryController {
     private boolean clinician(HttpServletRequest request) {
         WardPrincipal principal = principal(request);
         return principal != null && "clinician".equals(principal.role());
+    }
+
+    private boolean reviewer(HttpServletRequest request) {
+        WardPrincipal principal = principal(request);
+        if (principal == null) {
+            return false;
+        }
+        return oidcEnabled ? "clinical-reviewer".equals(principal.role()) : "clinician".equals(principal.role());
+    }
+
+    private static String identityToken(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        Object value = session == null ? null : session.getAttribute("hospitalAccessToken");
+        return value instanceof String token && token.chars().filter(ch -> ch == '.').count() == 2 ? token : "";
     }
 
     private static String csrf(HttpServletRequest request) {

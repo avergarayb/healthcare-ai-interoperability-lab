@@ -49,7 +49,12 @@ class Hl7LabExchangeFlowTest {
     static void laboratory(DynamicPropertyRegistry registry) {
         startLaboratory();
         registry.add("server.port", () -> "0");
-        registry.add("spring.autoconfigure.exclude", () -> "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration");
+        // Mini HIS brings Spring Security onto this classpath. The exchange still requires its participant token.
+        registry.add("spring.autoconfigure.exclude", () -> String.join(",",
+                "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration",
+                "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration",
+                "org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration",
+                "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration"));
         registry.add("exchange.store-path", () -> Path.of(System.getProperty("java.io.tmpdir"), "exchange-hl7-" + System.nanoTime() + ".sqlite").toString());
         registry.add("exchange.connectors.mini-lis.protocol", () -> "hl7v2");
         registry.add("exchange.connectors.mini-lis.hl7.host", () -> "127.0.0.1");
@@ -92,7 +97,20 @@ class Hl7LabExchangeFlowTest {
                 "mini-his.organization-id", "org-mini-his",
                 "mini-his.exchange.base-url", "http://127.0.0.1:" + exchangePort,
                 "mini-his.exchange.service-token", HIS_TOKEN));
-        his = application.run("--server.port=0", "--server.address=127.0.0.1");
+        his = application.run(
+                "--server.port=0",
+                "--server.address=127.0.0.1",
+                "--mini-his.sqlite-path=" + database,
+                "--mini-his.organization-id=org-mini-his",
+                "--mini-his.exchange.base-url=http://127.0.0.1:" + exchangePort,
+                "--mini-his.exchange.service-token=" + HIS_TOKEN,
+                "--mini-his.oidc.enabled=false",
+                "--mini-his.oidc.client-enabled=false",
+                "--mini-his.oidc.acceptance=false",
+                "--showcase.lis-health=http://127.0.0.1:9/health",
+                "--showcase.fhir-health=http://127.0.0.1:9/health",
+                "--showcase.ai-health=http://127.0.0.1:9/health",
+                "--showcase.lis-bench=http://127.0.0.1:9/bench");
         int resultPort = destination.listenPort();
         HttpResponse<String> peer = http.send(
                 HttpRequest.newBuilder(URI.create(lisUrl + "/hl7/result-peer"))
@@ -126,6 +144,10 @@ class Hl7LabExchangeFlowTest {
         String orderId = created.path("orderId").asText();
         JsonNode submitted = send("POST", hisBase + "/lab-orders/" + orderId + "/submission", null, null);
         String lisOrderId = submitted.path("destination").path("orderId").asText();
+        JsonNode lisOrder = send("GET", lisUrl + "/orders/" + lisOrderId, null, LIS_TOKEN);
+        JsonNode lisPatient = send("GET", lisUrl + "/patients/" + lisOrder.path("patientId").asText(), null, LIS_TOKEN);
+        assertThat(lisPatient.path("externalId").asText()).isEqualTo("MHS-PAT-001");
+        assertThat(lisPatient.path("identifierSystem").asText()).isEqualTo("https://lab.local/mini-his/patient");
         assertThat(submitted.path("serviceRequest").path("resourceType").asText()).isEqualTo("ServiceRequest");
         assertThat(submitted.path("serviceRequest").toString()).doesNotContain("loinc");
         JsonNode repeated = send("POST", hisBase + "/lab-orders/" + orderId + "/submission", null, null);
@@ -250,7 +272,12 @@ class Hl7LabExchangeFlowTest {
         properties.put("mini-lis.hl7.shared-secret", SECRET);
         properties.put("mini-lis.hl7.bind-address", "127.0.0.1");
         application.setDefaultProperties(properties);
-        lis = application.run("--server.port=0", "--server.address=127.0.0.1");
+        lis = application.run(
+                "--server.port=0",
+                "--server.address=127.0.0.1",
+                "--mini-lis.service-token=" + LIS_TOKEN,
+                "--mini-lis.oidc.enabled=false",
+                "--mini-lis.oidc.client-enabled=false");
         lisUrl = "http://127.0.0.1:" + lis.getEnvironment().getProperty("local.server.port");
         lisHl7Port = lis.getBean(Hl7Server.class).port();
     }

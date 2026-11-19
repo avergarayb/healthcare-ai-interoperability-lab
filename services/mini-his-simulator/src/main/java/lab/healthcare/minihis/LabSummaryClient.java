@@ -42,25 +42,37 @@ public class LabSummaryClient {
     }
 
     public Map<String, Object> prepare(String actorId) {
+        return prepare(actorId, "");
+    }
+
+    public Map<String, Object> prepare(String actorId, String identityToken) {
         return post("/internal/lab-summary/cases", Map.of(
                 "role", "clinician",
                 "organizationId", "org-mini-his",
-                "actorId", actorId), Duration.ofSeconds(40));
+                "actorId", actorId), Duration.ofSeconds(40), identityToken);
     }
 
     public Map<String, Object> decide(String caseId, String decision, String actorId) {
+        return decide(caseId, decision, actorId, "");
+    }
+
+    public Map<String, Object> decide(String caseId, String decision, String actorId, String identityToken) {
         return post("/internal/lab-summary/cases/" + caseId(caseId) + "/decision", Map.of(
                 "role", "clinician",
                 "organizationId", "org-mini-his",
                 "actorId", actorId,
-                "decision", decision), Duration.ofSeconds(10));
+                "decision", decision), Duration.ofSeconds(10), identityToken);
     }
 
     public Map<String, Object> replay(String caseId, String actorId) {
+        return replay(caseId, actorId, "");
+    }
+
+    public Map<String, Object> replay(String caseId, String actorId, String identityToken) {
         return post("/internal/lab-summary/cases/" + caseId(caseId) + "/replay", Map.of(
                 "role", "clinician",
                 "organizationId", "org-mini-his",
-                "actorId", actorId), Duration.ofSeconds(40));
+                "actorId", actorId), Duration.ofSeconds(40), identityToken);
     }
 
     private Map<String, Object> get(String path, Duration timeout) {
@@ -75,11 +87,18 @@ public class LabSummaryClient {
     }
 
     private Map<String, Object> post(String path, Map<String, Object> body, Duration timeout) {
+        return post(path, body, timeout, "");
+    }
+
+    private Map<String, Object> post(String path, Map<String, Object> body, Duration timeout, String identityToken) {
         try {
-            HttpRequest request = base(path, timeout)
+            HttpRequest.Builder builder = base(path, timeout)
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
-                    .header("Content-Type", "application/json")
-                    .build();
+                    .header("Content-Type", "application/json");
+            if (identityToken != null && identityToken.chars().filter(ch -> ch == '.').count() == 2) {
+                builder.header("Authorization", "Bearer " + identityToken);
+            }
+            HttpRequest request = builder.build();
             return read(client.send(request, HttpResponse.BodyHandlers.ofString()));
         } catch (InpatientRejection ex) {
             throw ex;

@@ -21,12 +21,15 @@ Required:
 - `MSH-5` `MINI-LIS`, `MSH-6` `org-mini-lis`
 - `MSH-8` shared secret. A blank secret is rejected
 - `MSH-9` `OML^O21`, `MSH-10` message control id, `MSH-11` `P`, `MSH-12` `2.5.1`
-- `PID-3-1` patient identifier, `PID-3-4` requesting organization
+- `PID-3-1` patient identifier
+- `PID-3-4-1` requesting organization, which is the namespace id of the assigning authority
+- `PID-3-4-2` identifier system and `PID-3-4-3` `URI`, when the sender knows the system
+- `PID-3-10` assigning agency or department. It is not the identifier system
 - `PID-5` name, `PID-7` date of birth, `PID-8` `F`, `M`, or `U`
 - `ORC-1` `NW`, `ORC-2-1` placer order id, `ORC-21-10` requesting organization identifier
 - `OBR-4-1` test code, `OBR-4-2` description, `OBR-4-3` local test system, `OBR-7` requested time
 
-`MSH-4` authenticates the sending system only together with `MSH-3` and `MSH-8`. The requesting organization is `ORC-21-10`, and it must be on the listener allowlist and equal `PID-3-4`. The patient match is organization plus identifier. The name is stored only when the patient is created.
+`MSH-4` authenticates the sending system only together with `MSH-3` and `MSH-8`. The requesting organization is `ORC-21-10`, and it must be on the listener allowlist and equal `PID-3-4-1`. When `PID-3-4-2` is present, `PID-3-4-3` is `URI` and the patient match is organization, that identifier system, and the identifier value. The same value under another system is a different patient. `PID-3-10` does not choose the patient. A URI in `PID-3-10` is read only when `PID-3-4-2` is empty, for a message that already carried the system there. If both are present and differ, the message is rejected. When no identifier system is present, one existing row is reused only if its system is the laboratory organization system for that organization. A single row under another issuer is not reused. Two rows reject the message and do not choose a patient. A new patient without a system is recorded under the laboratory organization system, not under a foreign system. The name is stored only when the patient is created.
 
 Not supported: `ORM`, specimens, `SPM`, ordering provider, LOINC, and UCUM. A code system containing `loinc` or `ucum` is rejected. Extra segments are ignored only when the required fields above are present and valid.
 
@@ -58,7 +61,7 @@ The clinical result status stays `PRELIMINARY`, `FINAL`, or `CANCELLED` in Mini 
 These uses are explicit restrictions of this profile. They are not a claim that the base standard defines them this way.
 
 - `ORC-21-10` carries the organization id. `ORC-21-1` is the organization name in the `XON` type and stays empty.
-- `PID-3-4` is the assigning authority of the patient identifier. In this profile that authority is the requesting organization.
+- `PID-3-4` is the assigning authority (`CX.4`). `PID-3-4-1` is the requesting organization. `PID-3-4-2` is the identifier system and `PID-3-4-3` is `URI` when the sender knows it. `PID-3-10` remains the assigning agency or department.
 - `ORC-5` maps the existing order enum onto table 0038: `ORDERED` `SC`, `IN_PROGRESS` `IP`, `COMPLETED` `CM`, `CANCELLED` `CA`. `SC` is the table's scheduled code for an order that has not started.
 - `OBX-11` and `OBR-25` use `P`, `F`, and `X` for preliminary, final, and cancelled. Those three codes exist in both table 0085 and table 0123.
 - `OBX-6-1` carries the original unit text. `OBX-6-3` stays empty because this profile does not invent a UCUM code.

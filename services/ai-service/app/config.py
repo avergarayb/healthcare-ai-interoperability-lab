@@ -55,6 +55,10 @@ class Settings:
     lab_review_iam_bindings_path: str = ""
     lab_review_iam_session_db_path: str = ""
     lab_review_iam_allow_http_loopback: bool = False
+    hospital_oidc_required: bool = False
+    hospital_oidc_issuer: str = ""
+    hospital_oidc_audience: str = ""
+    hospital_oidc_jwks_uri: str = ""
 
     @property
     def model_boundary_url(self) -> str:
@@ -200,6 +204,10 @@ class Settings:
             lab_review_iam_allow_http_loopback=(
                 os.getenv("LAB_REVIEW_IAM_ALLOW_HTTP_LOOPBACK", "false").strip() == "true"
             ),
+            hospital_oidc_required=os.getenv("HOSPITAL_OIDC_REQUIRED", "false").strip() == "true",
+            hospital_oidc_issuer=os.getenv("HOSPITAL_OIDC_ISSUER", "").strip(),
+            hospital_oidc_audience=os.getenv("HOSPITAL_OIDC_AUDIENCE", "").strip(),
+            hospital_oidc_jwks_uri=os.getenv("HOSPITAL_OIDC_JWKS_URI", "").strip(),
         )
 
 

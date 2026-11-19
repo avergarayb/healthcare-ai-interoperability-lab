@@ -44,7 +44,14 @@ class SyntheticSeed {
     }
 
     private static NewPatient patient(String externalId, String family, String given, String birthDate, String sex) {
-        return new NewPatient(LABORATORY, externalId, family, given, LocalDate.parse(birthDate), sex);
+        return new NewPatient(
+                LABORATORY,
+                externalId,
+                LaboratoryRecordService.organizationSystem(LABORATORY),
+                family,
+                given,
+                LocalDate.parse(birthDate),
+                sex);
     }
 
     private static NewOrder order(String patientId, String externalRequestId, String code, String description, String requestedAt) {

@@ -85,12 +85,12 @@ final class ShowcaseView {
             body.append("<form method=\"post\" action=\"/showcase/demo-001/case\"><input type=\"hidden\" name=\"csrf\" value=\"")
                     .append(esc(csrf)).append("\"><button class=\"btn btn-primary\" type=\"submit\">Ejecutar resumen</button></form></section>");
         } else {
-            body.append("<section class=\"card\"><h2>Caso nuevo</h2><p>Solo el clínico de esta sesión puede ejecutarlo. El auditor no. No es OIDC.</p></section>");
+            body.append("<section class=\"card\"><h2>Caso nuevo</h2><p>Solo el clínico de esta organización puede ejecutarlo. El auditor no.</p></section>");
         }
         return page("Resumen de laboratorio", body.toString());
     }
 
-    static String summaryResult(Map<String, Object> view, boolean clinician, String csrf, String notice) {
+    static String summaryResult(Map<String, Object> view, boolean reviewer, boolean clinician, String csrf, String notice) {
         StringBuilder body = new StringBuilder();
         String caseId = text(view.get("caseId"));
         body.append("<p><a href=\"/showcase/demo-001/case\">Otro caso</a></p>");
@@ -120,19 +120,22 @@ final class ShowcaseView {
             body.append("<p>El agente no dejó un resumen.</p>");
         }
         body.append("</section><section class=\"card\"><h2>Revisión humana</h2>");
-        body.append("<p>Revisor de laboratorio: ").append(esc(text(view.get("reviewer"))))
-                .append(". Autenticador de desarrollo. No es OIDC.</p>");
+        String authenticator = text(view.get("authenticator"));
+        String identity = "LAB_REVIEW_IAM_V1".equals(authenticator)
+                ? "Identidad OIDC verificada por el servicio."
+                : "Autenticador de desarrollo. No es la aceptación OIDC.";
+        body.append("<p>Revisor: ").append(esc(text(view.get("reviewer")))).append(". ").append(esc(identity)).append("</p>");
         if (view.get("decision") instanceof Map<?, ?> decision && present(decision.get("decision"))) {
             body.append("<p class=\"status status-ok\">").append(esc(text(decision.get("decision")))).append("</p>");
             body.append("<p>").append(esc(text(decision.get("note")))).append("</p>");
             body.append("<p class=\"muted\">").append(esc(text(decision.get("decidedAt")))).append("</p>");
-        } else if (clinician && !csrf.isBlank()) {
+        } else if (reviewer && !csrf.isBlank()) {
             body.append("<p>Propuesta pendiente.</p><form method=\"post\" action=\"/showcase/demo-001/case/")
                     .append(esc(caseId)).append("/decision\"><input type=\"hidden\" name=\"csrf\" value=\"").append(esc(csrf)).append("\">");
             body.append("<button class=\"btn btn-primary\" type=\"submit\" name=\"decision\" value=\"approved\">Aprobar</button> ");
             body.append("<button class=\"btn\" type=\"submit\" name=\"decision\" value=\"rejected\">Rechazar</button></form>");
         } else {
-            body.append("<p>Propuesta pendiente. Solo el clínico de esta sesión puede decidir.</p>");
+            body.append("<p>Propuesta pendiente. Solo el revisor clínico de esta organización puede decidir.</p>");
         }
         body.append("</section>");
         if (clinician && !csrf.isBlank()) {

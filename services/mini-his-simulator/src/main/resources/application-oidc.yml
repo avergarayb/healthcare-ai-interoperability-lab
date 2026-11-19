@@ -1,0 +1,17 @@
+mini-his:
+  sqlite-path: target/oidc-acceptance.sqlite
+  exchange:
+    base-url: http://127.0.0.1:8081
+  inpatient:
+    coordinator-url: http://127.0.0.1:8090
+  oidc:
+    enabled: true
+    client-enabled: true
+    issuer: http://127.0.0.1:18340/realms/hospital-lab
+    audience: mini-his-web
+    acceptance: true
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true

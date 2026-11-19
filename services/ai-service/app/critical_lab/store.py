@@ -76,8 +76,8 @@ def save_proposal(path, order_id, body):
 
 
 def decide(path, proposal_id, proposal_hash, decision, actor_id, role, organization_id, idempotency_key):
-    if (decision not in {"approved", "rejected"} or not actor_id or role != "clinician"
-            or organization_id != "org-mini-his"):
+    if (decision not in {"approved", "rejected"} or not actor_id
+            or role not in {"clinician", "clinical-reviewer"} or organization_id != "org-mini-his"):
         return {"outcome": "invalid_approval"}
     with _connect(path) as connection:
         prior = connection.execute(

@@ -34,7 +34,11 @@ public class CriticalLabClient {
     }
 
     public Map<String, Object> decide(Map<String, Object> body) {
-        return post("/internal/critical-lab/decisions", body);
+        return decide(body, "");
+    }
+
+    public Map<String, Object> decide(Map<String, Object> body, String identityToken) {
+        return post("/internal/critical-lab/decisions", body, identityToken);
     }
 
     public Map<String, Object> apply(Map<String, Object> body) {
@@ -42,11 +46,18 @@ public class CriticalLabClient {
     }
 
     private Map<String, Object> post(String path, Map<String, Object> body) {
+        return post(path, body, "");
+    }
+
+    private Map<String, Object> post(String path, Map<String, Object> body, String identityToken) {
         try {
-            HttpRequest request = base(path)
+            HttpRequest.Builder builder = base(path)
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
-                    .header("Content-Type", "application/json")
-                    .build();
+                    .header("Content-Type", "application/json");
+            if (identityToken != null && identityToken.chars().filter(ch -> ch == '.').count() == 2) {
+                builder.header("Authorization", "Bearer " + identityToken);
+            }
+            HttpRequest request = builder.build();
             return read(client.send(request, HttpResponse.BodyHandlers.ofString()));
         } catch (InpatientRejection ex) {
             throw ex;
