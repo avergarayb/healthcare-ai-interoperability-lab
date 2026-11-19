@@ -116,6 +116,16 @@ class MiniLisNormalizerTest {
     }
 
     @Test
+    void keepsTheIssuerSystemInsteadOfTheLaboratoryConstant() throws Exception {
+        ObjectNode patient = normalizer.patient(json.readTree("""
+                {"patientId":"MLS-PAT-020","organizationId":"org-mini-his","externalId":"CASE-020","identifierSystem":"https://lab.local/other-system/patient","familyName":"Nunez","givenName":"Oscar","birthDate":"1970-01-01","administrativeSex":"male"}
+                """));
+        assertThat(patient.path("identifier").findValuesAsText("system"))
+                .contains("https://lab.local/other-system/patient")
+                .doesNotContain("https://lab.local/mini-lis/organization/org-mini-his/patient");
+    }
+
+    @Test
     void mapsOrderStatusesWithoutTreatingCancellationAsCompletion() {
         assertThat(MiniLisNormalizer.serviceRequestStatus("ORDERED")).isEqualTo("active");
         assertThat(MiniLisNormalizer.serviceRequestStatus("CANCELLED")).isEqualTo("revoked");

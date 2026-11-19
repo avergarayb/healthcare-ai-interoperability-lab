@@ -49,6 +49,10 @@ final class MiniLisNormalizer {
         String id = requiredId(source, "patientId");
         String organizationId = requiredId(source, "organizationId");
         String externalId = requiredId(source, "externalId");
+        String issuer = source.path("identifierSystem").asText("");
+        if (issuer.isBlank()) {
+            issuer = externalPatientSystem(organizationId);
+        }
         String family = requiredText(source, "familyName");
         String given = requiredText(source, "givenName");
         String sex = requiredText(source, "administrativeSex");
@@ -56,7 +60,7 @@ final class MiniLisNormalizer {
             throw ClinicalReadException.invalidSource();
         }
         ObjectNode resource = resource("Patient", id, PATIENT_SYSTEM, id);
-        resource.withArray("identifier").add(identifier(externalPatientSystem(organizationId), externalId));
+        resource.withArray("identifier").add(identifier(issuer, externalId));
         ObjectNode name = resource.putArray("name").addObject();
         name.put("family", family);
         name.putArray("given").add(given);

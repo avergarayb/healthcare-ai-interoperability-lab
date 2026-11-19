@@ -21,12 +21,12 @@ Required:
 - `MSH-5` `MINI-LIS`, `MSH-6` `org-mini-lis`
 - `MSH-8` shared secret. A blank secret is rejected
 - `MSH-9` `OML^O21`, `MSH-10` message control id, `MSH-11` `P`, `MSH-12` `2.5.1`
-- `PID-3-1` patient identifier, `PID-3-4` requesting organization
+- `PID-3-1` patient identifier, `PID-3-4` requesting organization, `PID-3-10` identifier system when the sender knows it
 - `PID-5` name, `PID-7` date of birth, `PID-8` `F`, `M`, or `U`
 - `ORC-1` `NW`, `ORC-2-1` placer order id, `ORC-21-10` requesting organization identifier
 - `OBR-4-1` test code, `OBR-4-2` description, `OBR-4-3` local test system, `OBR-7` requested time
 
-`MSH-4` authenticates the sending system only together with `MSH-3` and `MSH-8`. The requesting organization is `ORC-21-10`, and it must be on the listener allowlist and equal `PID-3-4`. The patient match is organization plus identifier. The name is stored only when the patient is created.
+`MSH-4` authenticates the sending system only together with `MSH-3` and `MSH-8`. The requesting organization is `ORC-21-10`, and it must be on the listener allowlist and equal `PID-3-4`. When `PID-3-10` is present, the patient match is organization, that identifier system, and the identifier value. The same value under another system is a different patient. When `PID-3-10` is absent, one existing organization-and-value match is reused; two matches reject the message and do not choose a patient. A new patient without `PID-3-10` is recorded under the laboratory organization system, not under a foreign system. The name is stored only when the patient is created.
 
 Not supported: `ORM`, specimens, `SPM`, ordering provider, LOINC, and UCUM. A code system containing `loinc` or `ucum` is rejected. Extra segments are ignored only when the required fields above are present and valid.
 

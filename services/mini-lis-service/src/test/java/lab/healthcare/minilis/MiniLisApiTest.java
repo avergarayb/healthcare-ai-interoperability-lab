@@ -56,6 +56,14 @@ class MiniLisApiTest {
     }
 
     @Test
+    void theBrowserLoginPathIsNotAServiceTokenRoute() throws Exception {
+        mockMvc.perform(get("/oauth2/authorization/bench"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/login/oauth2/code/bench"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void seedCoversPendingFinalAndMultipleResults() throws Exception {
         mockMvc.perform(get("/orders/MLS-ORD-001").header("X-Service-Token", TOKEN))
                 .andExpect(status().isOk())
@@ -249,5 +257,74 @@ class MiniLisApiTest {
                         .param("externalRequestId", "EXT-REQ-001"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("invalid_request"));
+    }
+
+    @Test
+    void theSameValueUnderAnotherSystemIsAnotherPatient() throws Exception {
+        String his = """
+                {"organizationId":"org-mini-his","externalId":"CASE-910","identifierSystem":"https://lab.local/mini-his/patient","familyName":"Quispe","givenName":"Ana","birthDate":"1984-03-12","administrativeSex":"female"}
+                """;
+        String other = """
+                {"organizationId":"org-mini-his","externalId":"CASE-910","identifierSystem":"https://lab.local/other-system/patient","familyName":"Otra","givenName":"Persona","birthDate":"1999-01-01","administrativeSex":"male"}
+                """;
+        String foreignOrg = """
+                {"organizationId":"org-other","externalId":"CASE-910","identifierSystem":"https://lab.local/mini-his/patient","familyName":"Ajena","givenName":"Organizacion","birthDate":"1980-01-01","administrativeSex":"female"}
+                """;
+        String hisId = id(mockMvc.perform(post("/patients").header("X-Service-Token", TOKEN).contentType(MediaType.APPLICATION_JSON).content(his))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+        String otherId = id(mockMvc.perform(post("/patients").header("X-Service-Token", TOKEN).contentType(MediaType.APPLICATION_JSON).content(other))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+        mockMvc.perform(post("/patients").header("X-Service-Token", TOKEN).contentType(MediaType.APPLICATION_JSON).content(foreignOrg))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/patients").header("X-Service-Token", TOKEN).contentType(MediaType.APPLICATION_JSON).content(his))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(get("/patients").header("X-Service-Token", TOKEN)
+                        .param("organizationId", "org-mini-his")
+                        .param("externalId", "CASE-910")
+                        .param("identifierSystem", "https://lab.local/mini-his/patient"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].patientId").value(hisId));
+        mockMvc.perform(get("/patients").header("X-Service-Token", TOKEN)
+                        .param("organizationId", "org-mini-his")
+                        .param("externalId", "CASE-910")
+                        .param("identifierSystem", "https://lab.local/other-system/patient"))
+                .andExpect(jsonPath("$[0].patientId").value(otherId));
+        mockMvc.perform(get("/patients").header("X-Service-Token", TOKEN)
+                        .param("organizationId", "org-mini-his")
+                        .param("externalId", "CASE-910"))
+                .andExpect(jsonPath("$", hasSize(2)));
+        mockMvc.perform(get("/patients").header("X-Service-Token", TOKEN)
+                        .param("organizationId", "org-other")
+                        .param("externalId", "CASE-910")
+                        .param("identifierSystem", "https://lab.local/mini-his/patient"))
+                .andExpect(jsonPath("$[0].patientId").value(org.hamcrest.Matchers.not(hisId)));
+        mockMvc.perform(get("/patients").header("X-Service-Token", TOKEN)
+                        .param("organizationId", "org-mini-his")
+                        .param("externalId", "CASE-MISSING")
+                        .param("identifierSystem", "https://lab.local/mini-his/patient"))
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        String order = """
+                {"patientId":"%s","requestingOrganizationId":"org-mini-his","externalRequestId":"CASE-910-ORD","testCode":"GLU","testDescription":"Glucose","requestedAt":"2026-03-01T10:00:00Z"}
+                """.formatted(hisId);
+        String orderId = id(mockMvc.perform(post("/orders").header("X-Service-Token", TOKEN).contentType(MediaType.APPLICATION_JSON).content(order))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "orderId");
+        mockMvc.perform(post("/orders/" + orderId + "/results").header("X-Service-Token", TOKEN).contentType(MediaType.APPLICATION_JSON).content("""
+                {"externalResultId":"CASE-910-RES","testCode":"GLU","value":"90","unit":"mg/dL","resultedAt":"2026-03-01T12:00:00Z","status":"FINAL"}
+                """)).andExpect(status().isCreated());
+        mockMvc.perform(get("/patients/" + otherId + "/results").header("X-Service-Token", TOKEN))
+                .andExpect(jsonPath("$", hasSize(0)));
+        mockMvc.perform(post("/orders").header("X-Service-Token", TOKEN).contentType(MediaType.APPLICATION_JSON).content(order))
+                .andExpect(status().isConflict());
+    }
+
+    private static String id(String body) {
+        return id(body, "patientId");
+    }
+
+    private static String id(String body, String field) {
+        return body.replaceAll(".*\"" + field + "\":\"([^\"]+)\".*", "$1");
     }
 }

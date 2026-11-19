@@ -53,6 +53,7 @@ public class LaboratoryRecordService {
         requireId(patientId);
         requireId(command.organizationId());
         requireId(command.externalId());
+        String identifierSystem = issuer(command.identifierSystem(), command.organizationId());
         requireText(command.familyName(), 80);
         requireText(command.givenName(), 80);
         if (command.birthDate() == null || !List.of("female", "male", "unknown").contains(command.administrativeSex())) {
@@ -62,6 +63,7 @@ public class LaboratoryRecordService {
                 patientId,
                 command.organizationId(),
                 command.externalId(),
+                identifierSystem,
                 command.familyName().trim(),
                 command.givenName().trim(),
                 command.birthDate(),
@@ -79,6 +81,13 @@ public class LaboratoryRecordService {
         requireId(organizationId);
         requireId(externalId);
         return repository.searchPatients(organizationId, externalId);
+    }
+
+    public List<ExternalPatient> searchPatients(String organizationId, String externalId, String identifierSystem) {
+        requireId(organizationId);
+        requireId(externalId);
+        requireSystem(identifierSystem);
+        return repository.searchPatients(organizationId, externalId, identifierSystem);
     }
 
     public List<ExternalPatient> listPatients(int limit) {
@@ -259,14 +268,25 @@ public class LaboratoryRecordService {
     }
 
     private ExternalPatient resolvePatient(OmlOrder order) {
-        List<ExternalPatient> found = searchPatients(order.organizationId(), order.externalPatientId());
-        if (!found.isEmpty()) {
-            return found.get(0);
+        String system = order.identifierSystem();
+        if (system == null || system.isBlank()) {
+            ExternalPatient sole = only(searchPatients(order.organizationId(), order.externalPatientId()));
+            if (sole != null) {
+                return sole;
+            }
+            system = organizationSystem(order.organizationId());
+        } else {
+            ExternalPatient matched = only(searchPatients(order.organizationId(), order.externalPatientId(), system));
+            if (matched != null) {
+                return matched;
+            }
         }
+        String identifierSystem = system;
         try {
             return nested(() -> registerPatient(new NewPatient(
                     order.organizationId(),
                     order.externalPatientId(),
+                    identifierSystem,
                     order.familyName(),
                     order.givenName(),
                     order.birthDate(),
@@ -275,8 +295,19 @@ public class LaboratoryRecordService {
             if (!"duplicate".equals(ex.code())) {
                 throw ex;
             }
-            return searchPatients(order.organizationId(), order.externalPatientId()).get(0);
+            ExternalPatient again = only(searchPatients(order.organizationId(), order.externalPatientId(), identifierSystem));
+            if (again == null) {
+                throw MiniLisException.invalidRequest();
+            }
+            return again;
         }
+    }
+
+    private static ExternalPatient only(List<ExternalPatient> found) {
+        if (found.size() > 1) {
+            throw MiniLisException.invalidRequest();
+        }
+        return found.isEmpty() ? null : found.get(0);
     }
 
     public LabResult result(String resultId) {
@@ -334,6 +365,25 @@ public class LaboratoryRecordService {
 
     private static String newId(String prefix) {
         return prefix + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase(Locale.ROOT);
+    }
+
+    static String organizationSystem(String organizationId) {
+        return "https://lab.local/mini-lis/organization/" + organizationId + "/patient";
+    }
+
+    static String issuer(String requested, String organizationId) {
+        if (requested == null || requested.isBlank()) {
+            return organizationSystem(organizationId);
+        }
+        requireSystem(requested);
+        return requested;
+    }
+
+    private static void requireSystem(String value) {
+        if (value == null || value.length() < 8 || value.length() > 200 || value.chars().anyMatch(Character::isWhitespace)
+                || !value.startsWith("https://")) {
+            throw MiniLisException.invalidRequest();
+        }
     }
 
     private static void requireId(String value) {

@@ -74,8 +74,32 @@ La matriz negativa de token cubre firma ajena, caducidad, emisor, audiencia, org
 
 `8445` y `8444` presentan el mismo certificado de hoja, emitido por `Caddy Local Authority - ECC Intermediate` y encadenado a `Caddy Local Authority - 2026 ECC Root`. La huella SHA-256 de la hoja es `1B9C9B2E7D458D2B88637F24DC711BFB15A038646C6380AE619F7FBBEF6BB5D9`. La de la raíz es `D55F1D5A1EFFB117B9BD8BB3DA3652475925DECF80D2C54C861C9FC53C52DA7C`. No se instaló esa raíz en el almacén de Windows. Un Edge anterior usó `--ignore-certificate-errors-spki-list` sobre la hoja: ese ingreso es evidencia funcional, no una validación TLS. El perfil aislado de Firefox importa solo el certificado público de la raíz, con `security.enterprise_roots.enabled` en falso, y abre `https://127.0.0.1:8445/ward/login` comprobando cadena, nombre y vigencia.
 
-`http://127.0.0.1:8095/ward/login` responde 403. En ese Firefox, `medico.his` y `revisor.his` llegan con sesión OIDC. El formulario del portal usa el token de la aplicación. Spring no añade otro CSRF con el mismo nombre, porque ese segundo token rechazaba el POST. Las tarjetas de resumen, intercambio y resultado crítico responden «Disponible». El resumen llega al servicio, pero la federación deja Mini LIS en `identity_unresolved` con el sistema de identificador de Mini HIS, así que el caso no se completa. El 404 visto en el callback de Perú era el proxy de prueba reenviando, en la misma conexión, una petición con URL absoluta que Uvicorn no enruta. La petición directa al contenedor vigente responde 303 hacia el ingreso cuando el método o la cookie no cierran la sesión. Con el proxy corregido, `reviewer-pe` abre `org-pe-lab-demo` y `reviewer-es` abre `org-es-lab-demo`, cada uno en su puerto y con su historial. No se reconstruyó ese perfil ni se modificó el realm `platform-001`.
+`http://127.0.0.1:8095/ward/login` responde 403. En ese Firefox, `medico.his` y `revisor.his` llegan con sesión OIDC. El formulario del portal usa el token de la aplicación. Spring no añade otro CSRF con el mismo nombre, porque ese segundo token rechazaba el POST. Las tarjetas de resumen, intercambio y resultado crítico responden «Disponible». El 404 visto en el callback de Perú era el proxy de prueba reenviando, en la misma conexión, una petición con URL absoluta que Uvicorn no enruta. La petición directa al contenedor vigente responde 303 hacia el ingreso cuando el método o la cookie no cierran la sesión. Con el proxy corregido, `reviewer-pe` abre `org-pe-lab-demo` y `reviewer-es` abre `org-es-lab-demo`, cada uno en su puerto y con su historial. No se reconstruyó ese perfil ni se modificó el realm `platform-001`.
+
+## Correlación de paciente
+
+Mini HIS usa el sistema `https://lab.local/mini-his/patient` y el valor del identificador local. Mini LIS guarda la terna organización, sistema emisor y valor. Esa terna es la clave única. El mismo valor con otro sistema es otro paciente. No hay correspondencia por nombre.
+
+La federación de una fuente que no es la del llamador solo resuelve `exchange_patient_link`. El intercambio escribe esa fila al aceptar una orden: sistema y valor del emisor, y el identificador lógico del destino. Sin una orden aceptada no hay fila, el resultado es `identity_unresolved` y Mini LIS no se consulta. Dos coincidencias no eligen un paciente y no escriben enlace. Un paciente resuelto sin recursos clínicos es `complete` con `resourceCount` 0; eso no es una identidad ausente.
+
+HL7 lleva el valor en `PID-3-1`, la organización en `PID-3-4` y el sistema en `PID-3-10` cuando el emisor lo conoce. Si `PID-3-10` falta, una coincidencia previa de organización y valor se reutiliza; dos coincidencias rechazan el mensaje. Un paciente nuevo sin sistema queda en el sistema de la organización del laboratorio, no en un sistema ajeno.
+
+`V6__patient_identifier_system.sql` añade la columna. Las filas de semilla que ya existían recibieron el sistema de su organización.
+
+## Recorridos comprobados
+
+En el Firefox que confía en la raíz de Caddy:
+
+- DEMO-001. `medico.his` creó `sum-8208bbddca3e`. El vigente separó Mini HIS `MHS-RES-001` (13.4 g/dL) y Mini LIS `MLS-RES-3F94369ED382` (11 g/dL). No había otra observación histórica de la misma fuente. `revisor.his` aprobó con identidad OIDC. Repetir el permiso respondió que ya se consumió.
+- DEMO-002. Se conserva el ingreso de `reviewer-pe` en `org-pe-lab-demo` y de `reviewer-es` en `org-es-lab-demo`. Este cambio no modifica esos emisores ni esos permisos.
+- DEMO-003. `medico.his` envió `MHS-LAB-DD06790DC96F`, correlación `EXC-AFF6977DEFC54585`. Recepción, técnico y validador de Mini LIS publicaron 12.6 g/dL por OIDC. Mini HIS leyó ese resultado.
+- DEMO-004. `MHS-LAB-41D6A345FDC1` publicó 6.2 g/dL y la regla `sim-hemoglobin-low` marcó el crítico. Con Mini LIS alcanzable, la propuesta interceptada quedó pendiente. `revisor.his` aprobó y `medico.his` reconoció la tarea. Una preparación anterior, sin la dirección de Mini LIS, respondió que el agente no estaba y dejó el evento crítico en su sitio.
+- DEMO-005. El episodio `ENC-D6A8E5B716FC` sigue abierto. La preparación llegó a revisión, `revisor.his` decidió y quedó una tarea de seguimiento. La segunda ejecución no insertó otra.
+
+Mini LIS en `https://127.0.0.1:8444` admite por OIDC a recepcionista, técnico, validador y auditor. La recepcionista no valida ni publica, el técnico no publica y el auditor no modifica. Un CSRF inválido no cambia la orden.
+
+El AI Service lee Mini LIS con `MINI_LIS_BASE_URL` y Mini HIS con `MINI_HIS_BASE_URL`. Cada lectura lleva su `X-Service-Token`. Esos valores no se escriben aquí. Si faltan, la operación queda no disponible y el dato clínico no se borra.
 
 ## Límites
 
-El resultado queda parcial. No hay certificación, no hay exposición pública y una caída de Keycloak no publica ni aprueba: la operación responde denegada o no disponible. El puerto `8443` sigue ocupado por otro contenedor y no se detuvo.
+Los cinco recorridos del laboratorio quedaron comprobados con identidades OIDC y con la correlación HIS/LIS. Esto no es una certificación ni un despliegue público. Una caída de Keycloak no publica ni aprueba. La hoja local de Caddy vence el 2026-11-20 02:27:38Z; la confianza del perfil está en la raíz. El puerto `8443` sigue ocupado por otro contenedor y no se detuvo.

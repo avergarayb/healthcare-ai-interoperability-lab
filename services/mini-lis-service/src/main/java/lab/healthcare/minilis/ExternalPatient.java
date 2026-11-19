@@ -6,6 +6,7 @@ public record ExternalPatient(
         String patientId,
         String organizationId,
         String externalId,
+        String identifierSystem,
         String familyName,
         String givenName,
         LocalDate birthDate,

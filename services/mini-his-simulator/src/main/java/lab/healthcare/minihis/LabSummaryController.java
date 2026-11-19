@@ -79,7 +79,8 @@ public class LabSummaryController {
             return redirect("/ward/login");
         }
         try {
-            return ShowcaseView.summaryResult(summaries.read(caseId), reviewer(request), csrf(request), safe(notice));
+            return ShowcaseView.summaryResult(
+                    summaries.read(caseId), reviewer(request), clinician(request), csrf(request), safe(notice));
         } catch (InpatientRejection ex) {
             return redirect("/showcase/demo-001/case?aviso=" + safe(ex.code()));
         }

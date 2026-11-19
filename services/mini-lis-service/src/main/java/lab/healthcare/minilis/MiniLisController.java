@@ -40,6 +40,7 @@ public class MiniLisController {
         ExternalPatient patient = records.registerPatient(new NewPatient(
                 request.organizationId(),
                 request.externalId(),
+                request.identifierSystem(),
                 request.familyName(),
                 request.givenName(),
                 request.birthDate(),
@@ -52,8 +53,9 @@ public class MiniLisController {
     public Object patients(
             @RequestParam(required = false) String organizationId,
             @RequestParam(required = false) String externalId,
+            @RequestParam(required = false) String identifierSystem,
             @RequestParam(required = false) Integer limit) {
-        if (organizationId == null && externalId == null) {
+        if (organizationId == null && externalId == null && identifierSystem == null) {
             Integer bounded = bound(limit);
             if (bounded == null) {
                 return invalidLimit();
@@ -63,7 +65,10 @@ public class MiniLisController {
         if (organizationId == null || externalId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "invalid_request"));
         }
-        return records.searchPatients(organizationId, externalId);
+        if (identifierSystem == null || identifierSystem.isBlank()) {
+            return records.searchPatients(organizationId, externalId);
+        }
+        return records.searchPatients(organizationId, externalId, identifierSystem);
     }
 
     @GetMapping(path = "/patients/{patientId}", produces = MediaType.APPLICATION_JSON_VALUE)

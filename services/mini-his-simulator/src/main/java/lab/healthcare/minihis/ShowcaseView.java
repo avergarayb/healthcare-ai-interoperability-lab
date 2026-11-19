@@ -90,7 +90,7 @@ final class ShowcaseView {
         return page("Resumen de laboratorio", body.toString());
     }
 
-    static String summaryResult(Map<String, Object> view, boolean clinician, String csrf, String notice) {
+    static String summaryResult(Map<String, Object> view, boolean reviewer, boolean clinician, String csrf, String notice) {
         StringBuilder body = new StringBuilder();
         String caseId = text(view.get("caseId"));
         body.append("<p><a href=\"/showcase/demo-001/case\">Otro caso</a></p>");
@@ -129,7 +129,7 @@ final class ShowcaseView {
             body.append("<p class=\"status status-ok\">").append(esc(text(decision.get("decision")))).append("</p>");
             body.append("<p>").append(esc(text(decision.get("note")))).append("</p>");
             body.append("<p class=\"muted\">").append(esc(text(decision.get("decidedAt")))).append("</p>");
-        } else if (clinician && !csrf.isBlank()) {
+        } else if (reviewer && !csrf.isBlank()) {
             body.append("<p>Propuesta pendiente.</p><form method=\"post\" action=\"/showcase/demo-001/case/")
                     .append(esc(caseId)).append("/decision\"><input type=\"hidden\" name=\"csrf\" value=\"").append(esc(csrf)).append("\">");
             body.append("<button class=\"btn btn-primary\" type=\"submit\" name=\"decision\" value=\"approved\">Aprobar</button> ");

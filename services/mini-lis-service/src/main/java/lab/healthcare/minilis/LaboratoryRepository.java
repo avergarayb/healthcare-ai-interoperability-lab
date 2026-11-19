@@ -22,6 +22,7 @@ public class LaboratoryRepository {
             rs.getString("patient_id"),
             rs.getString("organization_id"),
             rs.getString("external_id"),
+            rs.getString("identifier_system"),
             rs.getString("family_name"),
             rs.getString("given_name"),
             rs.getObject("birth_date", LocalDate.class),
@@ -64,13 +65,14 @@ public class LaboratoryRepository {
         write(() -> jdbc.update(
                 """
                 INSERT INTO external_patients (
-                    patient_id, organization_id, external_id, family_name, given_name,
+                    patient_id, organization_id, external_id, identifier_system, family_name, given_name,
                     birth_date, administrative_sex, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 patient.patientId(),
                 patient.organizationId(),
                 patient.externalId(),
+                patient.identifierSystem(),
                 patient.familyName(),
                 patient.givenName(),
                 patient.birthDate(),
@@ -95,6 +97,19 @@ public class LaboratoryRepository {
                 PATIENT,
                 organizationId,
                 externalId);
+    }
+
+    public List<ExternalPatient> searchPatients(String organizationId, String externalId, String identifierSystem) {
+        return jdbc.query(
+                """
+                SELECT * FROM external_patients
+                WHERE organization_id = ? AND external_id = ? AND identifier_system = ?
+                ORDER BY patient_id
+                """,
+                PATIENT,
+                organizationId,
+                externalId,
+                identifierSystem);
     }
 
     public List<ExternalPatient> listPatients(int limit) {

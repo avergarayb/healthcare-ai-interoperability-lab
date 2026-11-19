@@ -51,6 +51,7 @@ final class Hl7ExchangeCodec {
             terser.set("/MSH-18", "UNICODE UTF-8");
             terser.set("/PATIENT/PID-3-1", patient.identifierValue());
             terser.set("/PATIENT/PID-3-4", command.requestingOrganizationId());
+            terser.set("/PATIENT/PID-3-10", patient.identifierSystem());
             terser.set("/PATIENT/PID-5-1", patient.familyName());
             terser.set("/PATIENT/PID-5-2", patient.givenName());
             terser.set("/PATIENT/PID-7", patient.birthDate().format(HL7_DATE));

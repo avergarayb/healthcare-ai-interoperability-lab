@@ -136,6 +136,7 @@ public class Hl7OrderReceiver {
             String sendingFacility,
             String digest) {
         String externalId = Hl7Messages.value(terser, "/PATIENT/PID-3-1");
+        String identifierSystem = Hl7Messages.value(terser, "/PATIENT/PID-3-10");
         String family = Hl7Messages.value(terser, "/PATIENT/PID-5-1");
         String given = Hl7Messages.value(terser, "/PATIENT/PID-5-2");
         LocalDate birthDate = Hl7Messages.parseDate(Hl7Messages.value(terser, "/PATIENT/PID-7"));
@@ -144,6 +145,9 @@ public class Hl7OrderReceiver {
         String code = Hl7Messages.value(terser, "/ORDER/OBSERVATION_REQUEST/OBR-4-1");
         String description = Hl7Messages.value(terser, "/ORDER/OBSERVATION_REQUEST/OBR-4-2");
         OffsetDateTime requestedAt = Hl7Messages.parseTime(Hl7Messages.value(terser, "/ORDER/OBSERVATION_REQUEST/OBR-7"));
+        if (!identifierSystem.isEmpty() && !validSystem(identifierSystem)) {
+            return null;
+        }
         if (!ID.matcher(externalId).matches() || !ID.matcher(placer).matches() || !ID.matcher(code).matches()
                 || family.isBlank() || given.isBlank() || birthDate == null || sex.isBlank()
                 || description.isBlank() || description.length() > 200 || requestedAt == null
@@ -151,8 +155,12 @@ public class Hl7OrderReceiver {
             return null;
         }
         return new OmlOrder(
-                controlId, organizationId, externalId, family, given, birthDate, sex, placer, code, description, requestedAt,
+                controlId, organizationId, externalId, identifierSystem, family, given, birthDate, sex, placer, code, description, requestedAt,
                 sendingApplication, sendingFacility, digest);
+    }
+
+    private static boolean validSystem(String value) {
+        return value.length() <= 200 && value.startsWith("https://") && value.chars().noneMatch(Character::isWhitespace);
     }
 
     private static String safe(String controlId) {
