@@ -6,7 +6,7 @@ Aceptado para el laboratorio. No autoriza un proveedor LLM real, un mensaje exte
 
 ## Decisión
 
-`critical-lab-coordination-v1` se apoya en el intercambio ya existente y en el mismo servicio de IA del coordinador de alta. No añade otro motor HL7, otra federación, otro Keycloak ni un servidor MCP.
+`critical-lab-coordination-v1` se apoya en el intercambio ya existente y en el mismo servicio de IA del coordinador de alta. Las herramientas se invocan con la sesión MCP en proceso ya usada por `read_federated_lab_chart`. No añade otro motor HL7, otra federación, otro Keycloak ni un servidor MCP de red.
 
 La criticidad sale de la regla de simulación `sim-hemoglobin-low` 1.0 sobre LOINC `718-7` y `g/dL`. El modelo no la decide. El evento queda en Mini LIS aunque el agente no responda.
 

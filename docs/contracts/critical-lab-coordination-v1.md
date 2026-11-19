@@ -18,7 +18,7 @@ A draft does not call the result writer and does not emit `ORU^R01`. Validation 
 
 The first graph pass is `admit`, `validate_event`, `read_clinical_context`, `retrieve_protocol`, `assess_evidence`, `prepare_proposal`, `finish`. Human review and the single authorized task are later requests, so a pending proposal can be read again without a second model call. The default transport is blocked. `CRITICAL_LAB_MODEL_MODE=intercepted` returns one fixed sentence and is not a live provider.
 
-The in-process tools are `get_critical_event`, `get_lab_order`, `get_validated_lab_result`, `get_patient_encounter`, `search_clinical_protocol`, and `propose_critical_result_task`. Decision and apply use the stored proposal hash. This contract does not add a standalone MCP server. A foreign organization, a missing event, or fewer than five active protocols stores no proposal.
+The graph invokes `get_critical_event`, `get_lab_order`, `get_validated_lab_result`, `get_patient_encounter`, `search_clinical_protocol`, and `propose_critical_result_task` through the same in-process JSON-RPC session used by `read_federated_lab_chart`: `initialize`, `tools/list`, and `tools/call`. A direct Python function is not that session. Tool arguments cannot change the organization, the role, or the order. This contract does not add a network MCP server. A foreign organization, a missing event, or fewer than five cited protocols stores no proposal.
 
 ## Session
 
@@ -26,4 +26,4 @@ Mini HIS `/ward` and Mini LIS `/bench` use local laboratory sessions on loopback
 
 ## Protocols
 
-Retrieval uses the system date, the organization, the document id, and the validity window. On 2026-11-18, `org-mini-his` returns five active protocols. An expired text and another organization are not cited for that organization. Retrieved text is evidence, not a system instruction.
+Retrieval scans the critical-lab index for the query `critical-result`. It keeps a document only when the organization matches, the status is `active`, and the system date is inside the document window. Each citation is `id@version#section` and can be checked against that file. On 2026-11-18, `org-mini-his` returns five citations. An empty query abstains. An expired text, a retired text, and another organization are not cited for that organization. Retrieved text is evidence, not a system instruction.

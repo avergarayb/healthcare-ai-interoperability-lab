@@ -61,6 +61,12 @@ class WardLabOrderTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Hemoglobina")));
         assertThat(orders.listAll()).hasSize(1);
         assertThat(orders.listAll().get(0).localStatus()).isEqualTo("failed");
+        String orderId = location.substring(location.lastIndexOf('/') + 1);
+        mvc.perform(post(location + "/decision").session(session)
+                        .param("csrf", csrf)
+                        .param("decision", "rejected"))
+                .andExpect(status().is3xxRedirection());
+        assertThat(orders.acknowledgement(orderId)).isEmpty();
         MockHttpSession auditor = login("auditor");
         mvc.perform(post("/ward/orders").session(auditor)
                         .param("csrf", String.valueOf(auditor.getAttribute("csrf")))
@@ -69,7 +75,16 @@ class WardLabOrderTest {
                         .param("indication", "No autorizado")
                         .param("requestedOn", "2026-11-18"))
                 .andExpect(status().is3xxRedirection());
+        mvc.perform(post(location + "/decision").session(auditor)
+                        .param("csrf", String.valueOf(auditor.getAttribute("csrf")))
+                        .param("decision", "approved"))
+                .andExpect(status().is3xxRedirection());
+        mvc.perform(get(location).session(auditor))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("no está autorizada para su rol")));
+        mvc.perform(get("/ward/login"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("No es un acceso OIDC")));
         assertThat(orders.listAll()).hasSize(1);
+        assertThat(orders.acknowledgement(orderId)).isEmpty();
     }
 
     private MockHttpSession login(String username) throws Exception {

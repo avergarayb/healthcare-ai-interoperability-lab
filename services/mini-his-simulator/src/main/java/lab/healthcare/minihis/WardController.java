@@ -451,7 +451,8 @@ public class WardController {
                     "orderId", order.destinationOrderId(),
                     "organizationId", organizationId,
                     "episodeId", episode == null ? "" : String.valueOf(episode),
-                    "actorId", principal(request).userId()));
+                    "actorId", principal(request).userId(),
+                    "role", principal(request).role()));
             orders.rememberProposal(
                     orderId,
                     String.valueOf(prepared.get("proposalId")),
@@ -488,6 +489,7 @@ public class WardController {
                     "proposalHash", context.get("proposal_hash"),
                     "decision", decision,
                     "actorId", principal(request).userId(),
+                    "role", principal(request).role(),
                     "organizationId", organizationId,
                     "idempotencyKey", UUID.randomUUID().toString()));
             if (!"recorded".equals(recorded.get("outcome"))) {

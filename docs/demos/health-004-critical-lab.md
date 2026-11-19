@@ -32,8 +32,8 @@ Un valor crítico puede perderse entre la validación del laboratorio y el recon
 ## Qué hace cada pieza
 
 - HL7/FHIR: el conector existente lleva `OML^O21` y devuelve `ORU^R01` cuando la publicación ocurre. La pantalla clínica no muestra el mensaje bruto.
-- MCP: las lecturas son herramientas internas del grafo, con el mismo límite de servicio. No se añadió un servidor MCP.
-- RAG: cinco protocolos sintéticos de `org-mini-his`, con versión y vigencia. Sin evidencia vigente, el agente se abstiene.
+- MCP: el grafo abre la misma sesión JSON-RPC en proceso que el resumen de laboratorio (`initialize`, `tools/list`, `tools/call`). Una función Python directa no es esa sesión. No se añadió un servidor de red.
+- RAG: la búsqueda `critical-result` recorre el índice y cita `id@version#sección` solo si la organización, el estado y la vigencia coinciden. Sin evidencia, el agente se abstiene.
 - LangGraph: ordena los pasos y puede reanudar una propuesta pendiente sin otra llamada al modelo.
 - Automatización: una tarea interna en Mini HIS, después de la aprobación y ligada al hash.
 - Auditoría: estado de la orden, evento, propuesta, decisión y tarea quedan persistidos.

@@ -35,7 +35,7 @@ def decide_critical(request, settings, raw, path=None):
         return JSONResponse({"outcome": "invalid_approval"}, status_code=400)
     result = decide(
         _path(path), body.get("proposalId"), body.get("proposalHash"), body.get("decision"),
-        body.get("actorId"), body.get("organizationId"), body.get("idempotencyKey"))
+        body.get("actorId"), body.get("role"), body.get("organizationId"), body.get("idempotencyKey"))
     return JSONResponse(result, status_code=200 if result["outcome"] == "recorded" else 409)
 
 
