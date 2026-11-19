@@ -23,8 +23,6 @@ import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
-
 import java.io.InputStream;
 import java.time.Instant;
 import java.util.Date;
@@ -52,11 +50,7 @@ public class BenchSecurityConfiguration {
                 .oauth2Login(oauth -> oauth.successHandler((request, response, authentication) -> accept(request, response, authentication, roles, issuer, audience)))
                 .logout(logout -> logout.logoutUrl("/logout").invalidateHttpSession(true).deleteCookies("JSESSIONID"))
                 .sessionManagement(session -> session.sessionFixation().changeSessionId())
-                .csrf(csrf -> {
-                    HttpSessionCsrfTokenRepository repository = new HttpSessionCsrfTokenRepository();
-                    repository.setParameterName("csrf");
-                    csrf.csrfTokenRepository(repository);
-                });
+                .csrf(csrf -> csrf.disable());
         return http.build();
     }
 

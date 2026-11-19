@@ -53,7 +53,7 @@ REVIEWER_ID = "hl7-reviewer"
 SESSION_ID = "showcase-lab-summary"
 BUDGET = 1000
 _CASE = re.compile(r"sum-[0-9a-f]{12}\Z")
-_ACTOR = re.compile(r"[a-z0-9-]{1,32}\Z")
+_ACTOR = re.compile(r"[a-z0-9.-]{1,64}\Z")
 _LOCK = threading.Lock()
 _OPEN = {}
 

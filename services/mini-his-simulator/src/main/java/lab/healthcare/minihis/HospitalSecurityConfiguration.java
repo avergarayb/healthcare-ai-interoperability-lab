@@ -23,8 +23,6 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepo
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
-import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,11 +51,7 @@ public class HospitalSecurityConfiguration {
                 .oauth2Login(oauth -> oauth.successHandler(success(bindings, issuer, audience, events, clients)))
                 .logout(logout -> logout.logoutUrl("/logout").invalidateHttpSession(true).deleteCookies("JSESSIONID"))
                 .sessionManagement(session -> session.sessionFixation().changeSessionId())
-                .csrf(csrf -> {
-                    HttpSessionCsrfTokenRepository repository = new HttpSessionCsrfTokenRepository();
-                    repository.setParameterName("csrf");
-                    csrf.csrfTokenRepository(repository);
-                });
+                .csrf(csrf -> csrf.disable());
         return http.build();
     }
 
