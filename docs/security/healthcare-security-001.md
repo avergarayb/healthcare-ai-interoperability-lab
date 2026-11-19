@@ -72,7 +72,9 @@ La matriz negativa de token cubre firma ajena, caducidad, emisor, audiencia, org
 
 `hospital-lab` se creó por la Admin API, sin reiniciar Keycloak y sin tocar el volumen. `platform-001` siguió respondiendo y sus clientes no cambiaron: sigue `lab-review-web`. El access token real de `mini-his-web` trae `typ=Bearer`, `azp=mini-his-web`, audiencia `hospital-ai`, usuario, organización y rol. El ID token trae `typ=ID` y audiencia `mini-his-web`. Un ID token no autoriza al AI Service.
 
-`http://127.0.0.1:8095/ward/login` responde 403 cuando la aceptación HTTPS está encendida. `https://127.0.0.1:8445/ward/login` responde 200 y muestra el ingreso OIDC. El navegador integrado no completó el login: el certificado interno de Caddy deja la página en error y no se forzó la confianza del sistema. Las cinco demostraciones clínicas no se recorrieron con sesión OIDC. La sesión local no se usa para declararlas aceptadas.
+`8445` y `8444` presentan el mismo certificado de hoja, emitido por `Caddy Local Authority - ECC Intermediate` y encadenado a `Caddy Local Authority - 2026 ECC Root`. La huella SHA-256 de la hoja es `1B9C9B2E7D458D2B88637F24DC711BFB15A038646C6380AE619F7FBBEF6BB5D9`. La de la raíz es `D55F1D5A1EFFB117B9BD8BB3DA3652475925DECF80D2C54C861C9FC53C52DA7C`. No se instaló esa raíz en el almacén de Windows. El Edge de prueba confía solo en el pin SPKI de la hoja.
+
+`http://127.0.0.1:8095/ward/login` responde 403. En ese Edge, `medico.his` llegó al portal con cookie `JSESSIONID` `Secure`, `HttpOnly` y `SameSite=Lax`. La auditoría registró `clinician` de `org-mini-his`. Las tarjetas de resumen, intercambio y resultado crítico siguen en «No disponible» porque el AI Service, Mini LIS y el intercambio no están en marcha. Perú abre su página OIDC, pero el callback del contenedor en ejecución responde 404 y no se reinició ese perfil.
 
 ## Límites
 

@@ -107,10 +107,6 @@ public class BenchSecurityConfiguration {
             response.sendRedirect("/bench/login?aviso=no-autorizado");
             return;
         }
-        HttpSession previous = request.getSession(false);
-        if (previous != null) {
-            previous.invalidate();
-        }
         HttpSession session = request.getSession(true);
         session.setAttribute("benchPrincipal", new BenchController.BenchPrincipal(
                 username, "lab-validator".equals(role), role, "org-mini-his", "oidc"));

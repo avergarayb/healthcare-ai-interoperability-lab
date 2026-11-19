@@ -105,13 +105,18 @@ public class HospitalSecurityConfiguration {
                 return;
             }
             try {
-                WardPrincipal principal = HospitalIdentity.accept(
-                        user.getClaims(), bindings, issuer, audience, Instant.now());
-                String access = HospitalTokenVerifier.delegation(accessToken(authentication, request, clients));
-                HttpSession previous = request.getSession(false);
-                if (previous != null) {
-                    previous.invalidate();
+                String rawAccess = accessToken(authentication, request, clients);
+                Map<String, Object> claims = new java.util.HashMap<>(user.getClaims());
+                if (claims.get("aud") == null) {
+                    claims.put("aud", user.getAudience());
                 }
+                if (claims.get("exp") == null && user.getExpiresAt() != null) {
+                    claims.put("exp", user.getExpiresAt());
+                }
+                copyAuthority(claims, rawAccess);
+                WardPrincipal principal = HospitalIdentity.accept(
+                        claims, bindings, issuer, audience, Instant.now());
+                String access = HospitalTokenVerifier.delegation(rawAccess);
                 HttpSession session = request.getSession(true);
                 session.setAttribute("wardPrincipal", principal);
                 session.setAttribute("csrf", UUID.randomUUID().toString());
@@ -125,6 +130,25 @@ public class HospitalSecurityConfiguration {
                 response.sendRedirect("/ward/login?aviso=no-autorizado");
             }
         };
+    }
+
+    private static void copyAuthority(Map<String, Object> claims, String accessToken) {
+        if (accessToken == null || accessToken.isBlank()) {
+            return;
+        }
+        try {
+            var tokenClaims = com.nimbusds.jwt.SignedJWT.parse(accessToken).getJWTClaimsSet();
+            Object roles = tokenClaims.getClaim("realm_access");
+            Object organization = tokenClaims.getClaim("organization");
+            if (roles != null) {
+                claims.put("realm_access", roles);
+            }
+            if (organization != null && claims.get("organization") == null) {
+                claims.put("organization", organization);
+            }
+        } catch (java.text.ParseException ex) {
+            claims.remove("realm_access");
+        }
     }
 
     private static String accessToken(

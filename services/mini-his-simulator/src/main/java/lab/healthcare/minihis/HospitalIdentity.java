@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
+import java.net.URL;
+import java.util.Collection;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,7 +50,7 @@ final class HospitalIdentity {
     static WardPrincipal accept(
             Map<String, Object> claims, Map<String, HospitalBindings.Binding> bindings,
             String issuer, String audience, Instant now) throws HospitalRejection {
-        if (claims == null || !issuer.equals(claims.get("iss")) || !audienceMatches(claims.get("aud"), audience)) {
+        if (claims == null || !issuer.equals(issuerOf(claims.get("iss"))) || !audienceMatches(claims.get("aud"), audience)) {
             throw new HospitalRejection("invalid_token", 401);
         }
         Instant expires = expiry(claims.get("exp"));
@@ -66,11 +68,18 @@ final class HospitalIdentity {
         return new WardPrincipal(username.toString(), binding.role(), binding.organization(), "oidc");
     }
 
+    private static String issuerOf(Object issuer) {
+        if (issuer instanceof URL url) {
+            return url.toExternalForm();
+        }
+        return issuer == null ? "" : issuer.toString();
+    }
+
     private static boolean audienceMatches(Object audience, String expected) {
         if (audience instanceof String value) {
             return expected.equals(value);
         }
-        return audience instanceof List<?> values && values.contains(expected);
+        return audience instanceof Collection<?> values && values.contains(expected);
     }
 
     private static Instant expiry(Object value) {
@@ -89,9 +98,9 @@ final class HospitalIdentity {
     @SuppressWarnings("unchecked")
     private static List<String> roles(Map<String, Object> claims) {
         Object access = claims.get("realm_access");
-        if (!(access instanceof Map<?, ?> map) || !(map.get("roles") instanceof List<?> values)) {
+        if (!(access instanceof Map<?, ?> map) || !(map.get("roles") instanceof Collection<?> values)) {
             return List.of();
         }
-        return (List<String>) values;
+        return values.stream().map(String::valueOf).toList();
     }
 }
