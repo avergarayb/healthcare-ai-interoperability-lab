@@ -4,6 +4,7 @@ import json
 from fastapi.responses import JSONResponse
 
 from app.clinical_federation_client import FederationClientError
+from app.hospital_identity import gate
 from app.service_auth import authenticate
 
 from .showcase_run import (
@@ -19,18 +20,18 @@ from .showcase_run import (
 
 
 def prepare_summary(request, settings, raw):
-    return _run(request, settings, raw, lambda body: prepare_case(
+    return _run(request, settings, raw, {"clinician"}, lambda body: prepare_case(
         summary_root(), federation_client(settings), body["actorId"]))
 
 
 def replay_summary(request, settings, case_id, raw):
-    return _run(request, settings, raw, lambda _body: replay_case(
+    return _run(request, settings, raw, {"clinician", "clinical-reviewer"}, lambda _body: replay_case(
         summary_root(), case_id, federation_client(settings)))
 
 
 def decide_summary(request, settings, case_id, raw):
-    return _run(request, settings, raw, lambda body: decide_case(
-        summary_root(), case_id, body.get("decision")))
+    return _run(request, settings, raw, {"clinical-reviewer"}, lambda body: decide_case(
+        summary_root(), case_id, body.get("decision"), body.get("_identity")))
 
 
 def read_summary(request, settings, case_id):
@@ -51,15 +52,25 @@ def latest_summary(request, settings):
         return JSONResponse({"error": error.reason}, status_code=error.status)
 
 
-def _run(request, settings, raw, action):
+def _run(request, settings, raw, roles, action):
     if not authenticate(request, settings):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     body = _body(raw)
     if body is None:
         return JSONResponse({"error": "invalid_input"}, status_code=400)
-    denied = _guard(body)
-    if denied is not None:
-        return denied
+    gated = gate(request.headers, settings, roles)
+    if isinstance(gated, dict):
+        return JSONResponse({"error": gated["error"]}, status_code=gated["status"])
+    if gated is None:
+        denied = _guard(body)
+        if denied is not None:
+            return denied
+    else:
+        body = dict(body)
+        body["actorId"] = gated.username
+        body["role"] = gated.role
+        body["organizationId"] = gated.organization_id
+        body["_identity"] = gated
     try:
         return JSONResponse(action(body))
     except SummaryRejected as error:

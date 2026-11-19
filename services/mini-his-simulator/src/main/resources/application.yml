@@ -1,6 +1,13 @@
 server:
   address: 127.0.0.1
   port: 8095
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${MINI_HIS_COOKIE_SECURE:false}
 
 spring:
   flyway:
@@ -19,6 +26,13 @@ mini-his:
     service-token: ${MINI_HIS_INPATIENT_TOKEN:}
     ward-password: ${MINI_HIS_WARD_PASSWORD:}
     coordinator-url: ${DISCHARGE_COORDINATOR_URL:}
+  oidc:
+    enabled: ${MINI_HIS_OIDC_ENABLED:false}
+    client-enabled: ${MINI_HIS_OIDC_CLIENT_ENABLED:false}
+    issuer: ${MINI_HIS_OIDC_ISSUER:}
+    audience: ${MINI_HIS_OIDC_AUDIENCE:mini-his-web}
+    client-id: ${MINI_HIS_OIDC_CLIENT_ID:mini-his-web}
+    bindings: ${MINI_HIS_OIDC_BINDINGS:}
 
 showcase:
   lis-health: ${SHOWCASE_LIS_HEALTH:http://127.0.0.1:8096/health}

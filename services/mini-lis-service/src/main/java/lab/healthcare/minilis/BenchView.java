@@ -9,6 +9,26 @@ final class BenchView {
     }
 
     static String login(String notice) {
+        return login(notice, false);
+    }
+
+    static String login(String notice, boolean oidc) {
+        if (oidc) {
+            return """
+                    <!DOCTYPE html>
+                    <html lang="es"><head>%s<title>Ingreso de laboratorio</title></head>
+                    <body><main class="login-wrap" id="contenido"><section class="card login-card">
+                      <p class="kicker">Healthcare Lab</p><h1>Mini LIS</h1>
+                      <p class="muted">El ingreso de aceptación usa el proveedor OIDC del laboratorio. Esta página no acepta la clave local.</p>
+                      %s
+                      <p><a class="btn btn-primary" href="/oauth2/authorization/bench">Continuar al proveedor</a></p>
+                    </section></main></body></html>
+                    """.formatted(head(), alert(notice));
+        }
+        return loginForm(notice);
+    }
+
+    private static String loginForm(String notice) {
         return """
                 <!DOCTYPE html>
                 <html lang="es"><head>%s<title>Ingreso de laboratorio</title></head>
@@ -191,6 +211,15 @@ final class BenchView {
         };
     }
 
+    private static String roleLabel(String role) {
+        return switch (role) {
+            case "lab-validator" -> "Validador";
+            case "receptionist" -> "Recepción";
+            case "auditor" -> "Auditor";
+            default -> "Técnico";
+        };
+    }
+
     static String label(String state) {
         return switch (state) {
             case "ORDER_RECEIVED" -> "Orden recibida";
@@ -205,11 +234,13 @@ final class BenchView {
     }
 
     private static String page(BenchController.BenchPrincipal principal, String csrf, String active, String notice, String title, String body) {
+        String mode = "oidc".equals(principal.sessionMode()) ? "Sesión OIDC" : "Sesión local";
         String session = """
-                <div class="session"><span>%s · %s</span>
+                <div class="session"><span>%s · %s · %s · %s</span>
                 <form method="post" action="/bench/logout"><input type="hidden" name="csrf" value="%s">
                 <button class="btn btn-secondary" type="submit">Cerrar sesión</button></form></div>
-                """.formatted(esc(principal.validator() ? "Validación" : "Técnico"), esc(principal.userId()), esc(csrf));
+                """.formatted(esc(roleLabel(principal.role())), esc(principal.userId()),
+                esc(principal.organizationId()), esc(mode), esc(csrf));
         return """
                 <!DOCTYPE html>
                 <html lang="es"><head>%s<title>%s</title></head><body>

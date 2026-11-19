@@ -34,11 +34,19 @@ public class DischargeCoordinator {
     }
 
     public Map<String, Object> decide(Map<String, Object> body) {
-        return post("/internal/discharge/decisions", body);
+        return decide(body, "");
+    }
+
+    public Map<String, Object> decide(Map<String, Object> body, String identityToken) {
+        return post("/internal/discharge/decisions", body, identityToken);
     }
 
     public Map<String, Object> authorize(Map<String, Object> body) {
-        return post("/internal/discharge/follow-ups", body);
+        return authorize(body, "");
+    }
+
+    public Map<String, Object> authorize(Map<String, Object> body, String identityToken) {
+        return post("/internal/discharge/follow-ups", body, identityToken);
     }
 
     public Map<String, Object> audit(String proposalId) {
@@ -46,11 +54,18 @@ public class DischargeCoordinator {
     }
 
     private Map<String, Object> post(String path, Map<String, Object> body) {
+        return post(path, body, "");
+    }
+
+    private Map<String, Object> post(String path, Map<String, Object> body, String identityToken) {
         try {
-            HttpRequest request = base(path)
+            HttpRequest.Builder builder = base(path)
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
-                    .header("Content-Type", "application/json")
-                    .build();
+                    .header("Content-Type", "application/json");
+            if (identityToken != null && identityToken.chars().filter(ch -> ch == '.').count() == 2) {
+                builder.header("X-Hospital-Identity", identityToken);
+            }
+            HttpRequest request = builder.build();
             return read(client.send(request, HttpResponse.BodyHandlers.ofString()));
         } catch (InpatientRejection ex) {
             throw ex;

@@ -27,28 +27,34 @@ public class BenchController {
 
     private static final Set<String> NOTICES = Set.of(
             "muestra-registrada", "muestra-recibida", "procesamiento", "borrador", "validado",
-            "publicado", "corregido", "transicion", "no-autorizado", "entrada", "sesion", "credenciales");
+            "publicado", "corregido", "transicion", "no-autorizado", "entrada", "sesion", "credenciales", "use-oidc");
 
     private final LaboratoryRecordService records;
     private final BenchWorkflow workflow;
     private final String password;
+    private final boolean oidcEnabled;
 
     public BenchController(
             LaboratoryRecordService records,
             BenchWorkflow workflow,
-            @Value("${mini-lis.bench-password:}") String password) {
+            @Value("${mini-lis.bench-password:}") String password,
+            @Value("${mini-lis.oidc.enabled:false}") boolean oidcEnabled) {
         this.records = records;
         this.workflow = workflow;
         this.password = password == null ? "" : password;
+        this.oidcEnabled = oidcEnabled;
     }
 
     @GetMapping(path = "/bench/login", produces = MediaType.TEXT_HTML_VALUE)
     public String loginForm(@RequestParam(name = "aviso", required = false) String notice) {
-        return BenchView.login(notice == null ? "" : notice);
+        return BenchView.login(notice == null ? "" : notice, oidcEnabled);
     }
 
     @PostMapping("/bench/login")
     public ResponseEntity<Void> login(@RequestParam String username, @RequestParam String password, HttpServletRequest request) {
+        if (oidcEnabled) {
+            return redirect("/bench/login?aviso=use-oidc");
+        }
         BenchPrincipal principal = principalFor(username, password);
         if (principal == null) {
             return redirect("/bench/login?aviso=credenciales");
@@ -61,6 +67,9 @@ public class BenchController {
 
     @PostMapping("/bench/logout")
     public ResponseEntity<Void> logout(HttpServletRequest request) {
+        if (!csrfOk(request)) {
+            return redirect("/bench/orders");
+        }
         HttpSession session = request.getSession(false);
         if (session != null) {
             session.invalidate();
@@ -112,11 +121,12 @@ public class BenchController {
             @RequestParam(required = false) String unit,
             @RequestParam(required = false) String note,
             HttpServletRequest request) {
-        if (!csrfOk(request)) {
+        BenchPrincipal principal = principal(request);
+        if (principal == null || !csrfOk(request)
+                || !BenchAuthorization.permits(principal.role(), principal.organizationId(), action)) {
             notice(request, "no-autorizado");
             return redirect("/bench/orders/" + orderId);
         }
-        BenchPrincipal principal = principal(request);
         try {
             workflow.advance(orderId, action, value, unit, note, principal.validator());
             notice(request, switch (action) {
@@ -201,6 +211,9 @@ public class BenchController {
         return ResponseEntity.status(303).location(URI.create(path)).build();
     }
 
-    public record BenchPrincipal(String userId, boolean validator) {
+    public record BenchPrincipal(String userId, boolean validator, String role, String organizationId, String sessionMode) {
+        public BenchPrincipal(String userId, boolean validator) {
+            this(userId, validator, validator ? "lab-validator" : "lab-technician", "org-mini-his", "local");
+        }
     }
 }

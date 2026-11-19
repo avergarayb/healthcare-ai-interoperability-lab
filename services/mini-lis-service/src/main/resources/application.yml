@@ -1,6 +1,13 @@
 server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${SERVER_PORT:8096}
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${MINI_LIS_COOKIE_SECURE:false}
 
 spring:
   datasource:
@@ -13,6 +20,13 @@ spring:
 mini-lis:
   service-token: ${MINI_LIS_SERVICE_TOKEN:lab-mini-lis-dev}
   bench-password: ${MINI_LIS_BENCH_PASSWORD:}
+  oidc:
+    enabled: ${MINI_LIS_OIDC_ENABLED:false}
+    client-enabled: ${MINI_LIS_OIDC_CLIENT_ENABLED:false}
+    issuer: ${MINI_LIS_OIDC_ISSUER:}
+    audience: ${MINI_LIS_OIDC_AUDIENCE:mini-lis-web}
+    client-id: ${MINI_LIS_OIDC_CLIENT_ID:mini-lis-web}
+    bindings: ${MINI_LIS_OIDC_BINDINGS:}
   allow-external-bind: ${MINI_LIS_ALLOW_EXTERNAL_BIND:false}
   hl7:
     enabled: ${MINI_LIS_HL7_ENABLED:false}

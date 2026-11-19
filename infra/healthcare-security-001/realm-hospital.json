@@ -1,0 +1,88 @@
+{
+  "realm": "hospital-lab",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "resetPasswordAllowed": false,
+  "roles": {
+    "realm": [
+      {"name": "clinician"},
+      {"name": "clinical-reviewer"},
+      {"name": "auditor"},
+      {"name": "operator"},
+      {"name": "receptionist"},
+      {"name": "lab-technician"},
+      {"name": "lab-validator"}
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "mini-his-web",
+      "name": "Mini HIS Web",
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": ["http://127.0.0.1:8095/login/oauth2/code/hospital"],
+      "webOrigins": ["http://127.0.0.1:8095"],
+      "attributes": {"pkce.code.challenge.method": "S256"},
+      "protocolMappers": [
+        {
+          "name": "organization",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "organization",
+            "claim.name": "organization",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "mini-lis-web",
+      "name": "Mini LIS Web",
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": ["http://127.0.0.1:8096/login/oauth2/code/bench"],
+      "webOrigins": ["http://127.0.0.1:8096"],
+      "attributes": {"pkce.code.challenge.method": "S256"},
+      "protocolMappers": [
+        {
+          "name": "organization",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "organization",
+            "claim.name": "organization",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {"username": "medico.his", "enabled": true, "firstName": "Medico", "lastName": "Sintetico", "realmRoles": ["clinician"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "revisor.his", "enabled": true, "firstName": "Revisor", "lastName": "Sintetico", "realmRoles": ["clinical-reviewer"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "auditor.his", "enabled": true, "firstName": "Auditor", "lastName": "Sintetico", "realmRoles": ["auditor"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "operador.his", "enabled": true, "firstName": "Operador", "lastName": "Sintetico", "realmRoles": ["operator"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "recepcion.lis", "enabled": true, "firstName": "Recepcion", "lastName": "Sintetica", "realmRoles": ["receptionist"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "tecnico.lis", "enabled": true, "firstName": "Tecnico", "lastName": "Sintetico", "realmRoles": ["lab-technician"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]},
+    {"username": "validador.lis", "enabled": true, "firstName": "Validador", "lastName": "Sintetico", "realmRoles": ["lab-validator"], "attributes": {"organization": ["org-mini-his"]}, "credentials": [{"type": "password", "value": "REPLACE_AT_IMPORT", "temporary": false}]}
+  ]
+}

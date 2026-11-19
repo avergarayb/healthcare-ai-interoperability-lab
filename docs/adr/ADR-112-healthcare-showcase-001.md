@@ -8,7 +8,7 @@ Aceptado para el laboratorio. No autoriza un agente nuevo, un orquestador ni un 
 
 El portal se sirve desde Mini HIS en `/showcase` y reutiliza el sistema visual de la planta. Comprueba la salud de Mini LIS, el intercambio, el AI Service y, si está configurado, el perfil longitudinal. Solo acepta loopback. No muestra secretos y no ejecuta comandos del sistema.
 
-DEMO-001 ejecuta `lab-result-summary-v1` desde `/showcase/demo-001/case`. Mini HIS delega en el AI Service y no entrega el token al navegador. Cada caso abre un permiso nuevo. La decisión la registra `hl7-reviewer` con el autenticador de desarrollo, no con OIDC. DEMO-002 permanece en su perfil y su OIDC. La sesión de planta no se presenta como esa identidad. Un paso se marca comprobado solo con un hecho leído de la base local o del caso de resumen. La federación y la muestra que este portal no puede leer quedan como verificación externa.
+DEMO-001 ejecuta `lab-result-summary-v1` desde `/showcase/demo-001/case`. Mini HIS delega en el AI Service y no entrega el token al navegador. Cada caso abre un permiso nuevo. Con OIDC apagado, la decisión de desarrollo la registra `hl7-reviewer`. La aceptación de HEALTHCARE-SECURITY-001 exige el revisor OIDC y no usa esa identidad. DEMO-002 permanece en su perfil y su OIDC. La sesión de planta no se presenta como esa identidad. Un paso se marca comprobado solo con un hecho leído de la base local o del caso de resumen. La federación y la muestra que este portal no puede leer quedan como verificación externa.
 
 Preparar otro episodio usa la apertura ya existente. No borra historial ni reutiliza un permiso consumido.
 

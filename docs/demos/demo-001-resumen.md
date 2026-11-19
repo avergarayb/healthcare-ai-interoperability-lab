@@ -14,7 +14,7 @@ La capa determinista elige el contexto, exige UCUM y deja el resumen en `PENDING
 
 ## Autorización y revisión
 
-Cada caso registra un permiso nuevo, `catalog-summary-<caso>`. El permiso consumido no se reenvía. La decisión la registra `hl7-reviewer`, una identidad de laboratorio del componente de revisión. No es una sesión OIDC y este Compose no publica esa identidad.
+Cada caso registra un permiso nuevo, `catalog-summary-<caso>`. El permiso consumido no se reenvía. Con el hospital en modo OIDC, la decisión la toma el revisor del realm `hospital-lab`. `hl7-reviewer` permanece solo cuando OIDC está apagado y no cuenta como aceptación.
 
 ## Guion de tres a cinco minutos
 

@@ -20,6 +20,28 @@ final class WardView {
     }
 
     static String login(String notice) {
+        return login(notice, false);
+    }
+
+    static String login(String notice, boolean oidc) {
+        if (oidc) {
+            return """
+                    <!DOCTYPE html>
+                    <html lang="es"><head>%s<title>Ingreso</title></head>
+                    <body><a class="skip" href="#contenido">Saltar al contenido</a>
+                    <main class="login-wrap" id="contenido"><section class="card login-card">
+                      <p class="kicker">Healthcare Lab</p>
+                      <h1>Mini HIS</h1>
+                      <p class="muted">El ingreso de aceptación usa el proveedor OIDC del laboratorio. Esta página no acepta la clave local.</p>
+                      %s
+                      <p><a class="btn btn-primary" href="/oauth2/authorization/hospital">Continuar al proveedor</a></p>
+                    </section></main></body></html>
+                    """.formatted(head(), alert(notice));
+        }
+        return loginForm(notice);
+    }
+
+    private static String loginForm(String notice) {
         return """
                 <!DOCTYPE html>
                 <html lang="es"><head>%s<title>Ingreso</title></head>
@@ -417,10 +439,11 @@ final class WardView {
     }
 
     private static String layout(String title, String active, WardPrincipal principal, String csrf, String notice, String body) {
+        String mode = principal != null && "oidc".equals(principal.sessionMode()) ? "Sesión OIDC" : "Sesión local";
         String session = principal == null ? "" : """
-                <div class="session"><span>%s · %s · %s</span>%s</div>
+                <div class="session"><span>%s · %s · %s · %s</span>%s</div>
                 """.formatted(esc(roleLabel(principal.role())), esc(principal.userId()), esc(principal.organizationId()),
-                form("/ward/logout", csrf, "<button class=\"btn btn-secondary\" type=\"submit\">Cerrar sesión</button>"));
+                esc(mode), form("/ward/logout", csrf, "<button class=\"btn btn-secondary\" type=\"submit\">Cerrar sesión</button>"));
         return """
                 <!DOCTYPE html>
                 <html lang="es"><head>%s<title>%s</title></head><body>
@@ -759,7 +782,13 @@ final class WardView {
     }
 
     private static String roleLabel(String role) {
-        return "auditor".equals(role) ? "Auditor" : "Clínico";
+        return switch (role) {
+            case "auditor" -> "Auditor";
+            case "clinical-reviewer" -> "Revisor clínico";
+            case "operator" -> "Operador técnico";
+            case "clinician" -> "Clínico";
+            default -> "Sin privilegio clínico";
+        };
     }
 
     private static String timeRow(Object at, String title, String detail) {

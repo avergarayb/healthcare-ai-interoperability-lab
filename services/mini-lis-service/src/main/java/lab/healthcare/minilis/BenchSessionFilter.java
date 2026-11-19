@@ -31,7 +31,8 @@ class BenchSessionFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         HttpSession session = request.getSession(false);
         Object principal = session == null ? null : session.getAttribute("benchPrincipal");
-        if (!(principal instanceof BenchController.BenchPrincipal)) {
+        if (!(principal instanceof BenchController.BenchPrincipal bench)
+                || !"org-mini-his".equals(bench.organizationId())) {
             response.sendRedirect("/bench/login?aviso=sesion");
             return;
         }

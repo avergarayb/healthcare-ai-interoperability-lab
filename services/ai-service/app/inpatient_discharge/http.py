@@ -5,6 +5,7 @@ from json import JSONDecodeError
 
 from fastapi.responses import JSONResponse
 
+from app.hospital_identity import gate
 from app.service_auth import authenticate
 
 from .graph import BlockedTransport, DischargeGraph, InterceptedTransport, fetch_chart
@@ -34,15 +35,20 @@ def decide_discharge(request, settings, raw, fetcher=None):
     body = _body(raw)
     if body is None or body.get("decision") not in _DECISIONS:
         return JSONResponse({"outcome": "invalid_approval", "episodeClosed": False}, status_code=400)
+    gated = gate(request.headers, settings, {"clinical-reviewer"})
+    if isinstance(gated, dict):
+        return JSONResponse({"error": gated["error"], "episodeClosed": False}, status_code=gated["status"])
     try:
         chart = (fetcher or _fetcher())(body.get("episodeId"))
     except Exception:
         return JSONResponse({"outcome": "source_unavailable", "episodeClosed": False}, status_code=503)
     if not isinstance(chart, dict):
         return JSONResponse({"outcome": "source_unavailable", "episodeClosed": False}, status_code=503)
+    actor = body.get("actorId") if gated is None else gated.username
+    organization = body.get("organizationId") if gated is None else gated.organization_id
     result = decide(
         _review_path(), body.get("proposalId"), body.get("proposalHash"), body.get("episodeVersion"),
-        body.get("decision"), body.get("actorId"), body.get("organizationId"), body.get("idempotencyKey"),
+        body.get("decision"), actor, organization, body.get("idempotencyKey"),
         chart.get("version"))
     return JSONResponse(result)
 
@@ -53,13 +59,18 @@ def authorize_follow_ups(request, settings, raw, fetcher=None):
     body = _body(raw)
     if body is None:
         return JSONResponse({"outcome": "invalid_approval"}, status_code=400)
+    gated = gate(request.headers, settings, {"clinician", "clinical-reviewer"})
+    if isinstance(gated, dict):
+        return JSONResponse({"error": gated["error"]}, status_code=gated["status"])
     try:
         chart = (fetcher or _fetcher())(body.get("episodeId"))
     except Exception:
         return JSONResponse({"outcome": "source_unavailable"}, status_code=503)
+    actor = body.get("actorId") if gated is None else gated.username
+    organization = body.get("organizationId") if gated is None else gated.organization_id
     result = authorize(
         _review_path(), body.get("proposalId"), body.get("proposalHash"),
-        body.get("actorId"), body.get("organizationId"), chart)
+        actor, organization, chart)
     return JSONResponse(result)
 
 

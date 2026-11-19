@@ -1,0 +1,9 @@
+{
+  "medico.his": {"organization": "org-mini-his", "role": "clinician"},
+  "revisor.his": {"organization": "org-mini-his", "role": "clinical-reviewer"},
+  "auditor.his": {"organization": "org-mini-his", "role": "auditor"},
+  "operador.his": {"organization": "org-mini-his", "role": "operator"},
+  "recepcion.lis": {"organization": "org-mini-his", "role": "receptionist"},
+  "tecnico.lis": {"organization": "org-mini-his", "role": "lab-technician"},
+  "validador.lis": {"organization": "org-mini-his", "role": "lab-validator"}
+}

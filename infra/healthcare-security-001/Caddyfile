@@ -1,0 +1,14 @@
+# Loopback only. Trusts the internal CA for a local browser check of Secure cookies.
+# It does not publish PostgreSQL, MLLP, or a public address.
+{
+	admin off
+	auto_https disable_redirects
+}
+https://127.0.0.1:8443 {
+	tls internal
+	reverse_proxy 127.0.0.1:8095
+}
+https://127.0.0.1:8444 {
+	tls internal
+	reverse_proxy 127.0.0.1:8096
+}

@@ -21,11 +21,16 @@ from app.clinical_lab_summary.graph import LabSummaryGraph
 from app.clinical_lab_summary.mcp_tool import TOOL_NAME
 from app.clinical_lab_summary.policy import DEPLOYMENT_ID, PATIENT_ID
 from app.clinical_lab_summary.review import (
+    IAM_AUTHENTICATOR_V1,
+    IamReviewer,
     ReviewError,
     Reviewer,
+    assign_review_organization,
     decide,
+    iam_principal_id,
     list_reviews,
     prepare_decision_store,
+    prepare_organization_store,
     read_review,
 )
 from app.enterprise_ai_processing.durable_resolver import LedgerDurableAuthorization
@@ -108,7 +113,7 @@ def replay_case(root, authorization_id, federation):
         raise SummaryRejected(state.get("reason") or "replay_denied", 409)
 
 
-def decide_case(root, authorization_id, decision):
+def decide_case(root, authorization_id, decision, identity=None):
     _require_case(authorization_id)
     if decision not in {"approved", "rejected"}:
         raise SummaryRejected("invalid_decision", 400)
@@ -118,12 +123,19 @@ def decide_case(root, authorization_id, decision):
         review_path = _review(root)
         review_id = _review_id(review_path, authorization_id)
         prepare_decision_store(review_path)
-        reviewer = Reviewer(REVIEWER_ID, DEVELOPMENT_AUTHENTICATOR_V1, SESSION_ID)
+        if identity is None:
+            reviewer = Reviewer(REVIEWER_ID, DEVELOPMENT_AUTHENTICATOR_V1, SESSION_ID)
+            note = "Operador de planta org-mini-his. Sesion local de desarrollo, no OIDC."
+        else:
+            prepare_organization_store(review_path)
+            assign_review_organization(review_path, review_id, identity.organization_id)
+            reviewer = IamReviewer(
+                iam_principal_id(identity.issuer, identity.subject), identity.issuer, identity.subject,
+                identity.organization_id, identity.role, identity.session_id)
+            note = "Revisor clinico org-mini-his. Identidad OIDC verificada por el servicio."
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         try:
-            decide(
-                review_path, review_id, reviewer, decision,
-                "Operador de planta org-mini-his. Sesion local de desarrollo, no OIDC.", stamp)
+            decide(review_path, review_id, reviewer, decision, note, stamp)
         except ReviewError as error:
             status = 409 if error.reason == "already_decided" else 400
             raise SummaryRejected(error.reason, status) from None
@@ -131,6 +143,9 @@ def decide_case(root, authorization_id, decision):
         view["decision"] = _decision(read_review(review_path, review_id))
         view["audit"] = _audit_lines(read_review(review_path, review_id))
         view["reviewStatus"] = "decided"
+        if identity is not None:
+            view["reviewer"] = identity.username
+            view["authenticator"] = IAM_AUTHENTICATOR_V1
         _write(root, view)
         return view
 
