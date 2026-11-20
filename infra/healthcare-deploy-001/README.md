@@ -52,7 +52,7 @@ sh scripts/restore-test.sh
 
 El certificado es la autoridad interna de Caddy. El navegador de prueba debe confiarla de forma explícita. No se instala en el almacén del sistema. El puerto `18443` pertenece a `demo-deploy-001`. Caddy escucha en `127.0.0.1` y `caddy-edge` reenvía las direcciones del contenedor para que el puerto publicado complete TLS.
 
-En Docker Desktop, el 19 de noviembre de 2026, las imágenes se construyeron y el perfil `hospital` llegó a salud real. El motor después dejó de responder en `192.168.65.7:2376`. Los recorridos de navegador y el restore de los datos integrados no se ejecutaron. La VM Ubuntu sigue bloqueada. El detalle está en `docs/deploy/healthcare-deploy-001.md`.
+En Docker Desktop la API responde por `npipe` aunque la ejecución directa de `docker-desktop` falle. Un Firefox aislado confió la CA de este paquete sin excepción TLS y `medico.his` abrió el portal. Los recorridos completos y el restore de los almacenes integrados siguen abiertos. La VM Ubuntu sigue bloqueada. El detalle está en `docs/deploy/healthcare-deploy-001.md`.
 
 ## Respaldo
 

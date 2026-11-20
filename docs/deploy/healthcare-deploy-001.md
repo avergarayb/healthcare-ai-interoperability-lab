@@ -154,3 +154,19 @@ Después el motor dejó de ser alcanzable. El registro de Docker Desktop repite 
 
 La VM Ubuntu independiente sigue **BLOCKED**. No se instaló. El estado de la entrega sigue **PARTIAL**. Para terminar los recorridos hace falta que el motor de 5,8 GiB vuelva a enrutar, con margen además de los proyectos ya residentes. Un fallo de memoria o de ruta del motor no es un defecto de la lógica clínica.
 
+## Continuación: navegador y recorridos
+
+Más tarde la API volvió a responder por `desktop-linux` y `npipe`. `docker-desktop` es la distribución WSL2 interna de Docker Desktop, no una VM Ubuntu. Un `docker info` devolvió error 500 y, veinte segundos después, `docker ps` mostró el perfil `hospital` sano. No se reinició Docker ni se modificó WSL.
+
+La sonda HTTPS con la raíz de este paquete volvió a dar 200 en el descubrimiento, 404 en `/admin`, 200 en el ingreso de Mini HIS, redirección de Mini LIS hacia el emisor y 200 en `/health` del AI Service. Durante los recorridos, los contenedores ocupaban: Caddy 28 MiB, Keycloak 544 MiB, Mini HIS 165 MiB, Mini LIS 194 MiB, intercambio 167 MiB y AI Service 105 MiB.
+
+El navegador de prueba es el Firefox portable ya presente en el perfil aislado. Una política de esa instalación importa la CA pública de este paquete. `security.enterprise_roots.enabled` permanece en falso. No hubo excepción TLS. Las tres páginas —ingreso de Mini HIS, autorización de Mini LIS y realm— abrieron sin aviso de certificado. `medico.his` llegó a `https://127.0.0.1:18445/showcase` con el mismo resultado. El cierre de sesión del emisor dejó la navegación colgada, así que el revisor y el personal de laboratorio no obtuvieron un formulario nuevo.
+
+DEMO-001 no creó un caso `sum-`. DEMO-002 muestra Perú y España en su propio despliegue, sin permisos compartidos; no se escribió en esos perfiles. DEMO-003 creó la orden `MHS-LAB-AAEB569B0DC5` y la página capturada no mostró identificador LIS ni correlación. DEMO-004 creó `MHS-LAB-89A385E3A812`; el banco respondió que la sesión no estaba activa. DEMO-005 no empezó. El respaldo de los almacenes reales y su restauración aislada no se ejecutaron.
+
+Sin sesión, `/internal/agent-context` en `18490` respondió 401. `/lab-summaries` y `/review-cases` respondieron 503 con el aviso de identidad no disponible y sin filas de resumen. `/internal/workflows` respondió 405 a GET.
+
+Las imágenes Java y la de AI siguen en `root`. No tienen un usuario de ejecución y cambiarlo exige reconstruir y volver a crear contenedores. Con el motor intermitente y 31 contenedores de otros proyectos en marcha, ese cambio no se aplicó.
+
+Al cerrar el intento, las peticiones HTTPS del host a `18445` y `18490` agotaron el tiempo. `docker ps` tardó 33 segundos y Caddy seguía marcado sano por su healthcheck interno. No se reinició Docker. La aceptación de Docker Desktop queda distinta de una VM Ubuntu, que sigue **BLOCKED**. El estado sigue **PARTIAL**.
+
