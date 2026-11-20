@@ -1,0 +1,435 @@
+# Proyecto nuevo. No adjunta volúmenes de platform-001, demo-deploy-001 ni local-hapi.
+name: healthcare-deploy-001
+
+x-log: &log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-lock: &lock
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+  logging: *log
+
+services:
+  caddy:
+    profiles: [hospital, showcase, maintenance]
+    image: caddy:2.10.2-alpine
+    ports:
+      - "127.0.0.1:18543:18543"
+      - "127.0.0.1:18445:18445"
+      - "127.0.0.1:18444:18444"
+      - "127.0.0.1:18490:18490"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    read_only: true
+    tmpfs: [/tmp, /config]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -S -O /dev/null --no-check-certificate https://127.0.0.1:18543/ 2>&1 | grep -q HTTP/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    mem_limit: 128m
+    <<: *lock
+    networks: [edge, hospital]
+
+  caddy-edge:
+    profiles: [hospital, showcase, maintenance]
+    image: healthcare-deploy-loopback-proxy:0.1.0
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for ip in $(awk '$$1 ~ /^[0-9]+\./ && $$1 !~ /^127\./ { print $$1 }' /etc/hosts); do
+          echo "edge_bind=$$ip"
+          socat TCP-LISTEN:18543,bind=$$ip,fork,reuseaddr TCP:127.0.0.1:18543 &
+          socat TCP-LISTEN:18445,bind=$$ip,fork,reuseaddr TCP:127.0.0.1:18445 &
+          socat TCP-LISTEN:18444,bind=$$ip,fork,reuseaddr TCP:127.0.0.1:18444 &
+          socat TCP-LISTEN:18490,bind=$$ip,fork,reuseaddr TCP:127.0.0.1:18490 &
+        done
+        wait
+    network_mode: "service:caddy"
+    depends_on: [caddy]
+    mem_limit: 32m
+    <<: *lock
+
+  keycloak-db:
+    profiles: [hospital, showcase, maintenance]
+    image: postgres:16.10-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [keycloak-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 256m
+    <<: *lock
+    networks: [keycloak-data]
+
+  minilis-db:
+    profiles: [hospital, showcase, maintenance]
+    image: postgres:16.10-alpine
+    environment:
+      POSTGRES_DB: minilis
+      POSTGRES_USER: minilis
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [minilis-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minilis -d minilis"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 256m
+    <<: *lock
+    networks: [lis-data]
+
+  keycloak:
+    profiles: [hospital, showcase]
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
+    entrypoint: [/bin/bash, -ec]
+    command:
+      - |
+        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(cat /run/secrets/bootstrap_password)"
+        export KC_DB_PASSWORD="$$(cat /run/secrets/db_password)"
+        exec /opt/keycloak/bin/kc.sh start-dev --import-realm --http-enabled=true
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: deploy-bootstrap
+      KC_HOSTNAME: https://127.0.0.1:18543
+      KC_HOSTNAME_STRICT: "true"
+      KC_HOSTNAME_STRICT_HTTPS: "true"
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_CACHE: local
+      KC_LOG_LEVEL: WARN
+      KC_HTTP_ACCESS_LOG_ENABLED: "false"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - type: bind
+        source: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/realm-hospital.json
+        target: /opt/keycloak/data/import/realm-hospital.json
+        read_only: true
+    secrets: [bootstrap_password, db_password]
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    mem_limit: 768m
+    <<: *lock
+    networks: [edge, keycloak-data]
+
+  mini-his:
+    profiles: [hospital, showcase]
+    image: healthcare-deploy-mini-his:0.1.0
+    build:
+      context: ../../services/mini-his-simulator
+      dockerfile: Dockerfile
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        if [ -s /run/caddy/root.crt ]; then
+          keytool -importcert -noprompt -alias caddy-local -file /run/caddy/root.crt -keystore /tmp/caddy.ts -storepass changeit >/dev/null
+          export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/tmp/caddy.ts -Djavax.net.ssl.trustStorePassword=changeit"
+        fi
+        export MINI_HIS_EXCHANGE_TOKEN="$$(cat /run/secrets/his_token)"
+        i=0
+        while [ "$$i" -lt 40 ]; do
+          if bash -c 'echo >/dev/tcp/127.0.0.1/18543' >/dev/null 2>&1; then break; fi
+          i=$$((i + 1)); sleep 1
+        done
+        bash -c 'echo >/dev/tcp/127.0.0.1/18543' >/dev/null 2>&1 || { echo issuer_wait=timeout; exit 1; }
+        echo issuer_wait=ok
+        exec /entrypoint.sh
+    environment:
+      MINI_HIS_ALLOW_CONTAINER_BIND: "true"
+      MINI_HIS_SQLITE_PATH: /app/data/mini-his.sqlite
+      MINI_HIS_ORGANIZATION_ID: org-mini-his
+      MINI_HIS_EXCHANGE_BASE_URL: http://exchange:8081
+      MINI_HIS_OIDC_ENABLED: "true"
+      MINI_HIS_OIDC_CLIENT_ENABLED: "true"
+      MINI_HIS_OIDC_ISSUER: https://127.0.0.1:18543/realms/hospital-lab
+      MINI_HIS_OIDC_AUDIENCE: mini-his-web
+      MINI_HIS_OIDC_CLIENT_ID: mini-his-web
+      MINI_HIS_OIDC_BINDINGS: /run/config/bindings.json
+      MINI_HIS_COOKIE_SECURE: "true"
+      SHOWCASE_LIS_HEALTH: http://mini-lis:8096/health
+      SHOWCASE_FHIR_HEALTH: http://exchange:8081/actuator/health
+      SHOWCASE_AI_HEALTH: http://ai:8090/health
+      SHOWCASE_LIS_BENCH: https://127.0.0.1:18444/bench/orders
+    volumes:
+      - his-data:/app/data
+      - type: bind
+        source: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/bindings.json
+        target: /run/config/bindings.json
+        read_only: true
+      - type: bind
+        source: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/caddy-root.crt
+        target: /run/caddy/root.crt
+        read_only: true
+    secrets: [his_token]
+    depends_on:
+      exchange:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8095'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+    mem_limit: 512m
+    <<: *lock
+    networks: [hospital]
+
+  his-issuer-proxy:
+    profiles: [hospital, showcase]
+    image: healthcare-deploy-loopback-proxy:0.1.0
+    build:
+      context: ./docker
+      dockerfile: loopback-proxy.Dockerfile
+    network_mode: "service:mini-his"
+    depends_on: [caddy]
+    cap_drop: [ALL]
+    mem_limit: 32m
+    <<: *lock
+
+  mini-lis:
+    profiles: [hospital, showcase]
+    image: healthcare-deploy-mini-lis:0.1.0
+    build:
+      context: ../../services/mini-lis-service
+      dockerfile: Dockerfile
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        if [ -s /run/caddy/root.crt ]; then
+          keytool -importcert -noprompt -alias caddy-local -file /run/caddy/root.crt -keystore /tmp/caddy.ts -storepass changeit >/dev/null
+          export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/tmp/caddy.ts -Djavax.net.ssl.trustStorePassword=changeit"
+        fi
+        export MINI_LIS_SERVICE_TOKEN="$$(cat /run/secrets/lis_token)"
+        export MINI_LIS_HL7_SHARED_SECRET="$$(cat /run/secrets/hl7_secret)"
+        export SPRING_DATASOURCE_PASSWORD="$$(cat /run/secrets/db_password)"
+        i=0
+        while [ "$$i" -lt 40 ]; do
+          if bash -c 'echo >/dev/tcp/127.0.0.1/18543' >/dev/null 2>&1; then break; fi
+          i=$$((i + 1)); sleep 1
+        done
+        bash -c 'echo >/dev/tcp/127.0.0.1/18543' >/dev/null 2>&1 || { echo issuer_wait=timeout; exit 1; }
+        echo issuer_wait=ok
+        exec java -jar /app/mini-lis-service.jar
+    environment:
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: "8096"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://minilis-db:5432/minilis
+      SPRING_DATASOURCE_USERNAME: minilis
+      MINI_LIS_ALLOW_EXTERNAL_BIND: "true"
+      MINI_LIS_OIDC_ENABLED: "true"
+      MINI_LIS_OIDC_CLIENT_ENABLED: "true"
+      MINI_LIS_OIDC_ISSUER: https://127.0.0.1:18543/realms/hospital-lab
+      MINI_LIS_OIDC_AUDIENCE: mini-lis-web
+      MINI_LIS_OIDC_CLIENT_ID: mini-lis-web
+      MINI_LIS_OIDC_BINDINGS: /run/config/bindings.json
+      MINI_LIS_COOKIE_SECURE: "true"
+      MINI_LIS_HL7_ENABLED: "true"
+      MINI_LIS_HL7_BIND: 0.0.0.0
+      MINI_LIS_HL7_PORT: "2575"
+      MINI_LIS_HL7_ALLOWED_ORGANIZATIONS: org-mini-his
+      MINI_LIS_HL7_OUTBOUND_HOST: exchange
+      MINI_LIS_HL7_OUTBOUND_PORT: "2576"
+    volumes:
+      - type: bind
+        source: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/bindings.json
+        target: /run/config/bindings.json
+        read_only: true
+      - type: bind
+        source: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/caddy-root.crt
+        target: /run/caddy/root.crt
+        read_only: true
+    secrets: [lis_token, hl7_secret, db_password]
+    depends_on:
+      minilis-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8096'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+    mem_limit: 512m
+    <<: *lock
+    networks: [hospital, lis-data]
+
+  lis-issuer-proxy:
+    profiles: [hospital, showcase]
+    image: healthcare-deploy-loopback-proxy:0.1.0
+    network_mode: "service:mini-lis"
+    depends_on: [caddy]
+    cap_drop: [ALL]
+    mem_limit: 32m
+    <<: *lock
+
+  exchange:
+    profiles: [hospital, showcase]
+    image: healthcare-deploy-exchange:0.1.0
+    build:
+      context: ../..
+      dockerfile: services/fhir-integration-service/Dockerfile
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        export FEDERATION_MINI_HIS_TOKEN="$$(cat /run/secrets/federation_token)"
+        export EXCHANGE_MINI_HIS_TOKEN="$$(cat /run/secrets/his_token)"
+        export CLINICAL_READ_MINI_LIS_SERVICE_TOKEN="$$(cat /run/secrets/lis_token)"
+        export EXCHANGE_MINI_LIS_SERVICE_TOKEN="$$(cat /run/secrets/lis_token)"
+        export EXCHANGE_MINI_LIS_HL7_SECRET="$$(cat /run/secrets/hl7_secret)"
+        exec java -XX:MaxRAMPercentage=75 -jar /app/fhir-integration-service.jar
+    environment:
+      CLINICAL_READ_SOURCE: mini-lis
+      CLINICAL_READ_MINI_LIS_BASE_URL: http://mini-lis:8096
+      CLINICAL_READ_MINI_LIS_CONTAINER_NETWORK: "true"
+      INTEROP_SOURCES_MINI_HIS_BASE_URL: http://mini-his:8095
+      INTEROP_SOURCES_MINI_LIS_BASE_URL: http://mini-lis:8096
+      EXCHANGE_STORE_PATH: /var/lab/exchange/correlation.sqlite
+      EXCHANGE_MINI_LIS_PROTOCOL: hl7v2
+      EXCHANGE_MINI_LIS_BASE_URL: http://mini-lis:8096
+      EXCHANGE_MINI_LIS_HL7_HOST: mini-lis
+      EXCHANGE_MINI_LIS_HL7_PORT: "2575"
+      EXCHANGE_HL7_LISTEN_PORT: "2576"
+      EXCHANGE_HL7_CONTAINER_NETWORK: "true"
+      EXTERNAL_FHIR_ENABLED: "false"
+    volumes: [exchange-data:/var/lab]
+    secrets: [federation_token, his_token, lis_token, hl7_secret]
+    depends_on:
+      mini-lis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8081'"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 90s
+    mem_limit: 768m
+    <<: *lock
+    networks: [hospital]
+
+  ai:
+    profiles: [hospital, showcase]
+    image: healthcare-deploy-ai:0.1.0
+    build:
+      context: ../../services/ai-service
+      dockerfile: Dockerfile
+    environment:
+      AI_SERVICE_HOST: 0.0.0.0
+      AI_SERVICE_PORT: "8090"
+      AI_CLINICAL_CONTEXT_MODE: federated
+      AI_FEDERATION_REQUESTING_ORGANIZATION_ID: org-mini-his
+      AI_FEDERATION_PATIENT_SYSTEM_KEY: mini-his
+      LLM_EXPERIMENTAL_ENABLED: "false"
+      FOLLOWUP_AGENT_ENABLED: "false"
+      HUMAN_REVIEW_DEVELOPMENT_AUTH_ENABLED: "false"
+      CRITICAL_LAB_MODEL_MODE: intercepted
+      DISCHARGE_MODEL_MODE: intercepted
+      HOSPITAL_OIDC_REQUIRED: "true"
+      HOSPITAL_OIDC_ISSUER: https://127.0.0.1:18543/realms/hospital-lab
+      HOSPITAL_OIDC_AUDIENCE: hospital-ai
+      HOSPITAL_OIDC_JWKS_URI: https://127.0.0.1:18543/realms/hospital-lab/protocol/openid-connect/certs
+      LAB_REVIEW_IAM_ENABLED: "true"
+      LAB_REVIEW_IAM_ALLOW_HTTP_LOOPBACK: "false"
+      LAB_REVIEW_IAM_ISSUER: https://127.0.0.1:18543/realms/hospital-lab
+      LAB_REVIEW_IAM_DISCOVERY_URL: https://127.0.0.1:18543/realms/hospital-lab/.well-known/openid-configuration
+      LAB_REVIEW_IAM_JWKS_URI: https://127.0.0.1:18543/realms/hospital-lab/protocol/openid-connect/certs
+      LAB_REVIEW_IAM_CLIENT_ID: mini-his-web
+      LAB_REVIEW_IAM_BINDINGS_PATH: /run/config/bindings.json
+      PLATFORM_IN_CONTAINER: "true"
+      PLATFORM_PROFILE: hospital-lab
+      PLATFORM_LEDGER_ROOT: /var/lab/ledger
+      PLATFORM_AI_URL: http://127.0.0.1:8090
+      PLATFORM_TOKEN_FILE: /run/secrets/federation_token
+      PLATFORM_FEDERATION_URL: http://exchange:8081
+      PLATFORM_IAM_UPSTREAM: caddy:18543
+      PLATFORM_IAM_LISTEN: "18543"
+      DEMO_TRUST_PROXY: "true"
+      DEMO_FORWARDED_ALLOW_IPS: "*"
+      DEMO_CA_FILE: /run/caddy/root.crt
+      MINI_LIS_BASE_URL: http://mini-lis:8096
+      MINI_HIS_BASE_URL: http://mini-his:8095
+    volumes:
+      - ai-data:/var/lab
+      - type: bind
+        source: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/bindings.json
+        target: /run/config/bindings.json
+        read_only: true
+      - type: bind
+        source: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/caddy-root.crt
+        target: /run/caddy/root.crt
+        read_only: true
+    secrets: [federation_token, boundary_token, signing_secret]
+    depends_on:
+      exchange:
+        condition: service_healthy
+      caddy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+    mem_limit: 512m
+    <<: *lock
+    networks: [hospital]
+
+networks:
+  edge:
+    internal: false
+  hospital:
+    internal: true
+  keycloak-data:
+    internal: true
+  lis-data:
+    internal: true
+
+secrets:
+  db_password:
+    file: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/secrets/db_password
+  bootstrap_password:
+    file: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/secrets/bootstrap_password
+  his_token:
+    file: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/secrets/his_token
+  lis_token:
+    file: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/secrets/lis_token
+  hl7_secret:
+    file: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/secrets/hl7_secret
+  federation_token:
+    file: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/secrets/federation_token
+  boundary_token:
+    file: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/secrets/boundary_token
+  signing_secret:
+    file: ${DEPLOY_RUN_DIR:?Directorio de ejecución requerido}/secrets/signing_secret
+
+volumes:
+  caddy-data:
+  keycloak-db:
+  keycloak-data:
+  minilis-db:
+  his-data:
+  exchange-data:
+  ai-data:
